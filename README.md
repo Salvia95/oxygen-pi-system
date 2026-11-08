@@ -29,15 +29,34 @@ just package                      # → dist/oxygen-pi-YYYYMMDD.zip (+ .sha256)
 
 ## 2) 폐쇄망 PC: 설치
 
-```bash
-# zip 해제 후 해당 폴더에서 (Git Bash)
-bash scripts/configure.sh         # 최초 실행 시 agent/oxy.env 생성 → 편집 후 재실행
-bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
-bash tests/e2e-mock.sh            # vLLM 없이 mock 서버로 pi 전체 루프 점검
-./oxy                             # 실행 (cmd / Windows Terminal 에서는 oxy.cmd)
+zip 을 푼 폴더의 **`install.cmd` 를 더블클릭**하면 설치 TUI 가 열린다 (Git Bash 에서는 `./install.sh`).
+
+```
+1. 점검    Git Bash · Java 17+ · 번들 구성요소
+2. 위치    기본 %LOCALAPPDATA%\Programs\oxygen-pi (또는 현재 폴더 그대로 / 직접 입력)
+3. vLLM    주소·API 키 입력 → /v1/models 로 연결 확인
+4. 모델    코딩 모델 / 범용 모델(선택) 고르기, max_model_len 으로 컨텍스트 자동 입력
+5. GitLab  사내 호스트 (선택)
+6. 등록    PATH · Windows Terminal 'Oxygen Pi' 프로필 · 바탕화면 바로가기
+7. 확인    요약 → 설치 → 자가진단(verify)
 ```
 
-`agent/oxy.env` 에서 설정하는 값: vLLM 주소, API 키, served-model-name, 컨텍스트 길이, GitLab 호스트.
+- 방향키·Enter·Space 로 조작하고, **Esc 는 이전 단계**로 돌아간다.
+- 설치 후 다시 실행하면 **설정 변경 / 자가진단 / 업데이트 / 제거** 메뉴가 나온다.
+  - 업데이트할 때 `agent/oxy.env` 는 유지된다.
+  - 제거할 때 `oxy.env` 는 `%APPDATA%\oxygen-pi\oxy.env.bak` 으로 백업된다.
+- 설치 기록은 `%APPDATA%\oxygen-pi\install.json` 에 남는다.
+- 진짜 콘솔이 아닌 환경(파이프 입력, winpty 없는 mintty)에서는 번호를 입력하는 줄 입력 모드로 동작한다.
+- `--sandbox <폴더>` 를 주면 레지스트리(PATH)·바탕화면·AppData 대신 그 폴더에만 기록한다 (체험·테스트용).
+  `just install-demo` 는 mock vLLM 과 sandbox 로 설치 TUI 를 체험하는 명령이다.
+
+수동 설치도 가능하다:
+
+```bash
+bash scripts/configure.sh         # 최초 실행 시 agent/oxy.env 생성 → 편집 후 재실행
+bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
+./oxy                             # 실행 (cmd / Windows Terminal 에서는 oxy.cmd)
+```
 
 ## 사내 vLLM 요구사항
 
@@ -63,7 +82,9 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 ## 디렉터리
 
 ```
+install.cmd, install.sh 설치 TUI 실행 (installer/)
 oxy, oxy.cmd, env.sh   런처 / 환경
+VERSION                하네스 버전 (설치 TUI 배너에 표시)
 wrappers/              Git Bash 보정 래퍼 (sql)
 tests/                 mock vLLM + E2E 점검
 justfile               작업 목록 (just --list)
@@ -74,6 +95,21 @@ agent/                 PI_CODING_AGENT_DIR
   templates/           settings.json, models.json 템플릿
   extensions/ skills/ prompts/
 ```
+
+## 소형 모델용 extension (`agent/extensions/`)
+
+pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로 다음 4종을 기본으로 로드한다. 각각 환경변수로 끌 수 있다.
+
+| extension | 동작 | 끄기 |
+|---|---|---|
+| `oxy-bash-guard` | 체인 명령을 세그먼트별로 검사. **차단**: 루트/홈/드라이브 삭제, 디스크 포맷, 종료, 패키지 설치(폐쇄망). **확인**: 재귀 삭제, `git push`/`reset --hard` 등, glab 쓰기, DB 변경 SQL(`@script.sql` 내용 포함). 확인 UI 가 없는 `-p` 모드에서는 확인 대상도 차단 | `OXY_BASH_GUARD=off` |
+| `oxy-read-before-edit` | 읽지 않았거나 읽은 뒤 디스크에서 바뀐 파일의 edit 차단, 기존 파일 write 는 read 후에만 허용. compaction 후 기록 초기화 | `OXY_READ_BEFORE_EDIT=off` |
+| `oxy-loop-guard` | 텍스트로 쓴 tool call(`<tool_call>` 등) 감지 시 재호출 안내(최대 2회), 빈 응답 1회 재촉, 같은 호출 3번째 차단(파일 수정 시 초기화) | `OXY_LOOP_GUARD=off` (`OXY_REPEAT_LIMIT`) |
+| `oxy-context-budget` | bash/grep/find/ls 출력 12K자, read 40K자 초과 시 앞뒤만 남김. 상태줄에 컨텍스트 사용률 표시, 압축 반복 경고 | `OXY_CONTEXT_BUDGET=off` (`OXY_TOOL_OUTPUT_MAX_CHARS`, `OXY_READ_MAX_CHARS`) |
+
+자동 compaction 은 `settings.json` 의 `compaction.reserveTokens=24576` (128K 의 약 81%) 에서 시작한다.
+테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
+`just demo` 는 mock vLLM 으로 pi TUI 를 직접 써 보는 명령이다 (프롬프트에 `scenario:git-push` 등 입력).
 
 ## Git Bash 보정
 

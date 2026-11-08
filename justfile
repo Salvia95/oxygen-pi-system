@@ -30,6 +30,29 @@ verify *args:
 pi *args:
     ./oxy {{args}}
 
-# vLLM 없이 mock 서버로 하네스 E2E 점검 (pi → tool call → Git Bash → 응답)
+# vLLM 없이 mock 서버로 하네스 E2E 점검 (pi → tool call → Git Bash → extension → 응답)
 e2e:
     bash tests/e2e-mock.sh
+
+# extension 단위 테스트
+unit:
+    ./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts
+
+# 전체 테스트 (단위 + E2E)
+test: unit e2e
+
+# 실제 vLLM 없이 mock 서버로 TUI 체험 (프롬프트에 scenario:git-push 등 입력)
+demo *args:
+    bash tests/demo-tui.sh {{args}}
+
+# 설치 TUI 실행 (실제 설치)
+install *args:
+    ./runtime/node/node.exe installer/install.mjs {{args}}
+
+# 설치 TUI 체험: mock vLLM + sandbox (PATH·바탕화면 등 실제 시스템은 건드리지 않음)
+install-demo:
+    bash tests/installer-demo.sh
+
+# 설치 TUI 회귀 테스트 (sandbox, 몇 분 소요)
+test-installer:
+    bash tests/installer-sandbox.sh

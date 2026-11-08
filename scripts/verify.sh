@@ -86,7 +86,8 @@ if [[ $CHECK_LLM == 1 ]]; then
   section "5. 사내 vLLM (${OXY_VLLM_BASE_URL:-미설정})"
   if [[ -z "${OXY_VLLM_BASE_URL:-}" ]]; then fail "OXY_VLLM_BASE_URL 미설정 (agent/oxy.env)"
   elif resp=$(curl -fsS -m 5 -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" "$OXY_VLLM_BASE_URL/models" 2>&1); then
-    ids=$(jq -r '.data[].id' <<< "$resp" 2>/dev/null | tr '\n' ' ')
+    # jq.exe 는 CRLF 로 출력하므로 \r 제거 (안 하면 모델명 비교가 항상 실패)
+    ids=$(jq -r '.data[].id' <<< "$resp" 2>/dev/null | tr -d '\r' | tr '\n' ' ')
     pass "/models 응답: $ids"
     for m in "${OXY_MODEL_CODER:-}" "${OXY_MODEL_GENERAL:-}"; do
       [[ -z "$m" ]] && continue
