@@ -85,7 +85,8 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 install.cmd, install.sh 설치 TUI 실행 (installer/)
 oxy, oxy.cmd, env.sh   런처 / 환경
 VERSION                하네스 버전 (설치 TUI 배너에 표시)
-wrappers/              Git Bash 보정 래퍼 (sql)
+wrappers/              Git Bash 보정 래퍼 (sql, jq)
+config/                도구 설정 (ripgreprc)
 tests/                 mock vLLM + E2E 점검
 justfile               작업 목록 (just --list)
 manifest/              버전·해시 고정 파일
@@ -110,6 +111,27 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 자동 compaction 은 `settings.json` 의 `compaction.reserveTokens=24576` (128K 의 약 81%) 에서 시작한다.
 테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
 `just demo` 는 mock vLLM 으로 pi TUI 를 직접 써 보는 명령이다 (프롬프트에 `scenario:git-push` 등 입력).
+
+## 도구별 skill (`agent/skills/`)
+
+시스템 프롬프트에는 이름과 설명만 들어가고(6개 합쳐 약 700 토큰), 모델이 필요할 때 SKILL.md 를 read 로 읽는다.
+명령과 옵션은 번들 버전의 `--help` 와 실제 실행으로 확인한 것만 넣었다.
+
+| skill | 핵심 |
+|---|---|
+| `oracle-sqlcl` | 저장된 연결(`-name`)로만 접속, heredoc/`@script` 로만 실행 (`-e` 는 콘솔 없이 실패), `whenever sqlerror`, 행 수 제한, SP2- 오류는 종료코드 0 이라 출력 확인 |
+| `gitlab-glab` | 읽기 명령과 `-F json --jq`, 쓰기는 승인 후. `glab api -F` 는 암묵적 POST, `mr create --fill` 은 push 포함 |
+| `http-api-hurl` | `.hurl` 파일 + `--variable`, Asserts/Captures 로 연쇄 호출, `--test` |
+| `browser-automation` | 세션 이름 필수, snapshot 의 `@ref` 만 사용(추측 금지), 상세는 `agent-browser skills get core --ref commands` |
+| `just-tasks` | `just --list` 우선, recipe 작성 규칙 |
+| `shell-data-tools` | jq / fd / rg 파이프라인 (내장 grep·find 도구로 충분하면 그쪽 우선) |
+
+환경 쪽 보정:
+- `wrappers/jq`: `jq.exe` 의 CRLF 출력을 막기 위해 `-b`(LF)를 항상 붙인다.
+- `config/ripgreprc`: rg 경로를 `/` 로 출력한다. pi 의 grep 도구는 `--no-config` 라 영향 없음.
+- `wrappers/sql`: SQLcl 에 `-noupdates` 를 붙인다.
+- glab: 업데이트 확인·텔레메트리·Duo CLI 자동 다운로드·하이퍼링크 제어문자를 끈다 (`GLAB_*`).
+- agent-browser: 버전 일치 가이드 `vendor/agent-browser-skill-data` 를 `AGENT_BROWSER_SKILLS_DIR` 로 지정한다.
 
 ## Git Bash 보정
 

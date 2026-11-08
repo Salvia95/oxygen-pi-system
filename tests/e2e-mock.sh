@@ -10,7 +10,7 @@ source "$OXY_HOME/env.sh"
 PORT="${1:-18000}"
 TMP="$(mktemp -d)"; trap 'kill "${MOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/agent" "$TMP/work"
-cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$TMP/agent/"
+cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skills" "$TMP/agent/"
 cat > "$TMP/agent/oxy.env" <<ENV
 OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1
 OXY_VLLM_API_KEY=mock-key
@@ -43,7 +43,7 @@ nreq() { wc -l < "$REQ" | tr -d ' '; }
 run env
 chk "최종 응답 수신"                         '[[ "$out" == *MOCK-DONE* ]]'
 chk "bash 도구가 Git Bash(Msys)에서 실행"      '[[ "$out" == *hello-from-Msys* ]]'
-chk "번들 fd/jq 가 PATH 우선"                 '[[ "$out" == *"/agent/bin/fd"* && "$out" == *"$OXY_HOME/bin/jq"* ]]'
+chk "번들 fd / jq 래퍼가 PATH 우선"            '[[ "$out" == *"/agent/bin/fd"* && "$out" == *"$OXY_HOME/wrappers/jq"* ]]'
 chk "sql 은 래퍼로 연결"                      '[[ "$out" == *"$OXY_HOME/wrappers/sql"* ]]'
 chk "요청 2회 (tool call → 결과 회신)"          '[[ $(nreq) -eq 2 ]]'
 chk "model id / Authorization"               '[[ $(first .body.model) == qwen3.6-coder-30b && $(first .headers.authorization) == "Bearer mock-key" ]]'
@@ -51,6 +51,8 @@ chk "max_tokens 사용, store·developer role 없음" '[[ $(first ".body.max_tok
 chk "sampling (temperature 0.7, top_k 20)"   '[[ $(first .body.temperature) == 0.7 && $(first .body.top_k) == 20 ]]'
 chk "tools 7종"                              '[[ $(first "[.body.tools[].function.name] | sort | join(\",\")") == "bash,edit,find,grep,ls,read,write" ]]'
 chk "AGENTS.md 가 시스템 프롬프트에 포함"        '[[ $(first ".body.messages[0].content | tostring | contains(\"oxygen-pi-system\")") == true ]]'
+SYS="$(first '.body.messages[0].content | tostring')"
+chk "skill 6종이 시스템 프롬프트에 노출"         '[[ $(grep -oE "oracle-sqlcl|gitlab-glab|http-api-hurl|browser-automation|just-tasks|shell-data-tools" <<< "$SYS" | sort -u | wc -l) -eq 6 ]]'
 log "첫 요청 크기: system $(first '.body.messages[0].content | tostring | length')자, tools $(first '.body.tools | tostring | length')자"
 
 run offline-install
@@ -74,8 +76,12 @@ chk "context-budget: 긴 bash 출력 축약"          '[[ "$out" == *"characters
 run text-toolcall
 chk "loop-guard: 텍스트 tool call 감지 → 재호출 안내" '[[ "$out" == *"[oxy-loop-guard]"* && $(nreq) -eq 2 ]]'
 
+run read-skill
+chk "skill: 프롬프트의 위치로 SKILL.md 읽기"       '[[ "$out" == *"# Oracle SQLcl"* && "$out" == *"Never use \`-e\`"* ]]'
+
 run repeat
 chk "loop-guard: 같은 호출 3번째 차단"            '[[ "$out" == *"oxy-loop-guard"* && "$out" == *"2 times"* ]]'
 
 printf '\n'
+cp "$REQLOG" "$OXY_HOME/.cache/last-e2e-requests.jsonl" 2>/dev/null || true
 (( F == 0 )) && log "E2E 통과" || die "E2E 실패 $F 건"

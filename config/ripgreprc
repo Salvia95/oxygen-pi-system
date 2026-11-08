@@ -1,0 +1,2 @@
+# oxygen-pi-system ripgrep 기본 설정 (RIPGREP_CONFIG_PATH). Git Bash 에서 쓰기 좋게 / 구분자로 출력
+--path-separator=/

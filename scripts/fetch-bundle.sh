@@ -62,10 +62,9 @@ install_component() {
     agent-browser)
       t=$(fresh_tmp agent-browser); tar -xzf "$file" -C "$t"
       cp -f "$t/package/bin/agent-browser-win32-x64.exe" "$BIN/agent-browser.exe"
-      # 패키지에 포함된 공식 skill 이 있으면 벤더 skill 로 보관
-      if [[ -d "$t/package/skills" ]]; then
-        rm -rf "$OXY_HOME/vendor/agent-browser-skills"; cp -r "$t/package/skills" "$OXY_HOME/vendor/agent-browser-skills"
-      fi ;;
+      # `agent-browser skills get core` 가 읽는 버전 일치 가이드 (AGENT_BROWSER_SKILLS_DIR 로 지정)
+      rm -rf "$OXY_HOME/vendor/agent-browser-skills" "$OXY_HOME/vendor/agent-browser-skill-data"
+      [[ -d "$t/package/skill-data" ]] && cp -r "$t/package/skill-data" "$OXY_HOME/vendor/agent-browser-skill-data" ;;
     chrome)
       t=$(fresh_tmp chrome); extract_zip "$file" "$t"
       rm -rf "$OXY_HOME/vendor/browsers/chrome-win64"; mv "$t/chrome-win64" "$OXY_HOME/vendor/browsers/" ;;

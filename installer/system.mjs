@@ -19,7 +19,8 @@ const REQUIRED = [
   "runtime/node/node.exe",
   "vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
   "bin/fd.exe", "bin/rg.exe", "bin/jq.exe", "bin/just.exe", "bin/hurl.exe", "bin/glab.exe", "bin/agent-browser.exe",
-  "vendor/browsers/chrome-win64/chrome.exe", "runtime/sqlcl/bin/sql", "agent/templates/models.json",
+  "vendor/browsers/chrome-win64/chrome.exe", "vendor/agent-browser-skill-data/core/SKILL.md", "runtime/sqlcl/bin/sql",
+  "wrappers/sql", "wrappers/jq", "config/ripgreprc", "agent/templates/models.json",
   "agent/templates/settings.json", "env.sh", "oxy", "oxy.cmd", "scripts/verify.sh",
 ];
 

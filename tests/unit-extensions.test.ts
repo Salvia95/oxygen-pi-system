@@ -34,6 +34,10 @@ test("ask: 재귀 삭제 / git / glab / sql 변경", () => {
   assert.deepEqual(ids("git reset --hard HEAD~1"), ["ask:git-history"]);
   assert.deepEqual(ids("glab mr merge 12"), ["ask:glab-write"]);
   assert.deepEqual(ids("glab api projects/1 -X DELETE"), ["ask:glab-write"]);
+  // glab api 는 -F/-f(필드)를 주면 -X 없이도 POST 가 된다
+  assert.deepEqual(ids("glab api projects/1/issues -F title=x"), ["ask:glab-write"]);
+  assert.deepEqual(ids("glab api projects/1/issues --raw-field title=x"), ["ask:glab-write"]);
+  assert.deepEqual(ids("glab api --method=PUT projects/1"), ["ask:glab-write"]);
   assert.deepEqual(ids(`sql -S u/p@db <<'EOF'\nupdate emp set sal = 1;\ncommit;\nEOF`), ["ask:sql-write"]);
   assert.deepEqual(ids(`echo "delete from t;" | sql -S u/p@db`), ["ask:sql-write"]);
 });
@@ -41,7 +45,7 @@ test("ask: 재귀 삭제 / git / glab / sql 변경", () => {
 test("허용: 일반 개발 명령", () => {
   for (const c of [
     "ls -la", "rm file.txt", "rm -f a.log", "git status", "git push --help | head", "git commit -m 'update x set'",
-    "glab mr list", "glab mr view 3", "npm test", "npm run build", "pip list", "fd -e ts | xargs rg foo",
+    "glab mr list", "glab mr view 3", "glab api projects/1/merge_requests --paginate", "glab mr list -F json", "npm test", "npm run build", "pip list", "fd -e ts | xargs rg foo",
     `sql -S u/p@db <<'EOF'\nselect * from emp where name like 'update%';\nEOF`,
     "echo 'npm install'", "rg 'rm -rf /' src",
   ]) {

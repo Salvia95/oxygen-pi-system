@@ -29,6 +29,18 @@ export npm_config_update_notifier=false
 # --- agent-browser: 번들 Chrome 사용, 소형 모델 컨텍스트 보호 ---
 export AGENT_BROWSER_EXECUTABLE_PATH="$(cygpath -m "$OXY_HOME/vendor/browsers/chrome-win64/chrome.exe")"
 export AGENT_BROWSER_MAX_OUTPUT="${AGENT_BROWSER_MAX_OUTPUT:-20000}"
+# `agent-browser skills get core` 가 읽는 버전 일치 가이드
+export AGENT_BROWSER_SKILLS_DIR="$(cygpath -m "$OXY_HOME/vendor/agent-browser-skill-data")"
+
+# --- rg: 경로를 / 로 출력 (pi 의 grep 도구는 --no-config 로 실행하므로 영향 없음) ---
+export RIPGREP_CONFIG_PATH="$(cygpath -m "$OXY_HOME/config/ripgreprc")"
+
+# --- glab: 외부 업데이트 확인·텔레메트리·자동 다운로드 끄기, 출력에 하이퍼링크 제어문자 넣지 않기 ---
+export GLAB_CHECK_UPDATE=false
+export GLAB_SEND_TELEMETRY=false
+export GLAB_NOTIFY_SKILL_UPDATES=false
+export GLAB_DUO_CLI_AUTO_DOWNLOAD=false
+export GLAB_DISPLAY_HYPERLINKS=false
 
 # --- 인코딩 ---
 export LANG="${LANG:-C.UTF-8}"

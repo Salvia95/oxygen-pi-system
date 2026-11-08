@@ -70,7 +70,7 @@ const RULES: Rule[] = [
   {
     id: "glab-write",
     level: "ask",
-    test: /^glab\s+(?:mr\s+(?:merge|close|delete|approve|create|update|rebase)|issue\s+(?:create|close|delete|update)|release\s+(?:create|delete)|repo\s+(?:delete|archive|transfer)|variable\s+(?:set|delete|update)|ci\s+(?:run|retry|delete|cancel)|api\s+.*(?:-X|--method)\s*(?:POST|PUT|PATCH|DELETE))\b/i,
+    test: /^glab\s+(?:mr\s+(?:merge|close|delete|approve|create|update|rebase)|issue\s+(?:create|close|delete|update)|release\s+(?:create|delete)|repo\s+(?:delete|archive|transfer)|variable\s+(?:set|delete|update)|ci\s+(?:run|retry|delete|cancel)|api\s+.*(?:(?:-X|--method)[\s=]*(?:POST|PUT|PATCH|DELETE)|\s(?:-F|--field|-f|--raw-field|--input|--form)(?:[\s=]|$)))/i,
     title: "GitLab 쓰기 작업",
     hint: "The user did not approve this GitLab write operation. Do not retry; ask the user.",
   },

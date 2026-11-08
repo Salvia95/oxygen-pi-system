@@ -66,8 +66,19 @@ CHROME="$(cygpath -u "$AGENT_BROWSER_EXECUTABLE_PATH")"
 [[ -f "$CHROME" ]] && pass "Chrome for Testing: $AGENT_BROWSER_EXECUTABLE_PATH" || fail "Chrome 없음: $CHROME"
 if out=$(agent-browser doctor --offline --quick 2>&1); then pass "agent-browser doctor --offline --quick"
 else wrn "agent-browser doctor 경고: $(tail -n3 <<< "$out" | tr '\n' ' ')"; fi
+if agent-browser skills list 2>/dev/null | grep -q '^ *core '; then pass "agent-browser 버전 일치 가이드 (skills get core)"
+else fail "agent-browser 가이드 없음: $AGENT_BROWSER_SKILLS_DIR"; fi
 
-section "4. pi 설정"
+section "4. skill / Git Bash 보정"
+skills=$(find "$OXY_HOME/agent/skills" -name SKILL.md 2>/dev/null | sed 's|/SKILL.md$||; s|.*/||' | sort | tr '\n' ' ')
+[[ -n "$skills" ]] && pass "pi skill: $skills" || fail "agent/skills 에 SKILL.md 없음"
+if jq -n '1' | od -c | grep -q '\\r'; then fail "jq 출력에 CR 포함 (wrappers/jq 확인)"; else pass "jq 출력 LF (wrappers/jq)"; fi
+rgout=$(rg -l OXY_HOME "$OXY_HOME/scripts" 2>&1)
+if [[ -z "$rgout" ]]; then fail "rg 실행 결과 없음"
+elif [[ "$rgout" == *'\'* ]]; then fail   # 주의: Git Bash 에서 *\\* 패턴은 역슬래시와 매칭되지 않음 "rg 가 역슬래시 경로 출력 (RIPGREP_CONFIG_PATH 확인)"
+else pass "rg 경로 / 구분 (config/ripgreprc)"; fi
+
+section "5. pi 설정"
 for f in settings.json models.json; do
   p="$OXY_HOME/agent/$f"
   if [[ -f "$p" ]] && "$OXY_NODE" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$(winpath "$p")" 2>/dev/null; then
@@ -83,7 +94,7 @@ if [[ -f "$OXY_HOME/agent/models.json" && -f "$OXY_PI_CLI" ]]; then
 fi
 
 if [[ $CHECK_LLM == 1 ]]; then
-  section "5. 사내 vLLM (${OXY_VLLM_BASE_URL:-미설정})"
+  section "6. 사내 vLLM (${OXY_VLLM_BASE_URL:-미설정})"
   if [[ -z "${OXY_VLLM_BASE_URL:-}" ]]; then fail "OXY_VLLM_BASE_URL 미설정 (agent/oxy.env)"
   elif resp=$(curl -fsS -m 5 -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" "$OXY_VLLM_BASE_URL/models" 2>&1); then
     # jq.exe 는 CRLF 로 출력하므로 \r 제거 (안 하면 모델명 비교가 항상 실패)

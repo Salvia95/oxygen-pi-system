@@ -13,4 +13,5 @@ fi
 
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
-exec bash "$SQLCL_HOME/bin/sql" "$@"
+# -noupdates: SQLcl 은 기본적으로 업데이트 사이트에 접속을 시도함 (폐쇄망에서는 지연/실패)
+exec bash "$SQLCL_HOME/bin/sql" -noupdates "$@"

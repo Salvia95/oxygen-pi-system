@@ -4,6 +4,7 @@
 - Native Windows programs need Windows paths: convert with `cygpath -m <path>` when passing paths to them.
 - **No internet access.** Never run `npm install`, `pip install`, `curl` to public hosts, or anything that downloads. If a dependency is missing, stop and tell the user.
 - Pre-installed CLI tools: `fd`, `rg`, `jq`, `just`, `hurl`, `glab`, `sql` (Oracle SQLcl), `agent-browser`, `git`, `java`.
+  Before using `sql`, `glab`, `hurl`, or `agent-browser`, read the matching skill: their usage here differs from the defaults you may know.
 - Prefer the `grep`, `find`, `ls`, `read` tools over shell equivalents for exploring code.
 
 # Working rules

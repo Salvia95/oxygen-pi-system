@@ -24,6 +24,10 @@ const SCENARIOS = {
   "big-output": [bash("seq 1 30000")],
   "text-toolcall": [{ text: 'I will run it: <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>' }],
   repeat: [bash("echo same"), bash("echo same"), bash("echo same")],
+  // 시스템 프롬프트에 노출된 skill 위치를 그대로 read 로 연다 (실제 모델의 skill 로딩 흉내)
+  "read-skill": [{ tool: "read", args: (body) => ({
+    path: contentText(body.messages[0].content).match(/<location>([^<]*oracle-sqlcl[^<]*SKILL\.md)<\/location>/)?.[1] ?? "missing",
+  }) }],
 };
 
 const sse = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
@@ -70,7 +74,7 @@ http.createServer((req, res) => {
     const item = script[step];
     if (item?.tool) {
       sse(res, choice({ role: "assistant", tool_calls: [{ index: 0, id: `call_${step}`, type: "function", function: { name: item.tool, arguments: "" } }] }));
-      sse(res, choice({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify(item.args) } }] }));
+      sse(res, choice({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify(typeof item.args === "function" ? item.args(body) : item.args) } }] }));
       sse(res, choice({}, "tool_calls"));
     } else {
       const text = item?.text ?? `MOCK-DONE ${body.messages.at(-1).role}: ${contentText(body.messages.at(-1).content).trim()}`;

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# jq 래퍼: Windows jq.exe 는 기본 출력이 CRLF 라 Git Bash 비교/파이프에서 \r 이 섞인다 → -b(LF 출력) 를 항상 붙인다
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/jq.exe" -b "$@"
