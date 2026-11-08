@@ -1,0 +1,25 @@
+{
+  "defaultProvider": "oxy-vllm",
+  "defaultModel": "@@OXY_DEFAULT_MODEL@@",
+  "defaultThinkingLevel": "off",
+  "enabledModels": ["oxy-vllm/*"],
+
+  "shellPath": "@@OXY_SHELL_PATH@@",
+  "defaultTools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 24576,
+    "keepRecentTokens": 24000
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "provider": { "timeoutMs": 600000 }
+  },
+
+  "cacheWarming": "off",
+  "enableInstallTelemetry": false,
+  "defaultProjectTrust": "ask",
+  "quietStartup": "header"
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "oxy-vllm": {
+      "name": "사내 vLLM",
+      "baseUrl": "@@OXY_VLLM_BASE_URL@@",
+      "api": "openai-completions",
+      "apiKey": "$OXY_VLLM_API_KEY",
+      "authHeader": true,
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "@@OXY_MODEL_CODER@@",
+          "name": "Qwen Coder (vLLM)",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": @@OXY_CONTEXT_WINDOW@@,
+          "maxTokens": 16384,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "samplingParams": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "repetition_penalty": 1.05
+          }
+        },
+        {
+          "id": "@@OXY_MODEL_GENERAL@@",
+          "name": "Qwen General (vLLM, hybrid thinking)",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": @@OXY_CONTEXT_WINDOW@@,
+          "maxTokens": 32768,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "compat": {
+            "thinkingFormat": "qwen-chat-template"
+          },
+          "samplingParams": {
+            "temperature": 0.6,
+            "top_p": 0.95,
+            "top_k": 20
+          },
+          "samplingParamsByThinkingLevel": {
+            "off": { "temperature": 0.7, "top_p": 0.8 }
+          }
+        }
+      ]
+    }
+  }
+}

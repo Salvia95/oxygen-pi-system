@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# SQLcl 래퍼 (Git Bash 용)
+# - sql.exe 는 쓰지 않는다: 설치 경로가 약 120자를 넘으면 접근 위반(0xC0000005)으로 크래시함 (SQLcl 26.3.1 확인)
+# - 대신 sh 런처(bin/sql)를 쓰되, 이 런처는 JAVA_HOME 을 그대로 믿으므로 유효하지 않으면 실제 java 위치로 보정
+# - MSYS 경로 자동변환 차단: 없으면 `/nolog` 가 `C:/Program Files/Git/nolog` 로 바뀜
+SQLCL_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/../runtime/sqlcl" && pwd)"
+
+if [[ -z "${JAVA_HOME:-}" || ! -x "$(cygpath -u "$JAVA_HOME")/bin/java.exe" ]]; then
+  jh="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.home = //p' | tr -d '\r')"
+  [[ -n "$jh" ]] || { echo "[sql] java 를 찾지 못함 (Java 17+ 필요)" >&2; exit 1; }
+  export JAVA_HOME="$(cygpath -m "$jh")"
+fi
+
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+exec bash "$SQLCL_HOME/bin/sql" "$@"

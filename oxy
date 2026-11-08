@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# oxygen-pi-system 런처: 번들 Node 22 + pi 를 하네스 환경으로 실행한다.
+#   ./oxy                 # 대화형 TUI
+#   ./oxy -p "질문"       # 1회 실행
+set -euo pipefail
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+
+[[ -x "$OXY_NODE" ]] || { echo "[oxy] 번들 Node 없음: $OXY_NODE (설치가 끝났는지 확인)" >&2; exit 1; }
+[[ -f "$PI_CODING_AGENT_DIR/models.json" ]] || { echo "[oxy] models.json 없음 → 'just configure' 먼저 실행" >&2; exit 1; }
+
+exec "$OXY_NODE" "$OXY_PI_CLI" "$@"

@@ -1,0 +1,15 @@
+# 다운로드/생성물 (manifest/tools.lock.tsv 로 재현 가능)
+/.cache/
+/dist/
+/bin/
+/runtime/
+/vendor/
+/agent/bin/
+
+# PC별 설정·세션·인증 (configure 로 생성)
+/agent/oxy.env
+/agent/settings.json
+/agent/models.json
+/agent/auth.json
+/agent/sessions/
+/agent/models-store.json
