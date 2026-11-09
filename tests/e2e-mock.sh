@@ -52,7 +52,7 @@ chk "sampling (temperature 0.7, top_k 20)"   '[[ $(first .body.temperature) == 0
 chk "tools 7종"                              '[[ $(first "[.body.tools[].function.name] | sort | join(\",\")") == "bash,edit,find,grep,ls,read,write" ]]'
 chk "AGENTS.md 가 시스템 프롬프트에 포함"        '[[ $(first ".body.messages[0].content | tostring | contains(\"oxygen-pi-system\")") == true ]]'
 SYS="$(first '.body.messages[0].content | tostring')"
-chk "skill 6종이 시스템 프롬프트에 노출"         '[[ $(grep -oE "oracle-sqlcl|gitlab-glab|http-api-hurl|browser-automation|just-tasks|shell-data-tools" <<< "$SYS" | sort -u | wc -l) -eq 6 ]]'
+chk "skill 7종이 시스템 프롬프트에 노출"         '[[ $(grep -oE "find-code|json-querying|oracle-db-querying|gitlab-workflow|http-api-testing|web-page-automation|project-task-running" <<< "$SYS" | sort -u | wc -l) -eq 7 ]]'
 log "첫 요청 크기: system $(first '.body.messages[0].content | tostring | length')자, tools $(first '.body.tools | tostring | length')자"
 
 run offline-install

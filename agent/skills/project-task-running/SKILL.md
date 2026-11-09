@@ -1,6 +1,6 @@
 ---
-name: just-tasks
-description: Run and write project tasks with just (justfile). Use when a project has a justfile, or the user asks to add a build/test/run command or task runner recipe.
+name: project-task-running
+description: Run and define project commands (build, test, lint, run) with `just`. Use when the project has a justfile, when you need the right command to build or test it, or when the user asks to add a reusable task.
 ---
 
 # Task runner (just)

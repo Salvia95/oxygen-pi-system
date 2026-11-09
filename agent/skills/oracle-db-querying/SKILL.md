@@ -1,6 +1,6 @@
 ---
-name: oracle-sqlcl
-description: Query and inspect Oracle databases with SQLcl (the `sql` command). Use when the user asks about Oracle tables, data, schemas, DDL, PL/SQL, or running a .sql script.
+name: oracle-db-querying
+description: Query and inspect an Oracle database with the `sql` (SQLcl) command. Use when the user asks to look up table data, check a schema, column, index or DDL, read PL/SQL source, or run a .sql script against Oracle.
 ---
 
 # Oracle SQLcl

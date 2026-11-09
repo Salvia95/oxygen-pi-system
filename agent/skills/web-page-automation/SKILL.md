@@ -1,6 +1,6 @@
 ---
-name: browser-automation
-description: Control a headless Chrome with agent-browser to open internal web pages, read them, fill forms, click, and take screenshots. Use when the user asks to check, test, or interact with a web page or web app.
+name: web-page-automation
+description: Open and operate internal web pages in a headless Chrome with `agent-browser`. Use when the user asks to check how a page looks or behaves, click through a UI flow, fill and submit a form, take a screenshot, or read content that needs a browser.
 ---
 
 # Browser automation (agent-browser)

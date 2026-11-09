@@ -1,6 +1,6 @@
 ---
-name: gitlab-glab
-description: Work with the internal GitLab using the glab CLI - merge requests, issues, pipelines, and the GitLab API. Use when the user mentions MR, merge request, issue, pipeline, CI, or GitLab.
+name: gitlab-workflow
+description: Check and manage work on the internal GitLab with `glab`. Use when the user mentions a merge request (MR), code review comments, an issue, a pipeline or CI job failure, or asks to create an MR or call the GitLab API.
 ---
 
 # GitLab (glab)

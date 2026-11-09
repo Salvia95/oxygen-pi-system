@@ -26,7 +26,7 @@ const SCENARIOS = {
   repeat: [bash("echo same"), bash("echo same"), bash("echo same")],
   // 시스템 프롬프트에 노출된 skill 위치를 그대로 read 로 연다 (실제 모델의 skill 로딩 흉내)
   "read-skill": [{ tool: "read", args: (body) => ({
-    path: contentText(body.messages[0].content).match(/<location>([^<]*oracle-sqlcl[^<]*SKILL\.md)<\/location>/)?.[1] ?? "missing",
+    path: contentText(body.messages[0].content).match(/<location>([^<]*oracle-db-querying[^<]*SKILL\.md)<\/location>/)?.[1] ?? "missing",
   }) }],
 };
 
