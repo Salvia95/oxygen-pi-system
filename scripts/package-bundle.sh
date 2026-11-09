@@ -1,10 +1,41 @@
 #!/usr/bin/env bash
-# [인터넷 연결 PC 전용] fetch 가 끝난 하네스를 폐쇄망 반입용 zip 으로 묶는다.
-#   결과: dist/oxygen-pi-<날짜>.zip, dist/oxygen-pi-<날짜>.zip.sha256
+# [인터넷 연결 PC 전용] fetch 로 받은 구성요소와 하네스를 폐쇄망 반입용 zip 으로 묶는다.
+#   bash scripts/package-bundle.sh           # 필수 구성요소 검사 → dist/oxygen-pi-<날짜>.zip (+ .sha256)
+#   bash scripts/package-bundle.sh --check   # 검사만
+# 필수(role=required) 구성요소가 하나라도 없으면 zip 을 만들지 않는다.
+# 만든 번들은 본인 반입용이다. 비오픈소스 구성요소가 들어 있으면 다른 사람에게 배포하기 전에 해당 약관을 확인한다.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-[[ -x "$OXY_HOME/runtime/node/node.exe" && -f "$OXY_HOME/bin/fd.exe" ]] || die "먼저 just fetch 를 실행하세요"
+CHECK_ONLY=0
+[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
 
+NODE="$OXY_HOME/runtime/node/node.exe"
+[[ -x "$NODE" ]] || die "필수 구성요소 node 가 없습니다 → bash scripts/fetch-bundle.sh"
+
+# ---- 구성요소 검사 ----
+missing=() included=() proprietary=() skipped=()
+while IFS=$'\t' read -r name role installed prop version; do
+  if [[ $installed == 1 ]]; then
+    included+=("$name $version")
+    [[ $prop == 1 ]] && proprietary+=("$name")
+  elif [[ $role == required ]]; then
+    missing+=("$name")
+  else
+    skipped+=("$name")
+  fi
+done < <("$NODE" "$(winpath "$OXY_HOME/installer/components.mjs")" status --root "$(winpath "$OXY_HOME")" | tr -d '\r')
+
+log "포함: ${included[*]/%/,}"
+(( ${#skipped[@]} )) && log "미포함 (선택 항목): ${skipped[*]}"
+if (( ${#missing[@]} )); then
+  die "필수 구성요소 누락: ${missing[*]} → bash scripts/fetch-bundle.sh 로 받은 뒤 다시 실행하세요"
+fi
+if (( ${#proprietary[@]} )); then
+  warn "비오픈소스 구성요소 포함: ${proprietary[*]} — 본인 반입용입니다. 다른 사람에게 배포하기 전에 약관을 확인하세요."
+fi
+(( CHECK_ONLY )) && { log "검사 통과 (--check)"; exit 0; }
+
+# ---- zip 생성 ----
 name="oxygen-pi-$(date +%Y%m%d)"
 mkdir -p "$OXY_HOME/dist"
 out="$OXY_HOME/dist/$name.zip"
@@ -17,12 +48,14 @@ log "압축 중: $out"
   cd "$OXY_HOME/.."
   base="$(basename "$OXY_HOME")"
   "$TAR" -a -c -f "$(winpath "$out")" \
-    --exclude="$base/.cache" --exclude="$base/dist" --exclude="$base/.git" \
+    --exclude="$base/.cache" --exclude="$base/dist" --exclude="$base/.git" --exclude="$base/optional" \
+    --exclude="$base/.oxy-selection" \
     --exclude="$base/agent/oxy.env" --exclude="$base/agent/sessions" \
     --exclude="$base/agent/settings.json" --exclude="$base/agent/models.json" \
-    --exclude="$base/agent/auth.json" --exclude="$base/agent/models-store.json" \
+    --exclude="$base/agent/auth.json" --exclude="$base/agent/models-store.json" --exclude="$base/agent/skills" \
+    --exclude="$base/agent/usql.yaml" --exclude="$base/agent/dbhub.toml" \
     "$base"
 )
 (cd "$OXY_HOME/dist" && sha256sum "$name.zip" > "$name.zip.sha256")
 log "완료: $(du -h "$out" | cut -f1)  $(cut -d' ' -f1 "$out.sha256")"
-log "폐쇄망 PC: 압축 해제 → Git Bash 에서 bash scripts/configure.sh && bash scripts/verify.sh"
+log "폐쇄망 PC: 압축 해제 → install.cmd (설치 TUI)"

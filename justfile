@@ -6,17 +6,21 @@ set windows-shell := ["bash", "-uc"]
 default:
     @just --list
 
-# [인터넷 PC] lock 에 고정된 구성요소 다운로드 + sha256 검증 + 배치
-fetch:
-    bash scripts/fetch-bundle.sh
+# [인터넷 PC] 반입할 구성요소 선택 → 공식 배포처에서 직접 다운로드 + sha256 검증 + 배치
+fetch *args:
+    bash scripts/fetch-bundle.sh {{args}}
 
 # [인터넷 PC] 버전을 바꾼 뒤 lock(sha256, npm lockfile) 갱신
 lock:
     bash scripts/fetch-bundle.sh --update-lock
 
-# [인터넷 PC] 폐쇄망 반입용 zip 생성
+# [인터넷 PC] 필수 구성요소 검사 후 폐쇄망 반입용 zip 생성
 package:
     bash scripts/package-bundle.sh
+
+# [인터넷 PC] 번들링 전 구성요소 검사만
+check:
+    bash scripts/package-bundle.sh --check
 
 # agent/oxy.env → agent/settings.json, models.json 생성
 configure:

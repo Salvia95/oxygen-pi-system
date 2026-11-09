@@ -3,8 +3,10 @@
 - OS: Windows 11. Your `bash` tool runs **Git Bash** (MSYS). Use POSIX shell syntax and forward slashes.
 - Native Windows programs need Windows paths: convert with `cygpath -m <path>` when passing paths to them.
 - **No internet access.** Never run `npm install`, `pip install`, `curl` to public hosts, or anything that downloads. If a dependency is missing, stop and tell the user.
-- Pre-installed CLI tools: `fd`, `rg`, `jq`, `just`, `hurl`, `glab`, `sql` (Oracle SQLcl), `agent-browser`, `git`, `java`.
-  Before using `sql`, `glab`, `hurl`, or `agent-browser`, read the matching skill: their usage here differs from the defaults you may know.
+- CLI tools: `fd`, `rg`, `jq`, `git` are always present. Optional ones (only if brought in): `just`, `hurl`, `glab`, `gh`,
+  `usql`, `sql` (Oracle SQLcl), `agent-browser`, `obscura`.
+  A skill is listed only for tools that are installed. Read the matching skill before using a tool: usage here differs from the defaults you may know.
+  If a command is not found, tell the user it was not brought in. Never try to install it.
 - Prefer the `grep`, `find`, `ls`, `read` tools over shell equivalents for exploring code.
 
 # Working rules

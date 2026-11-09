@@ -5,7 +5,8 @@ description: Query and inspect an Oracle database with the `sql` (SQLcl) command
 
 # Oracle SQLcl
 
-`sql` is pre-installed (SQLcl 26.3, wrapper handles Git Bash path issues and disables update checks).
+`sql` runs Oracle SQLcl (the wrapper handles Git Bash path issues and disables update checks).
+SQLcl is an **optional component** (Oracle license, not bundled). If `sql` prints "SQLcl is not installed", stop and tell the user; do not try to install it.
 
 ## Rules
 

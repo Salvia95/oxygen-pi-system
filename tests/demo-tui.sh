@@ -20,7 +20,7 @@ source "$OXY_HOME/env.sh"
 PORT="${OXY_DEMO_PORT:-18090}"
 TMP="$(mktemp -d)"; trap 'kill "${MOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/agent" "$TMP/work"
-cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skills" "$TMP/agent/"
+cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skill-library" "$TMP/agent/"
 cat > "$TMP/agent/oxy.env" <<ENV
 OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1
 OXY_VLLM_API_KEY=mock-key

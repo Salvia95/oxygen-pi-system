@@ -19,14 +19,23 @@ run() { # <설명> <installer node> <답...>
   RC=$?
 }
 
-# 1) 신규 설치: 점검 계속 / 기본 위치 / (긴 경로 경고 시 예) / vLLM / 키 / 계속 / 코딩 1 / 범용 1 / ctx 기본 / GitLab / 등록 전부 / 설치 / verify 예 / 종료
+# 브라우저 선택지 수는 PC 마다 다름 (Edge/Chrome 설치 여부) → 마지막 항목('사용 안 함') 번호를 계산
+NONE_IDX=$("$NODE" --input-type=module -e "import('$(winpath "$OXY_HOME/installer/components.mjs" | sed 's|^|file:///|')').then(m=>console.log(m.browserChoices(process.argv[1]).length))" "$(winpath "$OXY_HOME")")
+[[ -f "$OXY_HOME/runtime/sqlcl/bin/sql" && -f "$OXY_HOME/vendor/browsers/chromium/chrome.exe" ]]   || die "이 테스트는 SQLcl·Chromium 이 받아진 상태가 필요 → bash scripts/fetch-bundle.sh --all --accept-license"
+
+# 1) 신규 설치: 점검 계속 / 기본 위치 / (긴 경로 경고 시 예) / SQLcl: 번들에 포함된 것 설치(1) / 브라우저: Chromium(2)
+#    / vLLM / 키 / 계속 / 코딩 1 / 범용 1 / ctx 기본 / GitLab / 등록 전부 / 설치 / verify 예 / 종료
 long=$([[ ${#I} -gt 100 ]] && echo 1 || true)
-run "신규 설치" "$NODE" 1 1 $long "http://127.0.0.1:$PORT" mock-key "" 1 1 "" gitlab.example.internal "" 1 1 ""
+run "신규 설치" "$NODE" 1 1 $long 1 2 "http://127.0.0.1:$PORT" mock-key "" 1 1 "" gitlab.example.internal "" 1 1 ""
 chk "설치 종료코드 0"                     '[[ $RC == 0 ]]'
 chk "파일 복사 + 설치 표시"                 '[[ -f "$I/.oxy-install" && -x "$I/runtime/node/node.exe" ]]'
 chk "oxy.env 에 입력값 기록"               'grep -q "^OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1$" "$I/agent/oxy.env" && grep -q "^GITLAB_HOST=gitlab.example.internal$" "$I/agent/oxy.env"'
 chk "models.json 모델 2개"                '[[ $(grep -c "\"id\"" "$I/agent/models.json") == 2 ]]'
 chk "PATH / WT 프로필 / 바로가기 (sandbox)"  '[[ -f "$SB/user-path.txt" && -f "$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi/oxygen-pi.json" && -f "$SB/Desktop/Oxygen Pi.lnk.json" ]]'
+chk "SQLcl: 번들에서 설치"                 '[[ -f "$I/runtime/sqlcl/bin/sql" ]]'
+chk "고르지 않은 브라우저는 복사 안 함"       '[[ -f "$I/vendor/browsers/chromium/chrome.exe" && ! -d "$I/vendor/browsers/chrome-win64" ]]'
+chk "브라우저 선택 기록 (chromium)"           'grep -q "^OXY_BROWSER=chromium$" "$I/agent/oxy.env"'
+chk "skill 자동 활성화 (설치된 도구만)"        '[[ -f "$I/agent/skills/sql-querying/SKILL.md" && -f "$I/agent/skills/web-page-automation/SKILL.md" && ! -d "$I/agent/skill-library/../skills/nonexistent" ]]'
 chk "verify 통과 (FAIL 0)"               'grep -q "FAIL 0" "$SB/out.txt"'
 
 # 2) 업데이트: 메뉴 3 / verify 아니요 / 종료
@@ -34,8 +43,12 @@ echo "OXY_CUSTOM_KEEP=1" >> "$I/agent/oxy.env"
 run "업데이트" "$NODE" 3 2 ""
 chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_KEEP=1$" "$I/agent/oxy.env"'
 
-# 3) 설정 변경: 메뉴 1 / URL·키 유지 / 계속 / 코딩 1 / 범용 '사용 안 함' / ctx / GitLab 유지 / 등록 1,2 / 적용 / verify 아니요 / 종료
-run "설정 변경" "$NODE" 1 "" "" "" 1 2 "" "" "1,2" 1 2 ""
+# 3) 설정 변경: 메뉴 1 / SQLcl 유지 / 브라우저 '사용 안 함' / URL·키 유지 / 계속 / 코딩 1 / 범용 '사용 안 함' / ctx / GitLab 유지
+#    / 등록 1,2 / 적용 / verify 아니요 / 종료
+run "설정 변경" "$NODE" 1 1 "$NONE_IDX" "" "" "" 1 2 "" "" "1,2" 1 2 ""
+chk "브라우저 '사용 안 함' 기록"              'grep -q "^OXY_BROWSER=none$" "$I/agent/oxy.env"'
+chk "브라우저 없음 → web-page-automation skill 꺼짐" '[[ ! -d "$I/agent/skills/web-page-automation" && -d "$I/agent/skills/web-page-reading" ]]'
+chk "SQLcl 유지"                          '[[ -f "$I/runtime/sqlcl/bin/sql" ]]'
 chk "범용 모델 제거 → models.json 1개"      '[[ $(grep -c "\"id\"" "$I/agent/models.json") == 1 ]]'
 chk "바로가기만 해제"                       '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" && -f "$SB/user-path.txt" ]]'
 

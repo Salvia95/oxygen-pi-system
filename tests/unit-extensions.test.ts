@@ -40,6 +40,15 @@ test("ask: 재귀 삭제 / git / glab / sql 변경", () => {
   assert.deepEqual(ids("glab api --method=PUT projects/1"), ["ask:glab-write"]);
   assert.deepEqual(ids(`sql -S u/p@db <<'EOF'\nupdate emp set sal = 1;\ncommit;\nEOF`), ["ask:sql-write"]);
   assert.deepEqual(ids(`echo "delete from t;" | sql -S u/p@db`), ["ask:sql-write"]);
+  // usql
+  assert.deepEqual(ids(`usql appdb -w -c "update users set name = 'x' where id = 1"`), ["ask:sql-write"]);
+  assert.deepEqual(ids(`usql appdb -w -c "drop table users"`), ["ask:sql-write"]);
+  // gh
+  assert.deepEqual(ids("gh pr merge 12 --squash"), ["ask:gh-write"]);
+  assert.deepEqual(ids("gh pr create --title x --body-file pr.md"), ["ask:gh-write"]);
+  assert.deepEqual(ids("gh api repos/o/r/issues -f title=x"), ["ask:gh-write"]);
+  assert.deepEqual(ids("gh api -X DELETE repos/o/r"), ["ask:gh-write"]);
+  assert.deepEqual(ids("gh workflow run deploy.yml"), ["ask:gh-write"]);
 });
 
 test("허용: 일반 개발 명령", () => {
@@ -48,6 +57,9 @@ test("허용: 일반 개발 명령", () => {
     "glab mr list", "glab mr view 3", "glab api projects/1/merge_requests --paginate", "glab mr list -F json", "npm test", "npm run build", "pip list", "fd -e ts | xargs rg foo",
     `sql -S u/p@db <<'EOF'\nselect * from emp where name like 'update%';\nEOF`,
     "echo 'npm install'", "rg 'rm -rf /' src",
+    `usql appdb -w -q --csv -c "select * from users where note like 'update%' limit 50"`, "usql appdb -c '\\d users'",
+    "gh pr list --json number,title", "gh pr view 3 --comments", "gh run view 99 --log-failed", "gh api repos/o/r/pulls --jq '.[].title'",
+    "obscura fetch http://intranet/ --dump text",
   ]) {
     assert.deepEqual(ids(c), [], c);
   }
@@ -66,4 +78,22 @@ test("clip: 앞/뒤 보존 + 안내", () => {
   assert.ok(out.startsWith("H".repeat(100)) && out.endsWith("T".repeat(80)));
   assert.match(out, /1000 characters omitted.*narrow it/);
   assert.equal(clip("short", 200, "x"), "short");
+});
+
+test("skill 자동 활성화: 설치된 구성요소의 skill 만", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, cpSync, readdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { syncSkills, CATALOG } = await import("../installer/components.mjs");
+  const root = mkdtempSync(join(tmpdir(), "oxy-skill-"));
+  cpSync("agent/skill-library", join(root, "agent", "skill-library"), { recursive: true });
+  const touch = (rel: string) => { mkdirSync(join(root, rel, ".."), { recursive: true }); writeFileSync(join(root, rel), ""); };
+  // 필수만 반입한 번들
+  for (const n of ["node", "pi", "fd", "rg", "jq"]) touch((CATALOG as any)[n].check);
+  assert.deepEqual(syncSkills(root, join(root, "agent")), ["find-code", "json-querying"]);
+  // usql + agent-browser 추가, 브라우저는 사용 안 함
+  for (const n of ["usql", "agent-browser"]) touch((CATALOG as any)[n].check);
+  mkdirSync(join(root, "agent", "skills", "my-custom"), { recursive: true });
+  assert.deepEqual(syncSkills(root, join(root, "agent"), { browser: "none" }), ["find-code", "json-querying", "sql-querying"]);
+  assert.ok(readdirSync(join(root, "agent", "skills")).includes("my-custom"), "사용자 skill 은 유지");
 });

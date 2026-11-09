@@ -10,7 +10,7 @@ source "$OXY_HOME/env.sh"
 PORT="${1:-18000}"
 TMP="$(mktemp -d)"; trap 'kill "${MOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/agent" "$TMP/work"
-cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skills" "$TMP/agent/"
+cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skill-library" "$TMP/agent/"
 cat > "$TMP/agent/oxy.env" <<ENV
 OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1
 OXY_VLLM_API_KEY=mock-key
@@ -52,7 +52,10 @@ chk "sampling (temperature 0.7, top_k 20)"   '[[ $(first .body.temperature) == 0
 chk "tools 7종"                              '[[ $(first "[.body.tools[].function.name] | sort | join(\",\")") == "bash,edit,find,grep,ls,read,write" ]]'
 chk "AGENTS.md 가 시스템 프롬프트에 포함"        '[[ $(first ".body.messages[0].content | tostring | contains(\"oxygen-pi-system\")") == true ]]'
 SYS="$(first '.body.messages[0].content | tostring')"
-chk "skill 7종이 시스템 프롬프트에 노출"         '[[ $(grep -oE "find-code|json-querying|oracle-db-querying|gitlab-workflow|http-api-testing|web-page-automation|project-task-running" <<< "$SYS" | sort -u | wc -l) -eq 7 ]]'
+ENABLED=$(ls "$TMP/agent/skills")
+missing_skill=$(for s in $ENABLED; do grep -q "<name>$s</name>" <<< "$SYS" || echo "$s"; done)
+chk "켜진 skill $(wc -w <<< "$ENABLED")개가 모두 프롬프트에 노출" '[[ -n "$ENABLED" && -z "$missing_skill" ]]'
+chk "skill-library 원본은 프롬프트에 없음"        '[[ "$SYS" != *"skill-library"* ]]'
 log "첫 요청 크기: system $(first '.body.messages[0].content | tostring | length')자, tools $(first '.body.tools | tostring | length')자"
 
 run offline-install

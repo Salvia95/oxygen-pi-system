@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# usql 래퍼: PC 로컬 연결 설정(agent/usql.yaml, git·번들 제외)이 있으면 자동으로 --config 로 넘긴다.
+#   agent/usql.yaml 예:
+#     connections:
+#       appdb: postgres://app_ro@db.example.internal:5432/app
+#       ora:   oracle://scott@ora.example.internal:1521/ORCLPDB1
+# 비밀번호는 이 파일이나 명령에 쓰지 말고, 사용자가 직접 입력하거나 별도로 관리한다.
+HOME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CFG="$HOME_DIR/agent/usql.yaml"
+if [[ -f "$CFG" && " $* " != *" --config "* ]]; then
+  exec "$HOME_DIR/bin/usql.exe" --config "$(cygpath -m "$CFG")" "$@"
+fi
+exec "$HOME_DIR/bin/usql.exe" "$@"

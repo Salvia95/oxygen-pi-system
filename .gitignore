@@ -4,6 +4,10 @@
 /bin/
 /runtime/
 /vendor/
+# 선택 구성요소 원본 (재배포 금지: Oracle SQLcl, Chrome for Testing 등)
+/optional/
+# fetch 선택 화면의 이전 선택 (PC별)
+/.oxy-selection
 /agent/bin/
 
 # PC별 설정·세션·인증 (configure 로 생성)
@@ -13,3 +17,8 @@
 /agent/auth.json
 /agent/sessions/
 /agent/models-store.json
+# 설치된 구성요소에 맞춰 configure / 설치 TUI 가 skill-library 에서 생성
+/agent/skills/
+# PC 로컬 DB 연결 설정 (Tweak TUI 예정)
+/agent/usql.yaml
+/agent/dbhub.toml

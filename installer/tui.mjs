@@ -188,36 +188,58 @@ export class UI {
     } finally { this.#raw(false); }
   }
 
-  /** 여러 개 고르기. options: [{label, value, checked, hint}] → value[] */
-  async multiselect(question, options, { back = true, note = "" } = {}) {
-    const checked = options.map((o) => Boolean(o.checked));
+  /**
+   * 여러 개 고르기. options: [{label, value, checked, hint, locked}] → value[]
+   * locked: 항상 선택된 상태로 고정 (해제 불가, 결과에 항상 포함)
+   */
+  async multiselect(question, rows, { back = true, note = "" } = {}) {
+    // rows 에 {header: "제목", desc} 를 섞으면 계층 제목 줄로 표시한다 (선택 대상 아님, 번호 없음)
+    const options = rows.filter((r) => !r.header);
+    const checked = options.map((o) => Boolean(o.checked || o.locked));
+    const withLocked = (vals) => [...new Set([...options.filter((o) => o.locked).map((o) => o.value), ...vals])]
+      .sort((a, b) => options.findIndex((o) => o.value === a) - options.findIndex((o) => o.value === b));
+    const headerLine = (r) => `  ${c.bold(c.cyan(r.header))}${r.desc ? c.gray("  " + r.desc) : ""}`;
     if (!this.tty) {
       this.print(`\n${question}${note ? "\n" + note : ""}`);
-      options.forEach((o, k) => this.print(`  ${k + 1}) [${checked[k] ? "x" : " "}] ${o.label}${o.hint ? c.gray("  " + o.hint) : ""}`));
+      let k = 0;
+      for (const r of rows) {
+        if (r.header) { this.print(headerLine(r)); continue; }
+        this.print(`   ${String(k + 1).padStart(2)}) [${r.locked ? "#" : checked[k] ? "x" : " "}] ${r.label}${r.hint ? c.gray("  " + r.hint) : ""}`);
+        k++;
+      }
+      if (options.some((o) => o.locked)) this.print(c.gray("  [#] 는 필수 항목이라 항상 포함됩니다"));
       for (;;) {
-        const a = await this.#line(`선택할 번호들 (예: 1,3 / 빈칸=표시된 대로 / -=없음${back ? " / <=이전" : ""}): `);
+        const a = await this.#line(`선택할 번호들 (예: 1,3 / 빈칸=표시된 대로 / -=필수만${back ? " / <=이전" : ""}): `);
         if (back && a === "<") return BACK;
-        if (a === "") return options.filter((_, k) => checked[k]).map((o) => o.value);
-        if (a === "-") return [];
+        if (a === "") return withLocked(options.filter((_, j) => checked[j]).map((o) => o.value));
+        if (a === "-") return withLocked([]);
         const nums = a.split(/[\s,]+/).map(Number);
-        if (nums.every((n) => Number.isInteger(n) && n >= 1 && n <= options.length)) return nums.map((n) => options[n - 1].value);
+        if (nums.every((n) => Number.isInteger(n) && n >= 1 && n <= options.length)) return withLocked(nums.map((n) => options[n - 1].value));
+        this.print(c.red(`  ✖ 1~${options.length} 사이의 번호를 쉼표로 구분해 입력하세요`));
       }
     }
+    let msg = "";
     let i = 0;
     this.#raw(true);
     try {
       for (;;) {
-        const body = options.map((o, k) => {
-          const box = checked[k] ? c.green("[✔]") : "[ ]";
-          const label = k === i ? c.cyan(o.label) : o.label;
-          return `  ${k === i ? c.cyan("❯") : " "} ${box} ${label}${o.hint ? c.gray("  " + o.hint) : ""}`;
+        let k = 0;
+        const body = rows.map((r) => {
+          if (r.header) return headerLine(r);
+          const j = k++;
+          const box = r.locked ? c.gray("[■]") : checked[j] ? c.green("[✔]") : "[ ]";
+          const label = j === i ? c.cyan(r.label) : r.label;
+          return `   ${j === i ? c.cyan("❯") : " "} ${box} ${label}${r.hint ? c.gray("  " + r.hint) : ""}`;
         });
-        this.screen(`  ${c.bold(question)}\n${note ? note + "\n" : ""}\n${body.join("\n")}\n\n  ${c.gray(`↑↓ 이동 · Space 선택/해제 · Enter 확정${back ? " · Esc 이전" : ""}`)}`);
+        const legend = options.some((o) => o.locked) ? " · [■] 필수(해제 불가)" : "";
+        this.screen(`  ${c.bold(question)}\n${note ? note + "\n" : ""}\n${body.join("\n")}\n\n` +
+          `${msg ? "  " + c.yellow(msg) + "\n" : ""}  ${c.gray(`↑↓ 이동 · Space 선택/해제 · Enter 확정${back ? " · Esc 이전" : ""}${legend}`)}`);
+        msg = "";
         const { key } = await this.#key();
         if (key.name === "up" || key.name === "k") i = (i - 1 + options.length) % options.length;
         else if (key.name === "down" || key.name === "j" || key.name === "tab") i = (i + 1) % options.length;
-        else if (key.name === "space") checked[i] = !checked[i];
-        else if (key.name === "return" || key.name === "enter") return options.filter((_, k) => checked[k]).map((o) => o.value);
+        else if (key.name === "space") { if (options[i].locked) msg = `${options[i].label.trim()} 은(는) 필수 항목이라 해제할 수 없습니다`; else checked[i] = !checked[i]; }
+        else if (key.name === "return" || key.name === "enter") return withLocked(options.filter((_, j) => checked[j]).map((o) => o.value));
         else if (back && key.name === "escape") return BACK;
       }
     } finally { this.#raw(false); }
@@ -299,4 +321,10 @@ export class UI {
   }
 
   close() { this.rl?.close(); }
+}
+
+/** 터미널 표시 폭 기준으로 오른쪽을 공백으로 채운다 (한글·전각 문자는 2칸) */
+export function padDisplay(s, width) {
+  const w = [...s].reduce((n, ch) => n + (/[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(ch) ? 2 : 1), 0);
+  return s + " ".repeat(Math.max(0, width - w));
 }

@@ -41,33 +41,60 @@ else fail "pi 미설치: $OXY_PI_CLI"; fi
 GIT_BASH="$(cygpath -m /)"; GIT_BASH="${GIT_BASH%/}/bin/bash.exe"
 [[ -f "$GIT_BASH" ]] && pass "Git Bash: $GIT_BASH" || fail "Git Bash 없음: $GIT_BASH"
 
+# 선택 구성요소(SQLcl, Chrome for Testing)는 설치하지 않을 수 있으므로 없으면 WARN
+HAS_SQLCL=0; [[ -f "$OXY_HOME/runtime/sqlcl/bin/sql" ]] && HAS_SQLCL=1
+need() { if (( HAS_SQLCL )); then fail "$@"; else wrn "$* (SQLcl 미설치라 영향 없음)"; fi; }
 if command -v java >/dev/null; then
   jv=$(java -version 2>&1 | head -n1)
   major=$(sed -nE 's/.*version "([0-9]+).*/\1/p' <<< "$jv")
-  (( ${major:-0} >= 17 )) && pass "java: $jv" || fail "java 17 이상 필요 (SQLcl): $jv"
-else fail "java 없음 (SQLcl 실행 불가)"; fi
+  (( ${major:-0} >= 17 )) && pass "java: $jv" || need "java 17 이상 필요 (SQLcl): $jv"
+else need "java 없음 (SQLcl 실행 불가)"; fi
 
 section "2. 번들 도구"
+# 필수 (manifest role=required): 없으면 FAIL
 tool "fd"            fd --version
 tool "rg"            rg --version
 tool "jq"            jq --version
-tool "just"          just --version
-tool "hurl"          hurl --version
-tool "glab"          glab --version
-tool "agent-browser" agent-browser --version
-tool "sqlcl"         sql -V
+# 선택: 반입하지 않았으면 WARN (해당 skill 사용 불가)
+opt_tool() { # <label> <bin/파일> <skill> <cmd...>
+  local label="$1" file="$2" skill="$3"; shift 3
+  if [[ -f "$OXY_HOME/$file" ]]; then tool "$label" "$@"
+  else wrn "$label: 선택 구성요소 미포함 ($skill 사용 불가 · 인터넷 PC 에서 fetch 로 받아 다시 번들링)"; fi
+}
+opt_tool "just"          bin/just.exe          project-task-running just --version
+opt_tool "hurl"          bin/hurl.exe          http-api-testing     hurl --version
+opt_tool "glab"          bin/glab.exe          gitlab-workflow      glab --version
+opt_tool "gh"            bin/gh.exe            github-workflow      gh --version
+opt_tool "agent-browser" bin/agent-browser.exe web-page-automation  agent-browser --version
+opt_tool "obscura"       bin/obscura.exe       web-page-reading     obscura --version
+opt_tool "usql"          bin/usql.exe          sql-querying         usql --version
+if [[ -f "$OXY_HOME/vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" ]]; then
+  pass "dbhub: 설치됨 (DB 연결·MCP 등록은 Tweak TUI 예정)"
+else wrn "dbhub: 선택 구성요소 미포함 (DB MCP 커넥터 사용 불가)"; fi
+HAS_AB=0; [[ -f "$OXY_HOME/bin/agent-browser.exe" ]] && HAS_AB=1
+if (( HAS_SQLCL )); then tool "sqlcl" sql -V
+else wrn "sqlcl: 선택 구성요소 미설치 (oracle-db-querying 사용 불가, 설치 TUI '설정 변경'에서 추가)"; fi
 for t in fd rg; do
   [[ -f "$OXY_HOME/agent/bin/$t.exe" ]] && pass "agent/bin/$t.exe (pi 자동 다운로드 방지)" \
     || fail "agent/bin/$t.exe 없음 → pi 가 GitHub 다운로드를 시도함"
 done
 
-section "3. 브라우저"
-CHROME="$(cygpath -u "$AGENT_BROWSER_EXECUTABLE_PATH")"
-[[ -f "$CHROME" ]] && pass "Chrome for Testing: $AGENT_BROWSER_EXECUTABLE_PATH" || fail "Chrome 없음: $CHROME"
-if out=$(agent-browser doctor --offline --quick 2>&1); then pass "agent-browser doctor --offline --quick"
-else wrn "agent-browser doctor 경고: $(tail -n3 <<< "$out" | tr '\n' ' ')"; fi
-if agent-browser skills list 2>/dev/null | grep -q '^ *core '; then pass "agent-browser 버전 일치 가이드 (skills get core)"
-else fail "agent-browser 가이드 없음: $AGENT_BROWSER_SKILLS_DIR"; fi
+section "3. 브라우저 (OXY_BROWSER=${OXY_BROWSER:-auto})"
+if (( ! HAS_AB )); then wrn "agent-browser 미포함 → 브라우저 점검 생략"
+elif [[ "${OXY_BROWSER:-}" == none ]]; then wrn "브라우저 자동화 사용 안 함 (web-page-automation 사용 불가)"
+elif [[ "${OXY_BROWSER:-}" == obscura ]]; then
+  if [[ -f "$OXY_HOME/bin/obscura.exe" ]]; then pass "브라우저 엔진: obscura (CDP 포트 ${OXY_OBSCURA_PORT:-9233}, agent-browser 래퍼가 필요할 때 기동)"
+  else fail "브라우저 엔진 obscura 를 골랐지만 bin/obscura.exe 가 없음"; fi
+elif [[ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]]; then wrn "사용할 브라우저 없음 (설치 TUI '설정 변경'에서 선택)"
+elif [[ -f "$(cygpath -u "$AGENT_BROWSER_EXECUTABLE_PATH")" ]]; then
+  pass "브라우저: $AGENT_BROWSER_EXECUTABLE_PATH"
+  if out=$(agent-browser doctor --offline --quick 2>&1); then pass "agent-browser doctor --offline --quick"
+  else wrn "agent-browser doctor 경고: $(tail -n3 <<< "$out" | tr '\n' ' ')"; fi
+else fail "브라우저 실행 파일 없음: $AGENT_BROWSER_EXECUTABLE_PATH"; fi
+if (( HAS_AB )); then
+  if agent-browser skills list 2>/dev/null | grep -q '^ *core '; then pass "agent-browser 버전 일치 가이드 (skills get core)"
+  else fail "agent-browser 가이드 없음: $AGENT_BROWSER_SKILLS_DIR"; fi
+fi
 
 section "4. skill / Git Bash 보정"
 skills=$(find "$OXY_HOME/agent/skills" -name SKILL.md 2>/dev/null | sed 's|/SKILL.md$||; s|.*/||' | sort | tr '\n' ' ')

@@ -5,23 +5,21 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { cp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { CATALOG, readLock } from "./components.mjs";
 
 export const MARKER = ".oxy-install";
 export const WT_PROFILE_NAME = "Oxygen Pi";
 const WT_GUID = "{6f1d3c2a-8b4e-4c7d-9a2f-0e5b7c3d1a90}";
 
 /** 설치 대상으로 복사하지 않는 경로 (번들 루트 기준, 소문자, / 구분). PC별 설정·생성물은 기존 것을 유지 */
-const COPY_EXCLUDE = [".cache", "dist", ".git", "agent/oxy.env", "agent/settings.json", "agent/models.json",
-  "agent/auth.json", "agent/models-store.json", "agent/sessions"];
+const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "agent/oxy.env", "agent/settings.json",
+  "agent/models.json", "agent/auth.json", "agent/models-store.json", "agent/sessions", "agent/skills",
+  "agent/usql.yaml", "agent/dbhub.toml"];
 
-/** 번들에 반드시 있어야 하는 파일 */
-const REQUIRED = [
-  "runtime/node/node.exe",
-  "vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
-  "bin/fd.exe", "bin/rg.exe", "bin/jq.exe", "bin/just.exe", "bin/hurl.exe", "bin/glab.exe", "bin/agent-browser.exe",
-  "vendor/browsers/chrome-win64/chrome.exe", "vendor/agent-browser-skill-data/core/SKILL.md", "runtime/sqlcl/bin/sql",
-  "wrappers/sql", "wrappers/jq", "config/ripgreprc", "agent/templates/models.json",
-  "agent/templates/settings.json", "env.sh", "oxy", "oxy.cmd", "scripts/verify.sh",
+/** 하네스 자체 파일 (구성요소 바이너리 외) */
+const HARNESS_FILES = [
+  "installer/components.mjs", "wrappers/sql", "wrappers/jq", "config/ripgreprc", "agent/templates/models.json",
+  "agent/templates/settings.json", "env.sh", "oxy", "oxy.cmd", "scripts/verify.sh", "manifest/tools.lock.tsv",
 ];
 
 export const toPosix = (p) => p.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
@@ -66,8 +64,10 @@ export function createSystem({ root, sandbox = null }) {
       const major = m[1] === "1" ? Number(m[2]) : Number(m[1]);
       return { ok: major >= 17, major, detail: text.split(/\r?\n/)[0] };
     },
+    /** 번들에 없는 필수 파일: 하네스 파일 + manifest 의 필수(role=required) 구성요소 */
     missingBundleFiles() {
-      return REQUIRED.filter((f) => !existsSync(join(root, f)));
+      const required = readLock(root).filter((e) => e.required).map((e) => CATALOG[e.name]?.check).filter(Boolean);
+      return [...HARNESS_FILES, ...required].filter((f) => !existsSync(join(root, f)));
     },
     version() {
       try { return readFileSync(join(root, "VERSION"), "utf8").trim(); } catch { return "dev"; }
@@ -83,10 +83,12 @@ export function createSystem({ root, sandbox = null }) {
     },
     isSameDir(a, b) { return resolve(a).toLowerCase() === resolve(b).toLowerCase(); },
 
-    async copyBundle(dest, onProgress) {
+    /** extraExclude: 사용자가 고르지 않은 번들 구성요소 (예: runtime/sqlcl, vendor/browsers/chromium) */
+    async copyBundle(dest, onProgress, extraExclude = []) {
+      const skip = [...COPY_EXCLUDE, ...extraExclude.map((e) => e.toLowerCase())];
       const excluded = (src) => {
         const rel = fwd(relative(root, src)).toLowerCase();
-        return rel !== "" && COPY_EXCLUDE.some((e) => rel === e || rel.startsWith(e + "/"));
+        return rel !== "" && skip.some((e) => rel === e || rel.startsWith(e + "/"));
       };
       let total = 0;
       const walk = (d) => {

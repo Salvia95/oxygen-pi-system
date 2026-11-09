@@ -1,50 +1,99 @@
 # oxygen-pi-system
 
 폐쇄망 Windows 11 + Git Bash 환경에서 사내 vLLM(Qwen 계열, 128K)을 사용하는 [pi coding agent](https://pi.dev) 하네스.
-실행에 필요한 Node, pi, CLI 도구, 브라우저를 모두 번들에 포함하며 **실행 중 외부 네트워크 접속을 하지 않는다**.
+**실행 중 외부 네트워크 접속을 하지 않는다.**
+
+이 저장소는 **하네스(pi 설정·extension·skill·스크립트·설치 TUI)만** 제공하고 바이너리는 배포하지 않는다.
+필요한 바이너리는 각 사용자가 인터넷 PC 에서 공식 배포처로부터 **직접 내려받아 번들로 묶은 뒤, 본인이 반입**한다.
+
+```
+[인터넷 PC]  fetch (구성요소 선택 → 직접 다운로드·검증)  →  package (필수 구성요소 검사 → zip)
+                                                                  │  본인이 반입
+[폐쇄망 PC]                                   install.cmd (설치 TUI)  ←┘
+```
 
 ## 구성요소
 
-`manifest/tools.lock.tsv` 에 버전, URL, sha256 이 고정되어 있다. pi 는 npm lockfile(`manifest/pi-package-lock.json`)로 고정한다.
+`manifest/tools.lock.tsv` 에 버전, URL, sha256, 라이선스, 구분(`role`), 계층(`group`)이 고정되어 있다.
+npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정한다. 표시 정보와 skill 연결은 `installer/components.mjs` 의 CATALOG.
 
-| 구성요소 | 위치 | 용도 |
-|---|---|---|
-| Node.js 22 (portable) | `runtime/node` | pi 실행 (시스템 Node 버전과 무관) |
-| pi coding agent | `vendor/pi` | 에이전트 본체 |
-| fd, rg, jq, just, hurl, glab, agent-browser | `bin/` | 에이전트·사용자 공용 CLI |
-| Chrome for Testing | `vendor/browsers/chrome-win64` | agent-browser 전용 브라우저 |
-| SQLcl | `runtime/sqlcl` | Oracle DB 작업 (시스템 Java 17+ 사용) |
+같은 계층 안에서 여러 개를 고를 수 있고, 호환성이 가장 검증된 대안에 **추천** 표시가 붙는다.
 
-전제: 폐쇄망 PC에 **Git for Windows** 와 **Java 17 이상**이 설치되어 있어야 한다.
+| 계층 | 구성요소 | 종류 | 라이선스 | 연결되는 skill |
+|---|---|---|---|---|
+| **core** (필수) | Node.js 22, pi coding agent | 런타임 | MIT | — |
+| | fd, ripgrep | 도구 | Apache-2.0·MIT / Unlicense·MIT | `find-code` |
+| | jq | 도구 | MIT | `json-querying` |
+| **dev-tools** | just | 도구 | CC0-1.0 | `project-task-running` |
+| | hurl | 도구 | Apache-2.0 | `http-api-testing` |
+| **repository** | glab (GitLab) | 도구 | MIT | `gitlab-workflow` |
+| | gh (GitHub / GHE) | 도구 | MIT | `github-workflow` |
+| **internet-browsing** | agent-browser **추천** | 도구 (페이지 조작) | Apache-2.0 | `web-page-automation` |
+| | obscura | 도구 (읽기·수집) + 엔진 | Apache-2.0 | `web-page-reading` |
+| | Chrome for Testing **추천** | 엔진 | Google Chrome 약관 (비오픈소스) | — |
+| | Chromium 오픈소스 빌드 | 엔진 | BSD-3-Clause | — |
+| **database** | usql **추천** | CLI (PostgreSQL·MySQL·SQLite·SQL Server·Oracle 등) | MIT | `sql-querying` |
+| | Oracle SQLcl | CLI (Oracle 전용, Java 17+) | Oracle Free Use T&C (비오픈소스) | `oracle-db-querying` |
+| | dbhub | MCP 커넥터 (pi 도구로 SQL 실행) | MIT | — (연결 설정은 Tweak TUI 예정) |
 
-## 1) 인터넷 PC: 번들 만들기
+- agent-browser 의 브라우저 엔진은 설치 TUI 에서 고른다: Chrome for Testing (추천) / Chromium / obscura / PC 의 Edge·Chrome / 사용 안 함.
+  obscura 를 고르면 `wrappers/agent-browser` 가 obscura CDP 서버를 필요할 때 띄우고 연결한다 (Chrome 대비 약 1/3 용량, 일부 CDP 기능 미지원).
+- usql 의 Oracle 드라이버는 순수 Go 라 Oracle Instant Client 가 필요 없다. SQLcl 은 Oracle 전용 기능(`info`, `ddl` 등)이 필요할 때 추가한다.
+
+전제: 폐쇄망 PC에 **Git for Windows** 가 설치되어 있어야 한다. **Java 17 이상**은 SQLcl 을 쓸 때만 필요하다.
+
+### 구성요소 원칙
+
+- 저장소에는 바이너리를 넣지 않는다. URL·버전·sha256 만 고정하고, 각 사용자가 공식 배포처에서 직접 받는다.
+- `role=required`: 하네스 동작에 필요한 것. fetch 선택 화면에서 **기본 체크(해제 불가)**, 번들링할 때 없으면 실패한다.
+- `role=optional`: 사용자가 필요한 것만 고른다. 반입하지 않으면 verify 는 WARN 으로 알리고 해당 skill 만 쓸 수 없다.
+- 오픈소스가 아닌 라이선스(SQLcl, Chrome for Testing)는 고를 때 약관을 보여 주고 동의를 받는다. 만든 번들은 본인 반입용이다.
+- 다른 런타임에 의존하는 도구(예: agent-browser 의 브라우저)는 설치 TUI 에서 **여러 선택지를 보여 주고, 호환성이 가장 검증된 것에 (추천)** 을 붙인다.
+- 새 바이너리를 추가할 때도 같은 기준을 따른다 (`installer/components.mjs` 의 CATALOG 에 설명·확인 파일 추가).
+
+## 1) 인터넷 PC: 직접 받아서 번들링
 
 ```bash
-bash scripts/fetch-bundle.sh      # lock 기준 다운로드 + sha256 검증
+bash scripts/fetch-bundle.sh      # 선택 화면: 필수 항목은 체크된 채 고정, 나머지는 골라서 (이전 선택 기억)
 source env.sh
-just package                      # → dist/oxygen-pi-YYYYMMDD.zip (+ .sha256)
+just package                      # 필수 구성요소 검사 → dist/oxygen-pi-YYYYMMDD.zip (+ .sha256)
 ```
 
-버전을 올릴 때는 `manifest/tools.lock.tsv` 의 version/url 을 수정하고 `just lock` 을 실행한다.
+비대화형 실행:
+
+```bash
+bash scripts/fetch-bundle.sh --defaults                         # 필수만
+bash scripts/fetch-bundle.sh --select=glab,hurl,agent-browser,chromium
+bash scripts/fetch-bundle.sh --all --accept-license             # 전부 (비오픈소스 약관 동의를 미리 표시)
+bash scripts/package-bundle.sh --check                          # 번들링 전 검사만
+```
+
+- 선택에서 뺀 구성요소가 이전에 받아져 있으면 지운다 (번들에 원치 않는 파일이 들어가지 않도록).
+- 버전을 올릴 때는 `manifest/tools.lock.tsv` 의 version/url 을 수정하고 `--update-lock` 을 붙여 실행한다.
+- 번들에 없는 SQLcl·Chrome for Testing 은 폐쇄망 PC 에서 zip 으로 추가할 수도 있다: 받은 `sqlcl-*.zip` / `chrome-win64.zip` 을
+  `Downloads` 폴더나 번들의 `optional/` 에 두면 설치 TUI 가 찾는다.
 
 ## 2) 폐쇄망 PC: 설치
 
 zip 을 푼 폴더의 **`install.cmd` 를 더블클릭**하면 설치 TUI 가 열린다 (Git Bash 에서는 `./install.sh`).
 
 ```
-1. 점검    Git Bash · Java 17+ · 번들 구성요소
+1. 점검    Git Bash · Java 17+ · 번들의 필수 구성요소
 2. 위치    기본 %LOCALAPPDATA%\Programs\oxygen-pi (또는 현재 폴더 그대로 / 직접 입력)
-3. vLLM    주소·API 키 입력 → /v1/models 로 연결 확인
-4. 모델    코딩 모델 / 범용 모델(선택) 고르기, max_model_len 으로 컨텍스트 자동 입력
-5. GitLab  사내 호스트 (선택)
-6. 등록    PATH · Windows Terminal 'Oxygen Pi' 프로필 · 바탕화면 바로가기
-7. 확인    요약 → 설치 → 자가진단(verify)
+3. 선택    SQLcl: 번들에 있으면 설치 / 직접 받은 zip 지정 (sha256 을 manifest 와 대조) / 설치 안 함
+           브라우저: Chrome for Testing (추천) / Chromium / PC 의 Edge·Chrome / 사용 안 함  (고른 것만 복사)
+4. vLLM    주소·API 키 입력 → /v1/models 로 연결 확인
+5. 모델    코딩 모델 / 범용 모델(선택) 고르기, max_model_len 으로 컨텍스트 자동 입력
+6. GitLab  사내 호스트 (선택)
+7. 등록    PATH · Windows Terminal 'Oxygen Pi' 프로필 · 바탕화면 바로가기
+8. 확인    요약 → 설치 → 자가진단(verify)
 ```
 
 - 방향키·Enter·Space 로 조작하고, **Esc 는 이전 단계**로 돌아간다.
 - 설치 후 다시 실행하면 **설정 변경 / 자가진단 / 업데이트 / 제거** 메뉴가 나온다.
   - 업데이트할 때 `agent/oxy.env` 는 유지된다.
   - 제거할 때 `oxy.env` 는 `%APPDATA%\oxygen-pi\oxy.env.bak` 으로 백업된다.
+- 선택 구성요소를 설치하지 않으면 verify 는 FAIL 이 아니라 WARN 으로 표시한다. 나중에 "설정 변경"에서 추가할 수 있다.
 - 설치 기록은 `%APPDATA%\oxygen-pi\install.json` 에 남는다.
 - 진짜 콘솔이 아닌 환경(파이프 입력, winpty 없는 mintty)에서는 번호를 입력하는 줄 입력 모드로 동작한다.
 - `--sandbox <폴더>` 를 주면 레지스트리(PATH)·바탕화면·AppData 대신 그 폴더에만 기록한다 (체험·테스트용).
@@ -76,7 +125,7 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 - `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, `PI_TELEMETRY=0`, `enableInstallTelemetry=false`
 - `PI_CODING_AGENT_DIR=agent/` : 설정·세션·skill 이 모두 하네스 안에 있음 (`~/.pi` 미사용)
 - `agent/bin/{fd,rg}.exe` : pi 가 GitHub 에서 자동 다운로드하지 않도록 미리 배치
-- `AGENT_BROWSER_EXECUTABLE_PATH` : agent-browser 가 브라우저를 내려받지 않도록 번들 Chrome 지정
+- `AGENT_BROWSER_EXECUTABLE_PATH` : agent-browser 가 브라우저를 내려받지 않도록, 설치할 때 고른 브라우저(`OXY_BROWSER`)를 지정
 - `npm_config_offline=true`
 
 ## 디렉터리
@@ -85,7 +134,7 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 install.cmd, install.sh 설치 TUI 실행 (installer/)
 oxy, oxy.cmd, env.sh   런처 / 환경
 VERSION                하네스 버전 (설치 TUI 배너에 표시)
-wrappers/              Git Bash 보정 래퍼 (sql, jq)
+wrappers/              Git Bash 보정 래퍼 (sql, jq, usql, agent-browser)
 config/                도구 설정 (ripgreprc)
 tests/                 mock vLLM + E2E 점검
 justfile               작업 목록 (just --list)
@@ -94,7 +143,8 @@ scripts/               fetch / package / configure / verify
 agent/                 PI_CODING_AGENT_DIR
   AGENTS.md            전역 규칙 (모델에게 주는 환경 설명)
   templates/           settings.json, models.json 템플릿
-  extensions/ skills/ prompts/
+  extensions/ prompts/
+  skill-library/       skill 원본 (설치된 구성요소의 것만 skills/ 로 켜짐)
 ```
 
 ## 소형 모델용 extension (`agent/extensions/`)
@@ -103,7 +153,7 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 
 | extension | 동작 | 끄기 |
 |---|---|---|
-| `oxy-bash-guard` | 체인 명령을 세그먼트별로 검사. **차단**: 루트/홈/드라이브 삭제, 디스크 포맷, 종료, 패키지 설치(폐쇄망). **확인**: 재귀 삭제, `git push`/`reset --hard` 등, glab 쓰기, DB 변경 SQL(`@script.sql` 내용 포함). 확인 UI 가 없는 `-p` 모드에서는 확인 대상도 차단 | `OXY_BASH_GUARD=off` |
+| `oxy-bash-guard` | 체인 명령을 세그먼트별로 검사. **차단**: 루트/홈/드라이브 삭제, 디스크 포맷, 종료, 패키지 설치(폐쇄망). **확인**: 재귀 삭제, `git push`/`reset --hard` 등, glab·gh 쓰기, DB 변경 SQL(sql·usql, `@script.sql`·`-f` 파일 내용 포함). 확인 UI 가 없는 `-p` 모드에서는 확인 대상도 차단 | `OXY_BASH_GUARD=off` |
 | `oxy-read-before-edit` | 읽지 않았거나 읽은 뒤 디스크에서 바뀐 파일의 edit 차단, 기존 파일 write 는 read 후에만 허용. compaction 후 기록 초기화 | `OXY_READ_BEFORE_EDIT=off` |
 | `oxy-loop-guard` | 텍스트로 쓴 tool call(`<tool_call>` 등) 감지 시 재호출 안내(최대 2회), 빈 응답 1회 재촉, 같은 호출 3번째 차단(파일 수정 시 초기화) | `OXY_LOOP_GUARD=off` (`OXY_REPEAT_LIMIT`) |
 | `oxy-context-budget` | bash/grep/find/ls 출력 12K자, read 40K자 초과 시 앞뒤만 남김. 상태줄에 컨텍스트 사용률 표시, 압축 반복 경고 | `OXY_CONTEXT_BUDGET=off` (`OXY_TOOL_OUTPUT_MAX_CHARS`, `OXY_READ_MAX_CHARS`) |
@@ -112,10 +162,12 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
 `just demo` 는 mock vLLM 으로 pi TUI 를 직접 써 보는 명령이다 (프롬프트에 `scenario:git-push` 등 입력).
 
-## 도구별 skill (`agent/skills/`)
+## 도구별 skill (`agent/skill-library/` → `agent/skills/`)
 
 skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "무엇을 · 언제 쓰는지"를 구체적으로 적는다.
-시스템 프롬프트에는 이름과 설명만 들어가고(7개 합쳐 약 900 토큰), 모델이 필요할 때 SKILL.md 를 read 로 읽는다.
+원본은 `agent/skill-library/` 에 있고, configure 와 설치 TUI 가 **설치된 구성요소의 skill 만** `agent/skills/` 로 켠다
+(브라우저를 "사용 안 함"으로 고르면 `web-page-automation` 도 끈다). `agent/skills/` 에 직접 넣은 사용자 skill 은 건드리지 않는다.
+시스템 프롬프트에는 켜진 skill 의 이름과 설명만 들어가고, 모델이 필요할 때 SKILL.md 를 read 로 읽는다.
 명령과 옵션은 번들 버전의 `--help` 와 실제 실행으로 확인한 것만 넣었다.
 
 | skill | 쓰는 때 (도구) | 핵심 |
@@ -127,8 +179,15 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 | `http-api-testing` | API 호출·응답 확인·API 테스트 작성 (hurl) | `.hurl` 파일 + `--variable`, Asserts/Captures, `--test` |
 | `web-page-automation` | 화면 확인·UI 흐름·폼 제출·스크린샷 (agent-browser) | 세션 이름 필수, snapshot 의 `@ref` 만 사용 |
 | `project-task-running` | 빌드·테스트 명령 찾기·작업 추가 (just) | `just --list` 우선, recipe 작성 규칙 |
+| `github-workflow` | PR·리뷰·이슈·Actions·GitHub API (gh) | `--json --jq`, 쓰기는 승인 후, `--web` 금지, `gh api -f` 는 쓰기 |
+| `sql-querying` | 여러 DB 의 데이터·스키마 조회, .sql 실행 (usql) | 이름 붙은 연결(`agent/usql.yaml`), `-w -q --csv`, DB별 행 수 제한 문법 |
+| `web-page-reading` | 페이지 내용·링크 추출, 여러 페이지 수집 (obscura) | `--dump markdown/text`, `--selector` 는 대기만, 일부 추출은 `scrape --eval` |
 
 환경 쪽 보정:
+- `wrappers/agent-browser`: `OXY_BROWSER=obscura` 이면 obscura CDP 서버를 띄우고 `AGENT_BROWSER_CDP` 로 연결한다.
+- `wrappers/usql`: PC 로컬 연결 설정 `agent/usql.yaml` (git·번들 제외)이 있으면 자동으로 `--config` 로 넘긴다.
+- obscura: 기본은 사설망 주소 접속을 막으므로(SSRF 방지) `OBSCURA_ALLOW_PRIVATE_NETWORK=1` 을 켠다.
+- gh: 업데이트 확인·텔레메트리·진행 애니메이션을 끈다 (`GH_*`).
 - `wrappers/jq`: `jq.exe` 의 CRLF 출력을 막기 위해 `-b`(LF)를 항상 붙인다.
 - `config/ripgreprc`: rg 경로를 `/` 로 출력한다. pi 의 grep 도구는 `--no-config` 라 영향 없음.
 - `wrappers/sql`: SQLcl 에 `-noupdates` 를 붙인다.
@@ -151,6 +210,7 @@ pi 문서상 mintty(기본 Git Bash 창)에서는 화면에 이상한 문자가 
 
 이 저장소의 코드는 [Apache License 2.0](LICENSE) 을 따른다 (저작권 표기: [NOTICE](NOTICE)).
 
-`scripts/fetch-bundle.sh` 가 내려받아 번들에 넣는 서드파티 구성요소(Node.js, pi, fd, ripgrep, jq, just, hurl, glab,
-agent-browser, Chrome for Testing, Oracle SQLcl)는 이 저장소에 포함되지 않으며 각자의 라이선스를 따른다.
-특히 Oracle SQLcl 은 Oracle 의 라이선스 조건이 적용되므로, 번들을 사내에 배포하기 전에 해당 조건을 확인한다.
+이 저장소는 바이너리를 포함하지도 배포하지도 않는다. `scripts/fetch-bundle.sh` 로 각 사용자가 공식 배포처에서 직접 받는
+서드파티 구성요소(Node.js, pi, fd, ripgrep, jq, just, hurl, glab, agent-browser, Chromium, Chrome for Testing, Oracle SQLcl)는
+각자의 라이선스를 따른다. 오픈소스가 아닌 Chrome for Testing 과 Oracle SQLcl 은 받을 때 약관 동의를 받으며,
+이를 포함해 만든 번들은 본인 반입용이다. 다른 사람에게 배포하려면 해당 약관을 따로 확인한다.

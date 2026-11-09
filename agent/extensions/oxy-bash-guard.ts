@@ -74,6 +74,13 @@ const RULES: Rule[] = [
     title: "GitLab 쓰기 작업",
     hint: "The user did not approve this GitLab write operation. Do not retry; ask the user.",
   },
+  {
+    id: "gh-write",
+    level: "ask",
+    test: /^gh\s+(?:pr\s+(?:create|merge|close|reopen|edit|review|comment|ready)|issue\s+(?:create|close|reopen|edit|comment|delete|transfer)|release\s+(?:create|delete|edit|upload)|repo\s+(?:create|delete|archive|rename|edit|fork)|run\s+(?:rerun|cancel|delete)|workflow\s+(?:run|enable|disable)|secret\s+(?:set|delete)|variable\s+(?:set|delete)|api\s+.*(?:(?:-X|--method)[\s=]*(?:POST|PUT|PATCH|DELETE)|\s(?:-F|--field|-f|--raw-field|--input)(?:[\s=]|$)))/i,
+    title: "GitHub 쓰기 작업",
+    hint: "The user did not approve this GitHub write operation. Do not retry; ask the user.",
+  },
 ];
 
 /** SQL 변경문 (sql 호출이 있는 명령 전체 + 참조한 @script.sql 내용에 적용) */
@@ -111,7 +118,7 @@ function normalizeSegment(seg: string): string {
       .replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)\s+/, "")
       .replace(/^(?:sudo|command|builtin|exec|time|nohup|env|nice)\s+(?:-\S+\s+)*/, "")
       .replace(/^xargs\s+(?:-\S+\s+)*/, "")
-      .replace(/^(?:\S*[\\/])?(rm|git|glab|sql|npm|pnpm|yarn|pip3?|dd)(?:\.exe)?(?=\s|$)/i, "$1");
+      .replace(/^(?:\S*[\\/])?(rm|git|glab|gh|u?sql|npm|pnpm|yarn|pip3?|dd)(?:\.exe)?(?=\s|$)/i, "$1");
     if (next === s) return s;
     s = next;
   }
@@ -119,8 +126,13 @@ function normalizeSegment(seg: string): string {
 
 function sqlScriptsText(command: string, cwd: string): string {
   let text = "";
-  for (const m of command.matchAll(/@{1,2}("?)([^\s"]+\.sql)\1/gi)) {
-    try { text += "\n" + readFileSync(resolve(cwd, m[2]), "utf8"); } catch { /* 없는 파일은 무시 */ }
+  // SQLcl: @script.sql / @@script.sql,  usql: -f script.sql / --file script.sql / --file=script.sql
+  const refs = [
+    ...[...command.matchAll(/@{1,2}("?)([^\s"]+\.sql)\1/gi)].map((m) => m[2]),
+    ...[...command.matchAll(/(?:^|\s)(?:-f|--file)(?:\s+|=)("?)([^\s"]+)\1/gi)].map((m) => m[2]),
+  ];
+  for (const f of refs) {
+    try { text += "\n" + readFileSync(resolve(cwd, f), "utf8"); } catch { /* 없는 파일은 무시 */ }
   }
   return text;
 }
@@ -135,7 +147,7 @@ export function inspect(command: string, cwd: string): Finding[] {
       if (rule.test.test(segment)) { findings.push({ rule, segment }); break; }
     }
   }
-  if (segments.some((s) => /^sql(?:\s|$)/i.test(s)) && SQL_WRITE.test(command + sqlScriptsText(command, cwd))) {
+  if (segments.some((s) => /^u?sql(?:\s|$)/i.test(s)) && SQL_WRITE.test(command + sqlScriptsText(command, cwd))) {
     findings.push({
       segment: command.length > 300 ? command.slice(0, 300) + " …" : command,
       rule: {

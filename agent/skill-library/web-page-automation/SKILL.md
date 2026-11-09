@@ -5,7 +5,8 @@ description: Open and operate internal web pages in a headless Chrome with `agen
 
 # Browser automation (agent-browser)
 
-`agent-browser` is pre-installed with a bundled Chrome. Only internal sites and localhost are reachable.
+`agent-browser` is pre-installed. The browser it uses is chosen at install time (`OXY_BROWSER`: Chrome for Testing, Chromium, Edge, or Chrome).
+If `echo "$OXY_BROWSER"` prints `none`, browser automation is turned off: tell the user instead of trying. Only internal sites and localhost are reachable.
 
 ## Rules
 

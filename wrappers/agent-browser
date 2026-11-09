@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# agent-browser 래퍼
+# - OXY_BROWSER=obscura 이면 obscura 의 CDP 서버(obscura serve)를 확인하고, 없으면 띄운 뒤 AGENT_BROWSER_CDP 로 연결한다.
+#   pi 의 bash 도구는 명령마다 셸이 끝나므로 서버는 분리(detached) 프로세스로 띄운다.
+# - 그 밖의 엔진(Chrome for Testing, Chromium, Edge, Chrome)은 env.sh 가 AGENT_BROWSER_EXECUTABLE_PATH 를 지정한다.
+HOME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN="$HOME_DIR/bin"
+
+# 브라우저가 필요 없는 명령(버전·도움말·가이드·진단·세션 이름)에는 obscura 서버를 띄우지 않는다
+needs_browser=1
+args=("$@"); i=0
+while (( i < ${#args[@]} )); do
+  a="${args[i]}"
+  case "$a" in
+    -V|--version|-h|--help) needs_browser=0; break ;;
+    # 값을 받는 전역 옵션: 다음 인자(값)까지 건너뛴다
+    --session|--profile|--state|--cdp|--cdp-headers|--args|--user-agent|--proxy|--proxy-bypass|--executable-path|\
+    --screenshot-dir|--screenshot-quality|--screenshot-format|--download-path|--allowed-domains|--max-output|--color-scheme)
+      i=$((i + 2)); continue ;;
+    -*) i=$((i + 1)); continue ;;
+    skills|doctor|install|session|help) needs_browser=0; break ;;
+    *) break ;;   # 첫 명령어 (open, snapshot, click ...)
+  esac
+done
+
+if [[ "${OXY_BROWSER:-}" == obscura && $needs_browser == 1 ]]; then
+  port="${OXY_OBSCURA_PORT:-9233}"
+  up() { curl -fs -m 2 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1; }
+  if ! up; then
+    node="${OXY_NODE:-$HOME_DIR/runtime/node/node.exe}"
+    "$node" -e '
+      const { spawn } = require("child_process");
+      spawn(process.argv[1], ["serve", "-p", process.argv[2]], {
+        detached: true, stdio: "ignore", windowsHide: true,
+        env: { ...process.env, OBSCURA_ALLOW_PRIVATE_NETWORK: "1" },
+      }).unref();' "$(cygpath -w "$BIN/obscura.exe")" "$port"
+    for _ in $(seq 50); do up && break; sleep 0.1; done
+    up || { echo "[agent-browser] obscura CDP 서버를 띄우지 못했습니다 (port $port)" >&2; exit 1; }
+  fi
+  export AGENT_BROWSER_CDP="$port"
+fi
+
+exec "$BIN/agent-browser.exe" "$@"

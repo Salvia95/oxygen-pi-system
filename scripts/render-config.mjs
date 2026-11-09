@@ -15,14 +15,21 @@ export function parseEnv(text) {
   for (const line of text.split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
     if (!m) continue;
-    out[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
+    const v = m[2];
+    out[m[1]] = /^'.*'$/.test(v) ? v.slice(1, -1).replace(/'\\''/g, "'") : v.replace(/^"(.*)"$/, "$1");
   }
   return out;
 }
 
+/** env 파일은 bash 가 source 하므로 공백·괄호 등이 있는 값은 작은따옴표로 감싼다 */
+export function quoteEnv(v) {
+  const s = String(v ?? "");
+  return /^[A-Za-z0-9_./:@%+,=-]*$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 /** 기존 env 파일 내용을 유지하면서 updates 의 키만 바꾸거나 추가한다 (주석, 기타 키 보존) */
 export function mergeEnv(text, updates) {
-  const pending = new Map(Object.entries(updates));
+  const pending = new Map(Object.entries(updates).map(([k, v]) => [k, quoteEnv(v)]));
   const lines = text.split(/\r?\n/).map((line) => {
     const m = line.match(/^\s*#?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
     if (!m || !pending.has(m[1])) return line;
