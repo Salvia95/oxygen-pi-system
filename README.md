@@ -121,7 +121,8 @@ bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
 | 항목 | 내용 |
 |---|---|
 | vLLM 주소 · API 키 | 연결 확인 후 저장. 지금 모델이 새 서버에 없으면 이어서 모델을 고른다 |
-| 모델 · 컨텍스트 | vLLM 의 모델 목록에서 코딩·범용 모델과 컨텍스트 길이 (연결이 안 되면 직접 입력) |
+| 모델 · 계열 · 컨텍스트 | vLLM 의 모델 목록에서 코딩·범용 모델, 각 모델의 계열(id 로 추정한 값이 기본), 컨텍스트 길이 (연결이 안 되면 직접 입력) |
+| 엔드포인트 세부 설정 | 요청에서 뺄 확장 파라미터, 거부됐을 때 재시도 횟수, 응답 최대 토큰 — 값 하나씩 |
 | GitLab 호스트 · 브라우저 (agent-browser) · Oracle SQLcl · 시스템 등록 | 각각 단독으로 변경 (브라우저는 agent-browser 를 반입한 경우만) |
 | DB 연결 | PostgreSQL · MySQL · MariaDB · SQL Server · Oracle · SQLite 연결 추가·편집·연결 시험·삭제. 연결마다 **usql**(CLI) / **dbhub**(pi MCP 도구) 중 쓸 도구와 읽기 전용 여부를 고른다 |
 | extension 켜기/끄기 | 안전장치·작업 기록·백그라운드 작업 등 |
@@ -156,10 +157,23 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 `just verify` 가 `/v1/models` 조회와 tool call 왕복, 그리고 pi 가 보내는 샘플링 파라미터를 서버가 받는지 실제로 시험한다.
 
 **앞단 게이트웨이 · 다른 OpenAI 호환 엔드포인트**: vLLM 확장 파라미터(`top_k`, `repetition_penalty`, `min_p`,
-thinking 제어용 `chat_template_kwargs`)를 400 `property '…' is unsupported` 로 거부하는 곳이 있다.
+thinking 제어용 `chat_template_kwargs`·`reasoning_effort`)를 400 `property '…' is unsupported` 로 거부하는 곳이 있다.
 설치 TUI·Tweak 의 vLLM 단계가 1토큰 요청으로 하나씩 시험해서 거부된 것만 `OXY_VLLM_DROP_PARAMS` 에 적고 요청에서 뺀다.
 
-외부망에서 Groq 같은 사용량 제한 엔드포인트로 시험할 때는 `agent/oxy.env` 에 다음을 더한다 (사내 vLLM 에는 필요 없음).
+**모델 계열**: 모델마다 thinking(추론) 제어 방식과 권장 샘플링 값이 다르다. 설치 TUI·Tweak 의 모델 단계에서 고르고(id 로 추정한 값이 기본),
+`OXY_MODEL_CODER_FAMILY` · `OXY_MODEL_GENERAL_FAMILY` 에 기록된다. 모델 설정은 `scripts/render-config.mjs` 의 `MODEL_FAMILIES` 프리셋 하나에서 나온다.
+
+| 계열 | thinking 제어 | 샘플링 |
+|---|---|---|
+| `qwen-coder` | 없음 | temperature 0.7 · top_p 0.8 · top_k 20 · repetition_penalty 1.05 |
+| `qwen-thinking` | `chat_template_kwargs.enable_thinking` (vLLM `--reasoning-parser qwen3`) | 0.6 · 0.95 · top_k 20, thinking 끔: 0.7 · 0.8 |
+| `gpt-oss` | `reasoning_effort` (끌 수 없어 off 는 low) | temperature 1.0 · top_p 1.0 |
+| `generic` | 없음 | temperature 0.7 |
+
+서버가 그 계열의 thinking 제어 파라미터를 거부하면 thinking 제어 없이 쓴다 (모델 이름에 "thinking 제어 없음" 표시).
+
+**사용량 제한이 있는 엔드포인트** (외부망 시험용 Groq 등): vLLM 단계가 응답 헤더(`x-ratelimit-limit-tokens`)로 분당 토큰 한도를 보고,
+30,000 이하이면 맞춤 설정(재시도 · 응답 상한 · subagent 동시 실행 1)을 제안한다. 직접 맞출 때는 Tweak 의 "엔드포인트 세부 설정" 또는 `agent/oxy.env`:
 Groq 무료 등급은 분당 입력 7,000 · 출력 1,000 토큰이라, 하네스 요청(약 5,000토큰) 기준으로 1분에 한 번 정도만 보낼 수 있다.
 
 | 설정 | 이유 |

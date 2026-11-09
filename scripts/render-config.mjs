@@ -57,15 +57,54 @@ function substitute(template, vars, name) {
  * OpenAI 표준이 아닌 vLLM 확장 파라미터. vLLM 은 받지만, 앞단 게이트웨이(LiteLLM 등)가 거부하는 경우가 있다.
  * 설치 TUI·Tweak 의 vLLM 단계가 하나씩 시험해서, 거부된 것만 OXY_VLLM_DROP_PARAMS 에 적는다.
  */
-export const VLLM_EXTRA_PARAMS = ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs"];
+export const VLLM_EXTRA_PARAMS = ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs", "reasoning_effort"];
+
+/**
+ * 모델 계열 프리셋: thinking(추론) 제어 방식과 권장 샘플링 값. models.json 의 모델마다 OXY_MODEL_<CODER|GENERAL>_FAMILY 로 고른다.
+ *   qwen-coder    : Qwen Coder 계열, thinking 없음
+ *   qwen-thinking : Qwen3 하이브리드 thinking — chat_template_kwargs.enable_thinking 으로 켜고 끔 (vLLM --reasoning-parser qwen3)
+ *   gpt-oss       : OpenAI gpt-oss — reasoning_effort (끌 수 없으므로 off 는 low 로 보냄)
+ *   generic       : 그 밖의 OpenAI 호환 모델 — thinking 제어 없음, temperature 만
+ */
+export const MODEL_FAMILIES = {
+  "qwen-coder": { label: "Qwen Coder (thinking 없음)", preset: {
+    reasoning: false, samplingParams: { temperature: 0.7, top_p: 0.8, top_k: 20, repetition_penalty: 1.05 } } },
+  "qwen-thinking": { label: "Qwen3 하이브리드 thinking (chat_template_kwargs)", preset: {
+    reasoning: true, compat: { thinkingFormat: "qwen-chat-template" },
+    samplingParams: { temperature: 0.6, top_p: 0.95, top_k: 20 },
+    samplingParamsByThinkingLevel: { off: { temperature: 0.7, top_p: 0.8 } } } },
+  "gpt-oss": { label: "OpenAI gpt-oss (reasoning_effort)", preset: {
+    reasoning: true, compat: { supportsReasoningEffort: true },
+    thinkingLevelMap: { off: "low", minimal: "low", low: "low", medium: "medium", high: "high" },
+    samplingParams: { temperature: 1.0, top_p: 1.0 } } },
+  generic: { label: "기타 OpenAI 호환 모델 (thinking 제어 없음)", preset: {
+    reasoning: false, samplingParams: { temperature: 0.7 } } },
+};
+
+/** 모델 id 로 계열 추정 (설치 TUI 의 기본 선택값, 계열을 적지 않은 기존 설치의 기본값) */
+export function detectFamily(id) {
+  const s = String(id ?? "").toLowerCase();
+  if (/gpt-oss/.test(s)) return "gpt-oss";
+  if (/qwen/.test(s)) return /coder/.test(s) ? "qwen-coder" : "qwen-thinking";
+  return "generic";
+}
 
 /**
  * vars.OXY_VLLM_DROP_PARAMS (쉼표 구분) 에 든 파라미터를 요청에서 뺀다.
  *   top_k · repetition_penalty · min_p → samplingParams 에서 삭제
- *   chat_template_kwargs → 범용 모델의 thinking 제어를 보내지 않는다 (reasoning:false, thinking 끈 상태의 샘플링 사용)
+ *   chat_template_kwargs / reasoning_effort → 그 방식으로 thinking 을 제어하는 모델은 thinking 제어를 끈다
+ *     (reasoning:false, thinking 끈 상태의 샘플링 사용)
  */
 export function dropList(vars = {}) {
   return String(vars.OXY_VLLM_DROP_PARAMS ?? "").split(/[\s,]+/).filter((k) => VLLM_EXTRA_PARAMS.includes(k));
+}
+
+function applyFamily(m, family) {
+  const f = MODEL_FAMILIES[family];
+  if (!f) return;
+  for (const k of ["reasoning", "compat", "samplingParams", "samplingParamsByThinkingLevel", "thinkingLevelMap"]) delete m[k];
+  Object.assign(m, structuredClone(f.preset));
+  m.name = `${m.id} (${family})`;
 }
 
 function cleanModels(json, vars = {}) {
@@ -77,17 +116,26 @@ function cleanModels(json, vars = {}) {
     const seen = new Set();
     p.models = p.models.filter((m) => m.id && !seen.has(m.id) && seen.add(m.id));
     for (const m of p.models) {
+      // 계열: 명시한 값 → 없으면 id 로 추정 (템플릿 순서: 코딩 모델, 범용 모델)
+      const role = m.id === vars.OXY_MODEL_CODER ? "coder" : "general";
+      const fam = (role === "coder" ? vars.OXY_MODEL_CODER_FAMILY : vars.OXY_MODEL_GENERAL_FAMILY) || detectFamily(m.id);
+      applyFamily(m, fam);
       if (Number.isInteger(cap) && cap > 0 && m.maxTokens > cap) m.maxTokens = cap;
       for (const k of drop) {
         delete m.samplingParams?.[k];
         for (const lv of Object.values(m.samplingParamsByThinkingLevel ?? {})) delete lv[k];
       }
-      if (drop.includes("chat_template_kwargs") && m.compat?.thinkingFormat) {
+      const thinkingParam = m.compat?.thinkingFormat === "qwen-chat-template" ? "chat_template_kwargs"
+        : m.compat?.supportsReasoningEffort ? "reasoning_effort" : null;
+      if (thinkingParam && drop.includes(thinkingParam)) {
         delete m.compat.thinkingFormat;
+        delete m.compat.supportsReasoningEffort;
         if (!Object.keys(m.compat).length) delete m.compat;
         m.reasoning = false;
+        delete m.thinkingLevelMap;
         if (m.samplingParamsByThinkingLevel?.off) m.samplingParams = { ...m.samplingParams, ...m.samplingParamsByThinkingLevel.off };
         delete m.samplingParamsByThinkingLevel;
+        m.name += " · thinking 제어 없음";
       }
     }
   }

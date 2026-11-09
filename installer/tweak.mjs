@@ -15,7 +15,7 @@ import { CATALOG, GROUPS, OPTIONAL, enabledSkills, hasComponent, isInstalled, re
 import { DB_TYPES, ID_RE, loadConnections, probeConnection, saveConnections, secretKey } from "./connections.mjs";
 import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
 
-const { parseEnv, mergeEnv } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
+const { parseEnv, mergeEnv, VLLM_EXTRA_PARAMS, detectFamily } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
 const AGENT = join(ROOT, "agent");
 const ENV_FILE = join(AGENT, "oxy.env");
 
@@ -297,12 +297,46 @@ const items = {
     }
     return r;
   } },
-  model: { title: "모델 · 컨텍스트", run: async (state) => { await withModels(state); return stepModel(state); } },
+  model: { title: "모델 · 계열 · 컨텍스트", run: async (state) => { await withModels(state); return stepModel(state); } },
   gitlab: { title: "GitLab 호스트", run: (state) => stepGitlab(state) },
   browser: { title: "브라우저 (agent-browser)", run: (state) => stepBrowser(state) },
   sqlcl: { title: "Oracle SQLcl", run: (state) => stepSqlcl(state) },
   integrations: { title: "시스템 등록", run: async (state) => ((await stepIntegrate(state)) === BACK ? BACK : "integrations") },
 };
+
+/** 엔드포인트 세부 설정: 값 하나씩 바꾸고 바로 설정(models.json · settings.json)을 다시 만든다 */
+async function endpointMenu() {
+  for (;;) {
+    ui.frame = frame("엔드포인트 세부 설정");
+    const { text, env } = readEnv();
+    const drop = String(env.OXY_VLLM_DROP_PARAMS ?? "").split(/[\s,]+/).filter(Boolean);
+    const k = await ui.select("바꿀 값", [
+      { label: "요청에서 뺄 파라미터", value: "drop", hint: drop.join(", ") || "없음 (모두 보냄)" },
+      { label: "거부됐을 때 재시도 횟수", value: "retries", hint: env.OXY_PROVIDER_RETRIES ? `${env.OXY_PROVIDER_RETRIES}회` : "0 (재시도 안 함)" },
+      { label: "응답 최대 토큰", value: "maxout", hint: env.OXY_MAX_OUTPUT_TOKENS || "모델 기본값" },
+      { label: "← 뒤로", value: "__back" },
+    ], { note: c.gray("  'vLLM 주소 · API 키' 항목이 서버에 시험해서 자동으로 정하는 값입니다. 사용량 제한이 있는 엔드포인트에서 직접 맞출 때 씁니다.") });
+    if (k === BACK || k === "__back") return;
+    let updates = null;
+    if (k === "drop") {
+      const v = await ui.multiselect("요청에서 뺄 파라미터 (서버가 거부하는 것)", VLLM_EXTRA_PARAMS.map((p) => ({ label: p, value: p, checked: drop.includes(p),
+        hint: p === "chat_template_kwargs" ? "Qwen thinking 켜고 끄기" : p === "reasoning_effort" ? "gpt-oss 추론 강도" : "vLLM 샘플링 확장" })));
+      if (v !== BACK) updates = { OXY_VLLM_DROP_PARAMS: v.join(",") };
+    } else if (k === "retries") {
+      const v = await ui.input("거부됐을 때 재시도 횟수", { initial: env.OXY_PROVIDER_RETRIES ?? "0",
+        hint: "429 등에서 서버가 알려 준 시간만큼 기다렸다 다시 보냅니다. 사내 vLLM 은 보통 0", validate: (s) => (/^\d{1,2}$/.test(s) ? null : "0~99") });
+      if (v !== BACK) updates = { OXY_PROVIDER_RETRIES: v === "0" ? "" : v };
+    } else if (k === "maxout") {
+      const v = await ui.input("응답 최대 토큰 (비우면 모델 기본값)", { initial: env.OXY_MAX_OUTPUT_TOKENS ?? "",
+        hint: "분당 출력 토큰 제한보다 작게 둡니다", validate: (s) => (s === "" || (/^\d+$/.test(s) && Number(s) >= 256) ? null : "256 이상의 숫자 또는 빈칸") });
+      if (v !== BACK) updates = { OXY_MAX_OUTPUT_TOKENS: v };
+    }
+    if (!updates) continue;
+    writeFileSync(ENV_FILE, mergeEnv(text, updates));
+    const { reg } = registry();
+    try { writeSiteConfig(ROOT, { ...stateFromInstall(reg), installDir: ROOT }); } catch (e) { await notice(`${c.red("✖")} 설정 생성 실패: ${e.message}`); }
+  }
+}
 
 /** 설치된 구성요소와 켜진 skill (읽기 전용) */
 async function componentsView() {
@@ -351,7 +385,8 @@ async function main() {
     const onCount = EXTENSIONS.filter((e) => isOn(env, e)).length;
     const menu = [
       { label: "vLLM 주소 · API 키", value: "vllm", hint: gray(env.OXY_VLLM_BASE_URL) },
-      { label: "모델 · 컨텍스트", value: "model", hint: `${env.OXY_MODEL_CODER ?? "?"}${env.OXY_MODEL_GENERAL ? ` + ${env.OXY_MODEL_GENERAL}` : ""} · ${Math.round(Number(env.OXY_CONTEXT_WINDOW || 0) / 1024)}K` },
+      { label: "모델 · 계열 · 컨텍스트", value: "model", hint: `${env.OXY_MODEL_CODER ?? "?"} (${env.OXY_MODEL_CODER_FAMILY || detectFamily(env.OXY_MODEL_CODER)})${env.OXY_MODEL_GENERAL ? ` + ${env.OXY_MODEL_GENERAL} (${env.OXY_MODEL_GENERAL_FAMILY || detectFamily(env.OXY_MODEL_GENERAL)})` : ""} · ${Math.round(Number(env.OXY_CONTEXT_WINDOW || 0) / 1024)}K` },
+      { label: "엔드포인트 세부 설정", value: "endpoint", hint: [env.OXY_VLLM_DROP_PARAMS && `뺀 파라미터 ${env.OXY_VLLM_DROP_PARAMS.split(",").length}개`, env.OXY_PROVIDER_RETRIES && `재시도 ${env.OXY_PROVIDER_RETRIES}회`, env.OXY_MAX_OUTPUT_TOKENS && `응답 최대 ${env.OXY_MAX_OUTPUT_TOKENS}`].filter(Boolean).join(" · ") || "기본값" },
       { label: "GitLab 호스트", value: "gitlab", hint: gray(env.GITLAB_HOST) },
       ...(hasComponent("agent-browser", ROOT) ? [{ label: "브라우저 (agent-browser)", value: "browser", hint: gray(env.OXY_BROWSER) }] : []),
       ...(hasComponent("sqlcl", ROOT) || OPTIONAL.sqlcl ? [{ label: "Oracle SQLcl", value: "sqlcl", hint: isInstalled("sqlcl", ROOT) ? "설치됨" : c.gray("설치 안 됨") }] : []),
@@ -371,6 +406,7 @@ async function main() {
     else if (v === "db") await dbMenu();
     else if (v === "ext") await extensionMenu();
     else if (v === "limits") await limitsMenu();
+    else if (v === "endpoint") await endpointMenu();
     else if (v === "components") await componentsView();
     else if (v === "verify") await verifyNow();
   }

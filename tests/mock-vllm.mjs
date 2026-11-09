@@ -85,8 +85,8 @@ http.createServer((req, res) => {
     }
     const base = { id: "mock-1", object: "chat.completion.chunk", created: 0, model: body.model };
 
-    if (!body.stream) { // verify.sh 의 비스트리밍 tool call 점검
-      res.writeHead(200, { "content-type": "application/json" });
+    if (!body.stream) { // verify.sh 의 비스트리밍 tool call 점검 · 설치 TUI 의 파라미터 시험
+      res.writeHead(200, { "content-type": "application/json", ...(process.env.MOCK_TPM ? { "x-ratelimit-limit-tokens": process.env.MOCK_TPM } : {}) });
       return res.end(JSON.stringify({ ...base, object: "chat.completion", choices: [{ index: 0, finish_reason: "tool_calls",
         message: { role: "assistant", content: null, tool_calls: [{ id: "call_0", type: "function",
           function: { name: body.tools?.[0]?.function?.name ?? "ping", arguments: "{}" } }] } }] }));

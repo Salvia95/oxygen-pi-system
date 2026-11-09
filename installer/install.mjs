@@ -13,7 +13,7 @@ const argSandbox = (() => { const i = process.argv.indexOf("--sandbox"); return 
 const sys = createSystem({ root: ROOT, sandbox: argSandbox ?? process.env.OXY_INSTALLER_SANDBOX ?? null });
 const VERSION = sys.version();
 const ui = new UI();
-const { parseEnv, mergeEnv, renderConfig } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
+const { parseEnv, mergeEnv, renderConfig, MODEL_FAMILIES, detectFamily } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
 
 const ok = (s) => `${c.green("✔")} ${s}`;
 const bad = (s) => `${c.red("✖")} ${s}`;
@@ -272,7 +272,14 @@ async function fetchModels(baseUrl, apiKey) {
 }
 
 /** 확장 파라미터마다 시험할 값 */
-const PROBE_VALUES = { top_k: 20, repetition_penalty: 1.05, min_p: 0, chat_template_kwargs: { enable_thinking: false } };
+const PROBE_VALUES = { top_k: 20, repetition_penalty: 1.05, min_p: 0, chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "low" };
+
+/** 사용량 제한(분당 토큰)이 이 값 이하인 엔드포인트에는 맞춤 설정을 제안한다 (사내 vLLM 은 보통 헤더가 없다) */
+const RATE_LIMITED_TPM = 30000;
+/** 분당 토큰 한도에 맞춘 설정: 서버가 알려 준 대기 후 재시도 · 응답 상한 · subagent 동시 실행 1 */
+export function endpointPreset(tpm) {
+  return { retries: 4, maxOut: Math.max(512, Math.min(4096, Math.floor(tpm / 8))), concurrency: 1 };
+}
 
 /**
  * 서버(또는 앞단 게이트웨이)가 vLLM 확장 파라미터를 받는지 1토큰 요청으로 하나씩 시험한다.
@@ -285,11 +292,12 @@ async function probeParams(baseUrl, apiKey, model) {
       headers: { Authorization: `Bearer ${apiKey || "EMPTY"}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], max_tokens: 1, ...extra }),
     });
-    return { status: r.status, text: r.ok ? "" : (await r.text()).slice(0, 200) };
+    const tpm = Number(r.headers.get("x-ratelimit-limit-tokens")) || null;
+    return { status: r.status, text: r.ok ? "" : (await r.text()).slice(0, 200), tpm };
   };
   try {
     const base = await call({});
-    if (base.status >= 300) return { results: null, drop: [], detail: `기본 요청 HTTP ${base.status} ${base.text}` };
+    if (base.status >= 300) return { results: null, drop: [], detail: `기본 요청 HTTP ${base.status} ${base.text}`, tpm: base.tpm };
     const results = {};
     const errors = [];
     for (const [k, v] of Object.entries(PROBE_VALUES)) {
@@ -297,7 +305,7 @@ async function probeParams(baseUrl, apiKey, model) {
       results[k] = r.status < 300;
       if (!results[k]) errors.push(r.text);
     }
-    return { results, drop: Object.keys(results).filter((k) => !results[k]), detail: errors[0] ?? "" };
+    return { results, drop: Object.keys(results).filter((k) => !results[k]), detail: errors[0] ?? "", tpm: base.tpm };
   } catch (e) {
     return { results: null, drop: [], detail: e.cause?.code ?? e.message };
   }
@@ -336,6 +344,19 @@ async function stepVllm(state) {
         ...(p.results && p.detail ? ["  " + c.gray(`  ${p.detail}`)] : []),
       ].join("\n"));
       await ui.pause();
+      // 사용량 제한이 있는 엔드포인트 (응답 헤더 x-ratelimit-limit-tokens) → 맞춤 설정 제안
+      if (p.tpm && p.tpm <= RATE_LIMITED_TPM) {
+        const preset = endpointPreset(p.tpm);
+        const v = await ui.select(`사용량 제한이 있는 엔드포인트입니다 (분당 ${p.tpm.toLocaleString()} 토큰)`, [
+          { label: "제한에 맞춘 설정 적용 (권장)", value: "apply" },
+          { label: "설정 바꾸지 않음", value: "keep" },
+        ], { back: false, note: [
+          c.gray("  제한을 넘으면 요청이 거부됩니다. 적용하면 다음과 같이 맞춥니다 (Tweak 의 '엔드포인트 세부 설정'에서 바꿀 수 있음)."),
+          c.gray(`    · 거부되면 서버가 알려 준 시간만큼 기다렸다 재시도 ${preset.retries}회`),
+          c.gray(`    · 응답 최대 ${preset.maxOut} 토큰   · subagent 동시 실행 ${preset.concurrency}개`),
+        ].join("\n") });
+        if (v === "apply") state.endpoint = preset;
+      }
       return "next";
     } catch (e) {
       const choice = await ui.select("vLLM 에 연결하지 못했습니다", [
@@ -379,6 +400,20 @@ async function stepModel(state) {
   });
   if (ctx === BACK) return stepModel(state);
   state.contextWindow = Number(ctx);
+
+  // 모델 계열: thinking 제어 방식과 권장 샘플링 값이 정해진다 (id 로 추정한 값이 기본 선택)
+  for (const [role, id] of [["coder", state.coder], ["general", state.general]]) {
+    if (!id) continue;
+    const key = role === "coder" ? "coderFamily" : "generalFamily";
+    const detected = detectFamily(id);
+    const opts = Object.entries(MODEL_FAMILIES).map(([k, f]) => ({ label: f.label, value: k, hint: k === detected ? "id 로 추정" : "" }));
+    const fam = await ui.select(`${id} 의 모델 계열`, opts, {
+      initial: Math.max(0, opts.findIndex((o) => o.value === (state[key] ?? detected))),
+      note: c.gray("  thinking(추론) 을 켜고 끄는 방식과 권장 샘플링 값이 계열마다 다릅니다."),
+    });
+    if (fam === BACK) return stepModel(state);
+    state[key] = fam;
+  }
   return "next";
 }
 
@@ -415,7 +450,10 @@ function summary(state) {
     row("vLLM", state.baseUrl),
     row("API 키", state.apiKey === "EMPTY" ? c.gray("없음") : "•".repeat(8)),
     row("코딩 모델", state.coder),
+    row("코딩 모델 계열", state.coderFamily ?? detectFamily(state.coder)),
     row("범용 모델", state.general || c.gray("사용 안 함")),
+    ...(state.general ? [row("범용 모델 계열", state.generalFamily ?? detectFamily(state.general))] : []),
+    ...(state.endpoint ? [row("사용량 제한", `재시도 ${state.endpoint.retries}회 · 응답 최대 ${state.endpoint.maxOut ?? "모델 기본"} 토큰`)] : []),
     row("컨텍스트", `${state.contextWindow} 토큰`),
     row("GitLab", state.gitlabHost || c.gray("건너뜀")),
     ...(state.sqlcl ? [row("SQLcl", { keep: "설치된 것 유지", bundle: "번들에 포함된 것 설치", skip: c.gray("설치 안 함"), install: `설치  ${c.gray(state.sqlcl.archive ?? "")}` }[state.sqlcl.action])] : []),
@@ -443,6 +481,13 @@ function writeSiteConfig(installDir, state) {
     OXY_MODEL_CODER: state.coder, OXY_MODEL_GENERAL: state.general ?? "", OXY_DEFAULT_MODEL: state.defaultModel,
     OXY_CONTEXT_WINDOW: String(state.contextWindow),
     ...(state.dropParams ? { OXY_VLLM_DROP_PARAMS: state.dropParams.join(",") } : {}),
+    ...(state.coderFamily ? { OXY_MODEL_CODER_FAMILY: state.coderFamily } : {}),
+    ...(state.generalFamily && state.general ? { OXY_MODEL_GENERAL_FAMILY: state.generalFamily } : {}),
+    ...(state.endpoint ? {
+      OXY_PROVIDER_RETRIES: String(state.endpoint.retries ?? 0),
+      OXY_MAX_OUTPUT_TOKENS: state.endpoint.maxOut ? String(state.endpoint.maxOut) : "",
+      ...(state.endpoint.concurrency ? { OXY_LLM_MAX_CONCURRENT: String(state.endpoint.concurrency) } : {}),
+    } : {}),
     ...(state.gitlabHost ? { GITLAB_HOST: state.gitlabHost } : {}),
     // 번들 안의 브라우저(chrome-for-testing, chromium)는 env.sh 가 OXY_HOME 기준으로 경로를 계산한다
     ...(state.browser ? { OXY_BROWSER: state.browser.id, OXY_BROWSER_PATH: (state.browser.path ?? "").replace(/\\/g, "/") } : {}),
@@ -537,6 +582,11 @@ function stateFromInstall(reg) {
     general: env.OXY_MODEL_GENERAL ?? "", defaultModel: env.OXY_DEFAULT_MODEL,
     contextWindow: Number(env.OXY_CONTEXT_WINDOW) || 131072, gitlabHost: env.GITLAB_HOST,
     ...(env.OXY_VLLM_DROP_PARAMS != null ? { dropParams: env.OXY_VLLM_DROP_PARAMS.split(/[\s,]+/).filter(Boolean) } : {}),
+    ...(env.OXY_MODEL_CODER_FAMILY ? { coderFamily: env.OXY_MODEL_CODER_FAMILY } : {}),
+    ...(env.OXY_MODEL_GENERAL_FAMILY ? { generalFamily: env.OXY_MODEL_GENERAL_FAMILY } : {}),
+    ...(env.OXY_PROVIDER_RETRIES || env.OXY_MAX_OUTPUT_TOKENS ? { endpoint: {
+      retries: Number(env.OXY_PROVIDER_RETRIES) || 0, maxOut: Number(env.OXY_MAX_OUTPUT_TOKENS) || null,
+      concurrency: Number(env.OXY_LLM_MAX_CONCURRENT) || null } } : {}),
     integrations: reg.integrations ?? [],
     ...(env.OXY_BROWSER ? { browser: { id: env.OXY_BROWSER, path: env.OXY_BROWSER_PATH ?? "" } } : {}),
   };

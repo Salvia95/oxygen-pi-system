@@ -214,10 +214,13 @@ test("models.json: 서버가 거부한 vLLM 확장 파라미터만 뺀다 (OXY_V
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = mkdtempSync(join(tmpdir(), "oxyrc-"));
-  const vars = { OXY_VLLM_BASE_URL: "http://x/v1", OXY_MODEL_CODER: "c", OXY_MODEL_GENERAL: "g", OXY_DEFAULT_MODEL: "c", OXY_CONTEXT_WINDOW: "131072", OXY_SHELL_PATH: "C:/bash.exe" };
+  const vars = { OXY_VLLM_BASE_URL: "http://x/v1", OXY_MODEL_CODER: "qwen3.6-coder-30b", OXY_MODEL_GENERAL: "qwen3.8-27b", OXY_DEFAULT_MODEL: "qwen3.6-coder-30b", OXY_CONTEXT_WINDOW: "131072", OXY_SHELL_PATH: "C:/bash.exe" };
+  // c = 코딩 모델, g = 범용 모델
   const models = (extra: Record<string, string>) => {
-    renderConfig(dir, { ...vars, ...extra });
-    return Object.fromEntries(JSON.parse(readFileSync(join(dir, "models.json"), "utf8")).providers["oxy-vllm"].models.map((m: any) => [m.id, m]));
+    const v = { ...vars, ...extra };
+    renderConfig(dir, v);
+    const list = JSON.parse(readFileSync(join(dir, "models.json"), "utf8")).providers["oxy-vllm"].models;
+    return { c: list.find((m: any) => m.id === v.OXY_MODEL_CODER), g: list.find((m: any) => m.id === v.OXY_MODEL_GENERAL) };
   };
   try {
     cpSync(join(import.meta.dirname, "..", "agent", "templates"), join(dir, "templates"), { recursive: true });
@@ -241,7 +244,32 @@ test("models.json: 서버가 거부한 vLLM 확장 파라미터만 뺀다 (OXY_V
     assert.equal(st().retry.provider.maxRetries ?? 0, 0);
     models({ OXY_PROVIDER_RETRIES: "4" });
     assert.equal(st().retry.provider.maxRetries, 4);
+    // 모델 계열: gpt-oss 는 reasoning_effort, 거부되면 thinking 제어 없이
+    m = models({ OXY_MODEL_GENERAL: "openai/gpt-oss-120b" });
+    assert.equal(m.g.compat.supportsReasoningEffort, true);
+    assert.equal(m.g.thinkingLevelMap.off, "low");
+    assert.equal(m.g.compat.thinkingFormat, undefined);
+    m = models({ OXY_MODEL_GENERAL: "openai/gpt-oss-120b", OXY_VLLM_DROP_PARAMS: "reasoning_effort" });
+    assert.equal(m.g.reasoning, false);
+    assert.equal(m.g.thinkingLevelMap, undefined);
+    assert.match(m.g.name, /thinking 제어 없음/);
+    m = models({ OXY_MODEL_GENERAL: "openai/gpt-oss-120b", OXY_VLLM_DROP_PARAMS: "chat_template_kwargs" });
+    assert.equal(m.g.reasoning, true);                                   // 다른 방식의 거부는 영향 없음
+    // 명시한 계열이 id 추정보다 우선
+    m = models({ OXY_MODEL_CODER: "qwen/qwen3.8-27b", OXY_DEFAULT_MODEL: "qwen/qwen3.8-27b", OXY_MODEL_CODER_FAMILY: "qwen-coder" });
+    assert.equal(m.c.samplingParams.repetition_penalty, 1.05);
+    m = models({ OXY_MODEL_CODER: "my-llama", OXY_DEFAULT_MODEL: "my-llama" });
+    assert.deepEqual(m.c.samplingParams, { temperature: 0.7 });          // generic
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("모델 계열 추정 (id)", async () => {
+  const { detectFamily } = await import("../scripts/render-config.mjs");
+  assert.equal(detectFamily("qwen3.6-coder-30b"), "qwen-coder");
+  assert.equal(detectFamily("Qwen/Qwen3-Coder-480B"), "qwen-coder");
+  assert.equal(detectFamily("qwen/qwen3.8-27b"), "qwen-thinking");
+  assert.equal(detectFamily("openai/gpt-oss-120b"), "gpt-oss");
+  assert.equal(detectFamily("llama-3.3-70b"), "generic");
 });
 
 test("bash-guard: psmux/tmux 로 실행시키는 명령도 검사 (send-keys · 시작 명령 · run-shell)", () => {

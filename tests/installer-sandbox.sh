@@ -26,10 +26,11 @@ NONE_IDX=$("$NODE" --input-type=module -e "import('$(winpath "$OXY_HOME/installe
 # 1) 신규 설치: 점검 계속 / 기본 위치 / (긴 경로 경고 시 예) / SQLcl: 번들에 포함된 것 설치(1) / 브라우저: Chromium(2)
 #    / vLLM / 키 / 계속 / 코딩 1 / 범용 1 / ctx 기본 / GitLab / 등록 전부 / 설치 / verify 예 / 종료
 long=$([[ ${#I} -gt 100 ]] && echo 1 || true)
-run "신규 설치" "$NODE" 1 1 $long 1 2 "http://127.0.0.1:$PORT" mock-key "" 1 1 "" gitlab.example.internal "" 1 1 ""
+run "신규 설치" "$NODE" 1 1 $long 1 2 "http://127.0.0.1:$PORT" mock-key "" 1 1 "" "" "" gitlab.example.internal "" 1 1 ""
 chk "설치 종료코드 0"                     '[[ $RC == 0 ]]'
 chk "파일 복사 + 설치 표시"                 '[[ -f "$I/.oxy-install" && -x "$I/runtime/node/node.exe" ]]'
 chk "oxy.env 에 입력값 기록"               'grep -q "^OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1$" "$I/agent/oxy.env" && grep -q "^GITLAB_HOST=gitlab.example.internal$" "$I/agent/oxy.env"'
+chk "모델 계열 기록 (id 로 추정한 값)"   'grep -q "^OXY_MODEL_CODER_FAMILY=qwen-coder$" "$I/agent/oxy.env" && grep -q "^OXY_MODEL_GENERAL_FAMILY=qwen-thinking$" "$I/agent/oxy.env" && grep -q qwen-chat-template "$I/agent/models.json"'
 chk "models.json 모델 2개"                '[[ $(grep -c "\"id\"" "$I/agent/models.json") == 2 ]]'
 chk "PATH / WT 프로필 / 바로가기 (sandbox)"  '[[ -f "$SB/user-path.txt" && -f "$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi/oxygen-pi.json" && -f "$SB/Desktop/Oxygen Pi.lnk.json" ]]'
 chk "SQLcl: 번들에서 설치"                 '[[ -f "$I/runtime/sqlcl/bin/sql" ]]'
@@ -45,7 +46,7 @@ chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_
 
 # 3) 설정 변경: 메뉴 1 / SQLcl 유지 / 브라우저 '사용 안 함' / URL·키 유지 / 계속 / 코딩 1 / 범용 '사용 안 함' / ctx / GitLab 유지
 #    / 등록 1,2 / 적용 / verify 아니요 / 종료
-run "설정 변경" "$NODE" 1 1 "$NONE_IDX" "" "" "" 1 2 "" "" "1,2" 1 2 ""
+run "설정 변경" "$NODE" 1 1 "$NONE_IDX" "" "" "" 1 2 "" "" "" "1,2" 1 2 ""
 chk "브라우저 '사용 안 함' 기록"              'grep -q "^OXY_BROWSER=none$" "$I/agent/oxy.env"'
 chk "브라우저 없음 → web-page-automation skill 꺼짐" '[[ ! -d "$I/agent/skills/web-page-automation" && -d "$I/agent/skills/web-page-reading" ]]'
 chk "SQLcl 유지"                          '[[ -f "$I/runtime/sqlcl/bin/sql" ]]'
@@ -54,8 +55,8 @@ chk "바로가기만 해제"                       '[[ ! -f "$SB/Desktop/Oxygen 
 
 # 3-1) 설치된 복사본의 Tweak TUI: SQLite 연결 추가 (usql + dbhub) → 설치 위치 기준 파일 생성
 "$I/bin/usql.exe" "sqlite:$(winpath "$SB/t.db")" -c "create table t(a int); insert into t values (5),(6);" >/dev/null 2>&1
-# Tweak 메인 메뉴: 1 vLLM · 2 모델 · 3 GitLab · 4 브라우저 · 5 SQLcl · 6 시스템 등록 · 7 DB 연결 · 8 extension · 9 한도 · 10 구성요소 · 11 자가진단 · 12 종료
-INSTALLER="$I/installer/tweak.mjs" run "Tweak: DB 연결 추가" "$I/runtime/node/node.exe" 7 1 6 tdb "$(winpath "$SB/t.db")" 1 "" 1 "" 3 12
+# Tweak 메인 메뉴: 1 vLLM · 2 모델 · 3 엔드포인트 · 4 GitLab · 5 브라우저 · 6 SQLcl · 7 시스템 등록 · 8 DB 연결 · 9 extension · 10 한도 · 11 구성요소 · 12 자가진단 · 13 종료
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: DB 연결 추가" "$I/runtime/node/node.exe" 8 1 6 tdb "$(winpath "$SB/t.db")" 1 "" 1 "" 3 13
 chk "Tweak 종료코드 0"                         '[[ $RC == 0 ]]'
 chk "연결 시험 성공"                            'grep -q "tdb 접속  성공" "$SB/out.txt"'
 chk "usql.yaml / dbhub.toml / mcp.json 생성"     '[[ -f "$I/agent/usql.yaml" && -f "$I/agent/dbhub.toml" && -f "$I/agent/mcp.json" ]]'
@@ -64,7 +65,7 @@ chk "설치된 usql 래퍼로 이름 붙은 연결 조회"        '[[ "$(bash "$
 
 # 3-2) Tweak: 항목 하나씩 (순서 무관) — GitLab 호스트만 바꾸기 → 한도 값 하나만 바꾸기 → 종료. 나머지 설정은 그대로여야 한다
 before_url=$(grep "^OXY_VLLM_BASE_URL=" "$I/agent/oxy.env")
-INSTALLER="$I/installer/tweak.mjs" run "Tweak: 항목별 조정" "$I/runtime/node/node.exe" 3 gitlab2.example.internal "" 9 1 9000 7 12
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: 항목별 조정" "$I/runtime/node/node.exe" 4 gitlab2.example.internal "" 10 1 9000 7 13
 chk "Tweak 항목별: 종료코드 0"                   '[[ $RC == 0 ]]'
 chk "Tweak 항목별: GitLab 호스트만 변경"           'grep -q "^GITLAB_HOST=gitlab2.example.internal$" "$I/agent/oxy.env" && [[ "$(grep "^OXY_VLLM_BASE_URL=" "$I/agent/oxy.env")" == "$before_url" ]]'
 chk "Tweak 항목별: 한도 값 하나만 저장"            'grep -q "^OXY_TOOL_OUTPUT_MAX_CHARS=9000$" "$I/agent/oxy.env" && ! grep -q "^OXY_READ_MAX_CHARS=" "$I/agent/oxy.env"'
@@ -73,10 +74,11 @@ chk "Tweak 항목별: 단계 흐름 없이 바로 저장"        '! grep -q "설
 # 3-3) 확장 파라미터를 거부하는 게이트웨이 (사내에서 받은 400 "property 'repetition_penalty' is unsupported")
 #      Tweak 의 vLLM 항목이 하나씩 시험해서 거부된 것만 뺀다 → 그 설정으로 pi 요청이 통과
 SPORT=$((PORT + 1))
-MOCK_STRICT_PARAMS=repetition_penalty "$NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$SPORT" "$(winpath "$SB/req2.jsonl")" >/dev/null & STRICT_PID=$!
+MOCK_TPM=8000 MOCK_STRICT_PARAMS=repetition_penalty "$NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$SPORT" "$(winpath "$SB/req2.jsonl")" >/dev/null & STRICT_PID=$!
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$SPORT/v1/models" >/dev/null 2>&1 && break; sleep 0.1; done
-INSTALLER="$I/installer/tweak.mjs" run "Tweak: 엄격한 게이트웨이로 vLLM 변경" "$I/runtime/node/node.exe" 1 "http://127.0.0.1:$SPORT" mock-key "" "" 12
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: 엄격한 게이트웨이로 vLLM 변경" "$I/runtime/node/node.exe" 1 "http://127.0.0.1:$SPORT" mock-key "" 1 "" 13
 chk "게이트웨이 판정: 거부된 repetition_penalty 만 기록"   'grep -q "^OXY_VLLM_DROP_PARAMS=repetition_penalty$" "$I/agent/oxy.env" && grep -q "repetition_penalty: 서버가 거부" "$SB/out.txt"'
+chk "사용량 제한 감지 → 맞춤 설정 (재시도 4 · 응답 1000)"  'grep -q "분당 8,000 토큰" "$SB/out.txt" && grep -q "^OXY_PROVIDER_RETRIES=4$" "$I/agent/oxy.env" && grep -q "^OXY_MAX_OUTPUT_TOKENS=1000$" "$I/agent/oxy.env" && grep -q "\"maxTokens\": 1000" "$I/agent/models.json"'
 chk "models.json: repetition_penalty 빠지고 top_k 유지"   '! grep -q repetition_penalty "$I/agent/models.json" && grep -q "\"top_k\": 20" "$I/agent/models.json"'
 pi_out=$(cd "$SB" && PI_CODING_AGENT_DIR="$(winpath "$I/agent")" OXY_VLLM_API_KEY=mock-key OXY_FLOW=off timeout 120 "$I/runtime/node/node.exe" \
   "$I/vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" --no-session -p "scenario:flow-half" < /dev/null 2>&1 | tail -1)
