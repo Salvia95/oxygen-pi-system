@@ -19,6 +19,11 @@
 /agent/models-store.json
 # 설치된 구성요소에 맞춰 configure / 설치 TUI 가 skill-library 에서 생성
 /agent/skills/
-# PC 로컬 DB 연결 설정 (Tweak TUI 예정)
+# PC 로컬 설정·비밀 (Tweak TUI 가 생성): DB 연결, DPAPI 비밀 저장소, pi MCP 등록·로그·인증
 /agent/usql.yaml
 /agent/dbhub.toml
+/agent/connections.json
+/agent/secrets.json
+/agent/mcp.json
+/agent/mcp.log*
+/agent/mcp-auth.json

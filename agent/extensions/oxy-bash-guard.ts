@@ -139,9 +139,21 @@ function sqlScriptsText(command: string, cwd: string): string {
 
 interface Finding { rule: Pick<Rule, "id" | "level" | "title" | "hint">; segment: string }
 
+/** 비밀 저장소 접근 (Tweak TUI 의 DPAPI 저장소, 비밀번호를 넣은 임시 usql 설정 생성) */
+const SECRET_ACCESS = /secrets\.(?:json|mjs)|usql-config|mcp-auth\.json/i;
+
 export function inspect(command: string, cwd: string): Finding[] {
   const segments = splitSegments(command);
   const findings: Finding[] = [];
+  if (SECRET_ACCESS.test(command)) {
+    findings.push({
+      segment: command.length > 200 ? command.slice(0, 200) + " …" : command,
+      rule: {
+        id: "secret-access", level: "deny", title: "비밀 저장소 접근",
+        hint: "Stored credentials are never readable by the agent. Use the configured connections (usql <name>, dbhub MCP tools) instead.",
+      },
+    });
+  }
   for (const segment of segments) {
     for (const rule of RULES) {
       if (rule.test.test(segment)) { findings.push({ rule, segment }); break; }

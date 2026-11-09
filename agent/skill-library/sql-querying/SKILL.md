@@ -9,6 +9,8 @@ description: Query PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, Oracle and oth
 
 ## Rules
 
+- If tools named `mcp__dbhub__execute_sql…` are available, prefer them: they return structured rows and enforce read-only.
+  Use `mcp__dbhub__search_objects…` to find tables and columns first.
 - Use a **named connection** when one exists: `usql <name> ...`. List them with `usql -c '\cset'`.
   Named connections live in the PC-local file `agent/usql.yaml` (the wrapper loads it automatically).
 - Never write passwords in commands or files. If a connection needs one and none is configured, ask the user.

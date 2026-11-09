@@ -29,11 +29,13 @@ function setFrame(stepIndex = null, names = STEP_NAMES) {
 }
 
 /** 단계 배열을 순서대로 실행. 단계가 BACK 을 돌려주면 이전 단계로 */
-async function runSteps(steps, state, names) {
+/** backExits: 첫 단계에서 Esc(이전)를 누르면 흐름을 빠져나간다 (설정 변경·Tweak 에서 메뉴로 돌아가기) */
+async function runSteps(steps, state, names, { backExits = false } = {}) {
   let i = 0;
   while (i < steps.length) {
     setFrame(i, names);
     const r = await steps[i](state);
+    if (r === BACK && i === 0 && backExits) return false;
     if (r === BACK) i = Math.max(0, i - 1);
     else if (r === "cancel") return false;
     else i++;
@@ -466,7 +468,8 @@ function done(state, passed) {
     state.integrations?.includes("path") ? "    • 새로 연 터미널에서 프로젝트 폴더로 이동한 뒤  oxy" : `    • ${state.installDir}\\oxy.cmd`,
     state.gitlabHost ? `    • GitLab 토큰 등록:  glab auth login --hostname ${state.gitlabHost}` : "",
     state.sqlcl?.action === "skip" ? "    • SQLcl 은 나중에 직접 받은 zip 으로 추가할 수 있습니다 (install.cmd → 설정 변경)" : "",
-    "    • 설정 변경·자가진단·제거:  install.cmd 를 다시 실행",
+    "    • DB 연결·extension 등 종합 설정:  설치 폴더의 tweak.cmd",
+    "    • 업데이트·제거:  install.cmd 를 다시 실행",
   ];
   ui.print(lines.filter((l) => l !== "").join("\n"));
 }
@@ -485,17 +488,17 @@ function stateFromInstall(reg) {
   };
 }
 
-async function reconfigure(reg) {
+async function reconfigure(reg, { saveRegistry = true } = {}) {
   const state = { ...stateFromInstall(reg), action: "설정 적용", doneTitle: "설정 변경 완료" };
   const names = ["선택", "vLLM", "모델", "GitLab", "등록", "확인"];
-  const ok2 = await runSteps([stepOptional, stepVllm, stepModel, stepGitlab, stepIntegrate, stepReview], state, names);
+  const ok2 = await runSteps([stepOptional, stepVllm, stepModel, stepGitlab, stepIntegrate, stepReview], state, names, { backExits: true });
   if (!ok2) return 1;
   setFrame(names.length, names);
   ui.screen(`  ${c.bold("설정 적용 중")}\n`);
   await applyOptional(state);
   await ui.task("설정 생성", async () => `${writeSiteConfig(state.installDir, state)}개 파일`);
   await applyIntegrations(state, reg);
-  sys.saveRegistry({ ...reg, integrations: state.integrations, updatedAt: new Date().toISOString() });
+  if (saveRegistry) sys.saveRegistry({ ...reg, integrations: state.integrations, updatedAt: new Date().toISOString() });
   const passed = await finishWithVerify(state);
   done(state, passed);
   await ui.pause();
@@ -587,14 +590,19 @@ async function main() {
   return install({});
 }
 
-let code = 1;
-try {
-  if (sys.sandbox) process.stdout.write(c.yellow(`[sandbox] 시스템 대신 ${sys.sandbox} 에만 기록합니다\n`));
-  code = await main();
-} catch (e) {
-  process.stdout.write(`\n${c.red("오류:")} ${e.stack ?? e}\n`);
-} finally {
-  ui.close();
-  process.stdout.write("\x1b[?25h");
+// Tweak TUI(installer/tweak.mjs) 가 import 해서 쓸 수 있도록, 직접 실행할 때만 main 을 돈다
+export { ui, sys, ROOT, VERSION, setFrame, finishWithVerify, reconfigure, stateFromInstall, writeSiteConfig };
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  let code = 1;
+  try {
+    if (sys.sandbox) process.stdout.write(c.yellow(`[sandbox] 시스템 대신 ${sys.sandbox} 에만 기록합니다\n`));
+    code = await main();
+  } catch (e) {
+    process.stdout.write(`\n${c.red("오류:")} ${e.stack ?? e}\n`);
+  } finally {
+    ui.close();
+    process.stdout.write("\x1b[?25h");
+  }
+  process.exit(code);
 }
-process.exit(code);

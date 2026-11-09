@@ -28,6 +28,10 @@ const SCENARIOS = {
   "read-skill": [{ tool: "read", args: (body) => ({
     path: contentText(body.messages[0].content).match(/<location>([^<]*oracle-db-querying[^<]*SKILL\.md)<\/location>/)?.[1] ?? "missing",
   }) }],
+  // pi 가 선언한 MCP 도구 중 이름이 맞는 것을 호출 (tool 이 함수면 body 로 이름을 고른다)
+  "db-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__dbhub__execute_sql(_|$)/.test(n)) ?? "missing_dbhub_tool",
+    args: { sql: "select count(*) as n from t" } }],
+  "env-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__envcheck__check$/.test(n)) ?? "missing_envcheck_tool", args: {} }],
 };
 
 const sse = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
@@ -73,7 +77,8 @@ http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
     const item = script[step];
     if (item?.tool) {
-      sse(res, choice({ role: "assistant", tool_calls: [{ index: 0, id: `call_${step}`, type: "function", function: { name: item.tool, arguments: "" } }] }));
+      const toolName = typeof item.tool === "function" ? item.tool(body) : item.tool;
+      sse(res, choice({ role: "assistant", tool_calls: [{ index: 0, id: `call_${step}`, type: "function", function: { name: toolName, arguments: "" } }] }));
       sse(res, choice({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify(typeof item.args === "function" ? item.args(body) : item.args) } }] }));
       sse(res, choice({}, "tool_calls"));
     } else {

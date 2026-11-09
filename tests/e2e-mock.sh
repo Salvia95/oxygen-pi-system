@@ -22,6 +22,13 @@ ENV
 OXY_AGENT_DIR="$TMP/agent" bash "$OXY_HOME/scripts/configure.sh" >/dev/null
 export PI_CODING_AGENT_DIR="$(winpath "$TMP/agent")" OXY_VLLM_API_KEY=mock-key
 
+# DB MCP: SQLite 연결(dbhub) + 비밀값 주입 확인용 envcheck 서버 (dbhub 를 반입한 경우만)
+HAS_DBHUB=0; [[ -f "$OXY_HOME/vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" ]] && HAS_DBHUB=1
+if (( HAS_DBHUB )); then
+  "$OXY_HOME/bin/usql.exe" "sqlite:$(winpath "$TMP/e2e.db")" -c "create table t(a int); insert into t values (1),(2),(3),(4);" >/dev/null 2>&1
+  "$OXY_NODE" "$(winpath "$OXY_HOME/tests/e2e-db-setup.mjs")" "$(winpath "$OXY_HOME")" "$(winpath "$TMP/agent")" "$(winpath "$TMP/e2e.db")" 'pw:한글 "q"$x' >/dev/null
+fi
+
 REQLOG="$TMP/requests.jsonl"
 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$PORT" "$(winpath "$REQLOG")" >/dev/null & MOCK_PID=$!
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && break; sleep 0.1; done
@@ -49,7 +56,7 @@ chk "요청 2회 (tool call → 결과 회신)"          '[[ $(nreq) -eq 2 ]]'
 chk "model id / Authorization"               '[[ $(first .body.model) == qwen3.6-coder-30b && $(first .headers.authorization) == "Bearer mock-key" ]]'
 chk "max_tokens 사용, store·developer role 없음" '[[ $(first ".body.max_tokens // empty") != "" && $(first ".body | has(\"store\")") == false && $(first "[.body.messages[].role] | index(\"developer\")") == null ]]'
 chk "sampling (temperature 0.7, top_k 20)"   '[[ $(first .body.temperature) == 0.7 && $(first .body.top_k) == 20 ]]'
-chk "tools 7종"                              '[[ $(first "[.body.tools[].function.name] | sort | join(\",\")") == "bash,edit,find,grep,ls,read,write" ]]'
+chk "내장 tools 7종 (+MCP direct 도구)"        '[[ $(first "[.body.tools[].function.name | select(startswith(\"mcp__\") | not)] | sort | join(\",\")") == "bash,edit,find,grep,ls,read,write" ]]'
 chk "AGENTS.md 가 시스템 프롬프트에 포함"        '[[ $(first ".body.messages[0].content | tostring | contains(\"oxygen-pi-system\")") == true ]]'
 SYS="$(first '.body.messages[0].content | tostring')"
 ENABLED=$(ls "$TMP/agent/skills")
@@ -81,6 +88,16 @@ chk "loop-guard: 텍스트 tool call 감지 → 재호출 안내" '[[ "$out" == 
 
 run read-skill
 chk "skill: 프롬프트의 위치로 SKILL.md 읽기"       '[[ "$out" == *"# Oracle SQLcl"* && "$out" == *"Never use \`-e\`"* ]]'
+
+if (( HAS_DBHUB )); then
+  run db-mcp
+  chk "dbhub MCP: pi 가 도구를 선언하고 SQLite 조회"  '[[ "$out" == *'"'"'"n": 4'"'"'* || "$out" == *'"'"'\"n\": 4'"'"'* ]]'
+  chk "dbhub MCP: exposure=direct 로 바로 선언"     '[[ $(first "[.body.tools[].function.name] | map(select(startswith(\"mcp__dbhub__execute_sql\"))) | length") -ge 1 ]]'
+  run env-mcp
+  chk "MCP env \"!command\" 로 DPAPI 비밀값 주입"   '[[ "$out" == *"ENVCHECK: match"* ]]'
+else
+  log "dbhub 미포함 → DB MCP 시나리오 생략"
+fi
 
 run repeat
 chk "loop-guard: 같은 호출 3번째 차단"            '[[ "$out" == *"oxy-loop-guard"* && "$out" == *"2 times"* ]]'

@@ -53,7 +53,9 @@ log "압축 중: $out"
     --exclude="$base/agent/oxy.env" --exclude="$base/agent/sessions" \
     --exclude="$base/agent/settings.json" --exclude="$base/agent/models.json" \
     --exclude="$base/agent/auth.json" --exclude="$base/agent/models-store.json" --exclude="$base/agent/skills" \
-    --exclude="$base/agent/usql.yaml" --exclude="$base/agent/dbhub.toml" \
+    --exclude="$base/agent/usql.yaml" --exclude="$base/agent/dbhub.toml" --exclude="$base/agent/connections.json" \
+    --exclude="$base/agent/secrets.json" --exclude="$base/agent/mcp.json" --exclude="$base/agent/mcp.log*" \
+    --exclude="$base/agent/mcp-auth.json" \
     "$base"
 )
 (cd "$OXY_HOME/dist" && sha256sum "$name.zip" > "$name.zip.sha256")

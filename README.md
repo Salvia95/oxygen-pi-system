@@ -34,7 +34,7 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 | | Chromium 오픈소스 빌드 | 엔진 | BSD-3-Clause | — |
 | **database** | usql **추천** | CLI (PostgreSQL·MySQL·SQLite·SQL Server·Oracle 등) | MIT | `sql-querying` |
 | | Oracle SQLcl | CLI (Oracle 전용, Java 17+) | Oracle Free Use T&C (비오픈소스) | `oracle-db-querying` |
-| | dbhub | MCP 커넥터 (pi 도구로 SQL 실행) | MIT | — (연결 설정은 Tweak TUI 예정) |
+| | dbhub | MCP 커넥터 (pi 도구로 SQL 실행) | MIT | — (연결은 Tweak TUI 의 DB 연결에서 등록) |
 
 - agent-browser 의 브라우저 엔진은 설치 TUI 에서 고른다: Chrome for Testing (추천) / Chromium / obscura / PC 의 Edge·Chrome / 사용 안 함.
   obscura 를 고르면 `wrappers/agent-browser` 가 obscura CDP 서버를 필요할 때 띄우고 연결한다 (Chrome 대비 약 1/3 용량, 일부 CDP 기능 미지원).
@@ -107,6 +107,28 @@ bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
 ./oxy                             # 실행 (cmd / Windows Terminal 에서는 oxy.cmd)
 ```
 
+## 3) 종합 설정 (Tweak TUI)
+
+설치 폴더의 **`tweak.cmd`** (Git Bash 에서는 `./tweak.sh`, `just tweak`) 로 설치 후 설정을 한곳에서 바꾼다.
+
+| 메뉴 | 내용 |
+|---|---|
+| 모델 · vLLM · 브라우저 · SQLcl · 시스템 등록 | 설치 TUI 의 "설정 변경"과 같은 흐름 (Esc 로 메뉴 복귀) |
+| DB 연결 | PostgreSQL · MySQL · MariaDB · SQL Server · Oracle · SQLite 연결 추가·편집·연결 시험·삭제. 연결마다 **usql**(CLI) / **dbhub**(pi MCP 도구) 중 쓸 도구와 읽기 전용 여부를 고른다 |
+| extension | 안전장치 4종 켜기/끄기, 출력 한도·반복 차단 횟수 |
+| 자가진단 | verify 실행 |
+
+DB 연결은 다음처럼 저장된다 (모두 PC 로컬, git·번들 제외):
+
+- `agent/connections.json`: 연결 정보 원본 (비밀번호 없음)
+- `agent/secrets.json`: 비밀번호. **Windows DPAPI** 로 암호화돼 현재 Windows 사용자만 복호화할 수 있다 (PowerShell 에는 stdin 으로 전달, 평문 파일·명령줄 없음)
+- `agent/usql.yaml`: usql 이름 붙은 연결 (비밀번호 없음). `wrappers/usql` 이 실행할 때만 비밀번호를 넣은 임시 설정을 만들고 바로 지운다
+- `agent/dbhub.toml` + `agent/mcp.json`: dbhub 소스와 pi MCP 등록 (`exposure: direct`, 연결마다 `lazy` 접속).
+  비밀번호는 `${OXY_DB_<ID>_PASSWORD}` 로 참조하고, pi 가 서버를 띄울 때 `!command` 로 복호화해 넘긴다 (전역 환경변수에 남지 않음)
+- 모델이 비밀 저장소를 읽거나 복호화하는 명령은 bash-guard 가 차단한다 (`secret-access`)
+
+pi 도구 이름: 연결이 하나면 `mcp__dbhub__execute_sql`, 여러 개면 `mcp__dbhub__execute_sql_<연결 이름>` (search_objects 도 같음). 실행 중인 pi 에는 `/reload` 로 반영된다.
+
 ## 사내 vLLM 요구사항
 
 pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에 다음 옵션이 필요하다.
@@ -132,6 +154,7 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 
 ```
 install.cmd, install.sh 설치 TUI 실행 (installer/)
+tweak.cmd, tweak.sh     종합 설정 TUI (installer/tweak.mjs)
 oxy, oxy.cmd, env.sh   런처 / 환경
 VERSION                하네스 버전 (설치 TUI 배너에 표시)
 wrappers/              Git Bash 보정 래퍼 (sql, jq, usql, agent-browser)

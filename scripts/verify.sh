@@ -69,7 +69,11 @@ opt_tool "agent-browser" bin/agent-browser.exe web-page-automation  agent-browse
 opt_tool "obscura"       bin/obscura.exe       web-page-reading     obscura --version
 opt_tool "usql"          bin/usql.exe          sql-querying         usql --version
 if [[ -f "$OXY_HOME/vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" ]]; then
-  pass "dbhub: 설치됨 (DB 연결·MCP 등록은 Tweak TUI 예정)"
+  # mcp.json 이 없거나 dbhub 항목이 없으면 0 (set -e/pipefail 에서 멈추지 않도록 || true)
+  n=$( { jq -r '.mcpServers.dbhub.description // empty' "$OXY_HOME/agent/mcp.json" 2>/dev/null | grep -o '=' | wc -l; } || true)
+  n=${n//[^0-9]/}; n=${n:-0}
+  if (( n > 0 )); then pass "dbhub: pi MCP 에 DB 연결 ${n}개 등록됨"
+  else pass "dbhub: 설치됨 (DB 연결은 tweak.cmd → DB 연결 에서 등록)"; fi
 else wrn "dbhub: 선택 구성요소 미포함 (DB MCP 커넥터 사용 불가)"; fi
 HAS_AB=0; [[ -f "$OXY_HOME/bin/agent-browser.exe" ]] && HAS_AB=1
 if (( HAS_SQLCL )); then tool "sqlcl" sql -V

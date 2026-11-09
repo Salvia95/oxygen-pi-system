@@ -22,6 +22,16 @@ test("deny: 파괴적 명령", () => {
   }
 });
 
+test("deny: 비밀 저장소 접근", () => {
+  for (const c of [
+    "cat agent/secrets.json", "node installer/secrets.mjs get db/app --agent agent",
+    "\"$OXY_NODE\" installer/connections.mjs usql-config /tmp/x.yaml", "type %USERPROFILE%\\x\\mcp-auth.json",
+  ]) {
+    assert.ok(ids(c).includes("deny:secret-access"), c);
+  }
+  assert.deepEqual(ids("usql appdb -w -c 'select 1'"), []);
+});
+
 test("deny: 폐쇄망 패키지 설치", () => {
   for (const c of ["npm install", "npm i lodash", "pnpm add x", "pip install requests", "python -m pip install x", "uv add httpx", "go get x", "cd app && yarn add y"]) {
     assert.deepEqual(ids(c), ["deny:offline-install"], c);

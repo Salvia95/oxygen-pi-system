@@ -60,3 +60,7 @@ install-demo:
 # 설치 TUI 회귀 테스트 (sandbox, 몇 분 소요)
 test-installer:
     bash tests/installer-sandbox.sh
+
+# 종합 설정 TUI (모델·DB 연결·extension 등)
+tweak *args:
+    ./runtime/node/node.exe installer/tweak.mjs {{args}}

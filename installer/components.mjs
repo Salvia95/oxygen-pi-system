@@ -54,7 +54,7 @@ export const CATALOG = {
   chrome: { title: "Chrome for Testing", kind: "engine", purpose: "agent-browser 용 브라우저 엔진 (agent-browser 기본)", check: "vendor/browsers/chrome-win64/chrome.exe", proprietary: true, recommended: true },
   usql: { title: "usql", kind: "cli", purpose: "범용 SQL CLI (PostgreSQL·MySQL·SQLite·SQL Server·Oracle 등)", check: "bin/usql.exe", skills: ["sql-querying"], recommended: true },
   sqlcl: { title: "Oracle SQLcl", kind: "cli", purpose: "Oracle 전용 CLI (info·ddl 등) · Java 17 필요", check: "runtime/sqlcl/bin/sql", proprietary: true, skills: ["oracle-db-querying"] },
-  dbhub: { title: "dbhub", kind: "connector", purpose: "DB MCP 커넥터 (pi 도구로 SQL 실행) · 연결 설정은 Tweak TUI (예정)", check: "vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" },
+  dbhub: { title: "dbhub", kind: "connector", purpose: "DB MCP 커넥터 (pi 도구로 SQL 실행) · 연결은 tweak.cmd 에서 등록", check: "vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" },
 };
 
 export const hasComponent = (name, root) => Boolean(CATALOG[name]) && existsSync(join(root, CATALOG[name].check));
