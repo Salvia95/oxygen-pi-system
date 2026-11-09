@@ -122,3 +122,56 @@ test("oxy-jobs: Semaphore 동시 실행 제한 · vLLM metrics 해석", async ()
   assert.deepEqual(parseVllmMetrics("other_metric 1\n"), { waiting: 0, running: 0, kvCache: null });
   assert.equal(fmtDuration(72000), "1m12s");
 });
+
+test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 · 렌더 상한", async () => {
+  const { FileFlowEngine, renderContext, traceDecisions } = await import("../agent/extensions/oxy-flow/store.ts");
+  const { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "oxyflow-"));
+  const g = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, stdio: "ignore" });
+  try {
+    g("init", "-q"); writeFileSync(join(dir, "a.txt"), "1"); g("add", "."); g("commit", "-qm", "base");
+    const e = new FileFlowEngine(dir);
+    assert.equal(e.writable, true);
+    assert.equal(e.hasContent(), false);
+    e.ensureGoal("Add login API");
+    e.note("decision", "Use JWT", "stateless servers");
+    e.recordFile("a.txt");
+    e.recordCommand("npm test", false, "FAIL x\n1 failing");
+    writeFileSync(join(dir, "a.txt"), "2"); g("commit", "-qam", "feat: login");
+    const made = e.syncCommits(false);
+    assert.equal(made.length, 1);
+    assert.deepEqual(made[0].decisions.map((d) => d.text), ["Use JWT"]);   // 버퍼의 결정이 커밋 노드로 이동
+    assert.equal(e.load().buffer.decisions.length, 0);
+    assert.equal(e.load().buffer.failures.length, 1);                          // 해결 안 된 실패는 남는다
+    e.recordCommand("npm test", true, "ok");
+    assert.equal(e.load().buffer.failures.length, 0);                          // 같은 명령이 성공하면 해결
+    writeFileSync(join(dir, "b.txt"), "x"); g("add", "."); g("commit", "-qm", "outside 1");
+    writeFileSync(join(dir, "c.txt"), "x"); g("add", "."); g("commit", "-qm", "outside 2");
+    const ext = e.syncCommits(true);
+    assert.deepEqual(ext.map((n) => [n.id, n.title, n.external]), [["n2", "outside 1", true], ["n3", "outside 2", true]]);
+    assert.deepEqual(ext[0].files, ["b.txt"]);
+    assert.equal(e.syncCommits(true).length, 0);
+    // 다른 살아 있는 프로세스가 쥔 락 → 읽기 전용 / 주인이 죽은 락 → 넘겨받음
+    const lock = join(dir, ".oxy", "flow", "lock");
+    writeFileSync(lock, JSON.stringify({ pid: process.ppid, at: 0 }));
+    const other = new FileFlowEngine(dir);
+    assert.equal(other.writable, false);
+    assert.equal(other.load().nodes.length, 3);
+    writeFileSync(lock, JSON.stringify({ pid: 999999, at: 0 }));
+    assert.equal(new FileFlowEngine(dir).writable, true);
+    assert.equal(readFileSync(join(dir, ".oxy", ".gitignore"), "utf8"), "*\n");
+    assert.ok(existsSync(join(dir, ".oxy", "flow", "FLOW.md")));
+    // 렌더: 상한 안에서 최근 노드는 결정까지, 나머지는 제목만
+    for (let i = 0; i < 40; i++) e.load().nodes.push({ id: `n${4 + i}`, commit: "f".repeat(40), title: `step ${i} `.repeat(5), at: 0, decisions: [{ at: 0, text: "d".repeat(80) }], files: [] });
+    const r = renderContext(e.load(), 3000);
+    assert.ok(r.length <= 3000, `len ${r.length}`);
+    assert.match(r, /Goal: Add login API/);
+    assert.match(r, /Older steps: /);
+    assert.deepEqual(traceDecisions(e.load(), "jwt").length, 1);
+    e.release();
+    assert.equal(existsSync(lock), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

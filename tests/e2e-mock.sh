@@ -21,6 +21,7 @@ OXY_CONTEXT_WINDOW=131072
 ENV
 OXY_AGENT_DIR="$TMP/agent" bash "$OXY_HOME/scripts/configure.sh" >/dev/null
 export PI_CODING_AGENT_DIR="$(winpath "$TMP/agent")" OXY_VLLM_API_KEY=mock-key
+export OXY_FLOW=off   # oxy-flow 는 아래 전용 구역에서만 켠다
 
 # DB MCP: SQLite 연결(dbhub) + 비밀값 주입 확인용 envcheck 서버 (dbhub 를 반입한 경우만)
 HAS_DBHUB=0; [[ -f "$OXY_HOME/vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" ]] && HAS_DBHUB=1
@@ -127,6 +128,32 @@ printf '\n\033[1m[rpc-jobs]\033[0m %s\n' "$rpc"
 chk "대화형: 작업 패널·상태줄 표시"            '[[ "$rpc" == *"\"widgetRunning\":true"* && "$rpc" == *"\"statusRunning\":true"* && "$rpc" == *"\"widgetDone\":true"* ]]'
 chk "대화형: 작업이 끝나면 새 턴으로 결과 전달"   '[[ "$rpc" == *"\"followUpTurn\":true"* ]]'
 chk "대화형: /jobs → 로그 보기"               '[[ "$rpc" == *"\"jobsLogView\":true"* ]]'
+
+# oxy-flow: 별도 git 작업 폴더 (위 시나리오들은 OXY_FLOW=off 로 실행해 서로 영향을 주지 않게 한다)
+FW="$TMP/flowwork"; mkdir -p "$FW"; (cd "$FW" && git init -q)
+frun() {
+  : > "$REQLOG"
+  out=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" --no-session -p "$1" < /dev/null 2>&1) || true
+  REQ="$REQLOG"
+  printf '\n\033[1m[%s]\033[0m %s\n' "${1%% *}" "$(head -c 160 <<< "$out" | tr '\n' ' ')"
+}
+frun "scenario:flow-commit add the f file"
+chk "flow: 도구 flow_note · flow_show 등록"        '[[ $(first "[.body.tools[].function.name] | map(select(startswith(\"flow_\"))) | sort | join(\",\")") == "flow_note,flow_show" ]]'
+chk "flow: 커밋 → 노드 n1 + 결정 + 커밋 파일"       '[[ $(jq -r ".nodes[0] | \"\(.id) \(.title) \(.decisions[0].text) \(.files|join(\",\"))\"" "$FW/.oxy/flow/flow.json") == "n1 feat: add f Store sessions in SQLite f.txt" ]]'
+chk "flow: 커밋 결과에 기록 안내"                 '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Recorded step n1"* ]]'
+chk "flow: .oxy 는 사용자 git 에 안 잡힘"          '[[ -z "$(cd "$FW" && git status --porcelain)" ]]'
+frun "scenario:env continue"
+chk "flow: 다음 세션 첫 요청에 작업 상태 주입"       '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Goal: scenario:flow-commit add the f file"*"Store sessions in SQLite"* ]]'
+cp "$TMP/agent/settings.json" "$TMP/settings.bak"
+jq '.compaction.keepRecentTokens = 50' "$TMP/settings.bak" > "$TMP/agent/settings.json"   # 작은 대화로도 compaction 이 일어나게
+frun "scenario:flow-big refactor the parser"
+chk "flow: 작업 도중 compaction → LLM 요약 요청 없음" '[[ "$out" == *after-compaction* && $(grep -c "context summarization" "$REQ") -eq 0 ]]'
+chk "flow: compaction 요약 = 작업 상태 + 최근 요청"  '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Latest user request: scenario:flow-big"* ]]'
+cp "$TMP/settings.bak" "$TMP/agent/settings.json"
+: > "$REQLOG"
+rf=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-flow.mjs")" "$OXY_PI_CLI" "$(winpath "$FW")" "$(winpath "$REQLOG")" 2>&1 | tail -1) || true
+printf '\n\033[1m[rpc-flow]\033[0m %s\n' "$rf"
+chk "flow: 컨텍스트가 찬 뒤 새 메시지 → 새 세션 + 작업 상태" '[[ "$rf" == *"\"newSession\":true"* && "$rf" == *"\"stateInjected\":true"* ]]'
 
 run repeat
 chk "loop-guard: 같은 호출 3번째 차단"            '[[ "$out" == *"oxy-loop-guard"* && "$out" == *"2 times"* ]]'

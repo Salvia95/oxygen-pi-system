@@ -181,9 +181,28 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 | `oxy-loop-guard` | 텍스트로 쓴 tool call(`<tool_call>` 등) 감지 시 재호출 안내(최대 2회), 빈 응답 1회 재촉, 같은 호출 3번째 차단(파일 수정 시 초기화) | `OXY_LOOP_GUARD=off` (`OXY_REPEAT_LIMIT`) |
 | `oxy-context-budget` | bash/grep/find/ls 출력 12K자, read 40K자 초과 시 앞뒤만 남김. 상태줄에 컨텍스트 사용률 표시, 압축 반복 경고 | `OXY_CONTEXT_BUDGET=off` (`OXY_TOOL_OUTPUT_MAX_CHARS`, `OXY_READ_MAX_CHARS`) |
 
-자동 compaction 은 `settings.json` 의 `compaction.reserveTokens=24576` (128K 의 약 81%) 에서 시작한다.
+컨텍스트 관리(작업 기록 · 세션 넘기기 · compaction 교체)는 아래 oxy-flow 참고.
 테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
 `just demo` 는 mock vLLM 으로 pi TUI 를 직접 써 보는 명령이다 (프롬프트에 `scenario:git-push` 등 입력).
+
+## 작업 흐름 기록 · 컨텍스트 관리 (`agent/extensions/oxy-flow/`)
+
+LLM 요약(compaction)에 기대지 않고, **작업 기록 파일**로 컨텍스트를 이어간다. 기록은 프로젝트의 `.oxy/flow/`에 남는다
+(`.oxy/.gitignore` 를 스스로 만들어 사용자 저장소에는 잡히지 않는다).
+
+| 구분 | 동작 |
+|---|---|
+| 커밋 단위 노드 | `git commit` 이 성공하면 노드(`n1`, `n2` …)를 만들고 그 사이의 **결정 사항**과 커밋 파일을 붙인다. pi 밖에서 한 커밋도 다음 요청 때 노드로 잡힌다 |
+| 자동 기록 | 수정한 파일, 명령 성공/실패(실패는 마지막 출력, 같은 명령이 성공하면 해결로 처리), 백그라운드 작업·subagent |
+| 모델 도구 | `flow_note` (결정+이유 · 목표 · 다음 단계 · 막힌 점 · 완료) / `flow_show` (현재 상태 · `node=n3` 세부 · `query=` 결정 검색) |
+| 새 세션 | 첫 요청에 작업 상태(목표 · 최근 노드의 결정 · 커밋 전 작업 · 해결 안 된 실패)를 넣는다. 오래된 노드는 제목만 (`OXY_FLOW_CONTEXT_MAX_CHARS`, 기본 6000자) |
+| 세션 넘기기 | 컨텍스트가 `OXY_FLOW_ROLLOVER_PCT`(기본 50%) 이상인 상태에서 새 메시지를 보내면, **그 메시지를 새 세션에서** 작업 상태와 함께 처리한다. 직접: `/oxy-rollover [메시지]` |
+| 작업 도중 한도 | 도구를 연달아 쓰는 중에는 세션을 바꿀 수 없으므로 pi compaction 이 안전망으로 남는다. 이때 **LLM 요약 대신 작업 상태 + 최근 요청**으로 교체한다 (요약 호출 없음). `OXY_FLOW_COMPACT=llm` 이면 pi 기본 요약 |
+| `/flow` | 기록 보기 · `show n3` · `trace 키워드`(결정 추적) · `new 목표`(현재 작업 보관 후 새로 시작) · `rollback n3`(확인 후 이후 커밋을 `git revert`, 이력은 지우지 않음) |
+| 락 | 프로젝트마다 쓰는 pi 는 하나 (`.oxy/flow/lock`, PID). 다른 pi 가 쓰는 중이면 읽기 전용, 주인이 없으면 넘겨받는다. subagent 는 기록하지 않는다 |
+
+컨텍스트 여유분: `compaction.reserveTokens=49152` (128K 의 약 62% 에서 compaction). 응답 최대 32K + 도구 출력 한 묶음을 담을 수 있는 크기다.
+기록 엔진은 `store.ts` 의 `FlowEngine` 경계 뒤에 있어, 이후 flowout 으로 바꿀 수 있다. 끄기: `OXY_FLOW=off` · 세션 넘기기만 끄기: `OXY_FLOW_ROLLOVER=off`.
 
 ## 백그라운드 작업 · subagent (`agent/extensions/oxy-jobs/`)
 

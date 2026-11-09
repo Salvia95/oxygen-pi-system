@@ -40,6 +40,14 @@ const SCENARIOS = {
   "sub-par": [{ tool: "subagent", args: { tasks: [
     { agent: "scout", task: "scenario:env A" }, { agent: "scout", task: "scenario:env B" }, { agent: "scout", task: "scenario:env C" },
   ] } }],
+  // oxy-flow: 결정 기록 → 커밋 → 노드 / 사용량이 큰 응답으로 compaction · 세션 넘기기를 유발 (usage = prompt_tokens)
+  "flow-commit": [
+    { tool: "flow_note", args: { kind: "decision", text: "Store sessions in SQLite", why: "no DB server in the closed network" } },
+    bash("echo hi > f.txt && git add f.txt && git -c user.name=t -c user.email=t@t commit -qm 'feat: add f'"),
+    { text: "committed" },
+  ],
+  "flow-big": [bash("echo step-one"), { ...bash("echo step-two"), usage: 120000 }, { text: "after-compaction" }],
+  "flow-half": [{ text: "half-full", usage: 75000 }],
   "sub-async": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env async check", wait: false } }, { text: "Delegated; waiting." }],
 };
 
@@ -87,7 +95,8 @@ http.createServer((req, res) => {
       break;
     }
     const anchorText = anchor >= 0 ? contentText(body.messages[anchor].content) : "";
-    const name = anchorText.match(/scenario:([\w-]+)/)?.[1] ?? "env";
+    // compaction 뒤에는 요약(oxy-flow) 안의 "Latest user request" 가 원래 요청이다
+    const name = anchorText.match(/Latest user request: scenario:([\w-]+)/)?.[1] ?? anchorText.match(/scenario:([\w-]+)/)?.[1] ?? "env";
     const script = SCENARIOS[name] ?? SCENARIOS.env;
     const step = body.messages.slice(anchor + 1).filter((m) => m.role === "assistant").length;
     const choice = (delta, finish_reason = null) => ({ ...base, choices: [{ index: 0, delta, finish_reason }] });
@@ -109,7 +118,8 @@ http.createServer((req, res) => {
       sse(res, choice({ role: "assistant", content: text }));
       sse(res, choice({}, "stop"));
     }
-    sse(res, { ...base, choices: [], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } });
+    const pt = item?.usage ?? 100;
+    sse(res, { ...base, choices: [], usage: { prompt_tokens: pt, completion_tokens: 10, total_tokens: pt + 10 } });
     res.end("data: [DONE]\n\n");
   });
 }).listen(port, "127.0.0.1", () => console.log(`mock-vllm listening on 127.0.0.1:${port}`));

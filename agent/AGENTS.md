@@ -16,6 +16,12 @@
 - Broad searches or reviews that would fill your context: delegate to `subagent` (scout = find facts, reviewer = review,
   worker = make a defined change). Give a complete task; the helper cannot see this conversation. Independent tasks can go in `tasks=[...]`.
 
+# Task log (survives context resets)
+
+- A `[oxy-flow] Task state` message is the record of earlier work in this task. Trust it; use `flow_show` for details of a step.
+- When you choose between options (design, library, approach, a fix for a failure), call `flow_note(kind="decision", text, why)`.
+  Before ending a turn with work left, set `flow_note(kind="next")`. Files, commands, failures and commits are recorded automatically.
+
 # Working rules
 
 - Read a file before editing it. Make small, targeted edits; do not rewrite whole files.

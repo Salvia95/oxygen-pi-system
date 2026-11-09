@@ -128,6 +128,21 @@ for f in settings.json models.json; do
     pass "agent/$f"
   else fail "agent/$f 없음 또는 JSON 오류 → just configure"; fi
 done
+# compaction 여유분 ≥ 모델 응답 최대치 (작으면 compaction 전에 한도를 넘어 실패 후 복구 경로로 감)
+if [[ -f "$OXY_HOME/agent/settings.json" && -f "$OXY_HOME/agent/models.json" ]]; then
+  ctxchk=$("$OXY_NODE" -e '
+    const fs = require("fs"); const [s, m] = process.argv.slice(1).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+    const reserve = s.compaction?.reserveTokens ?? 16384;
+    const maxOut = Math.max(0, ...Object.values(m.providers ?? {}).flatMap((p) => (p.models ?? []).map((x) => x.maxTokens ?? 0)));
+    console.log(`${reserve} ${maxOut} ${s.compaction?.enabled === false ? "off" : "on"}`);' \
+    "$(winpath "$OXY_HOME/agent/settings.json")" "$(winpath "$OXY_HOME/agent/models.json")" 2>/dev/null)
+  read -r reserve maxout cmp <<< "$ctxchk"
+  if [[ "$cmp" == off ]]; then wrn "compaction 꺼짐 — 작업 도중 컨텍스트가 차면 요청이 실패합니다"
+  elif [[ -n "$reserve" ]] && (( reserve > maxout )); then pass "compaction 여유분 ${reserve} > 응답 최대 ${maxout} 토큰"
+  else wrn "compaction 여유분 ${reserve:-?} ≤ 응답 최대 ${maxout:-?} 토큰 → settings.json compaction.reserveTokens 를 늘리세요"; fi
+  [[ -f "$OXY_HOME/agent/extensions/oxy-flow/index.ts" ]] && enabled_flow=${OXY_FLOW:-on} && \
+    pass "작업 기록 oxy-flow: ${enabled_flow} (compaction ${OXY_FLOW_COMPACT:-file} · 세션 넘기기 ${OXY_FLOW_ROLLOVER:-on} ${OXY_FLOW_ROLLOVER_PCT:-50}%)"
+fi
 [[ "${PI_OFFLINE:-}" == 1 && "${PI_SKIP_VERSION_CHECK:-}" == 1 && "${PI_TELEMETRY:-}" == 0 ]] \
   && pass "PI_OFFLINE / PI_SKIP_VERSION_CHECK / PI_TELEMETRY=0" || fail "pi 오프라인 환경변수 미설정"
 if [[ -f "$OXY_HOME/agent/models.json" && -f "$OXY_PI_CLI" ]]; then

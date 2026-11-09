@@ -203,6 +203,8 @@ const EXTENSIONS = [
   { key: "OXY_READ_BEFORE_EDIT", label: "oxy-read-before-edit", hint: "읽지 않은 파일 수정 차단" },
   { key: "OXY_LOOP_GUARD", label: "oxy-loop-guard", hint: "텍스트 tool call 재호출 안내 · 반복 호출 차단" },
   { key: "OXY_CONTEXT_BUDGET", label: "oxy-context-budget", hint: "긴 출력 축약 · 컨텍스트 사용률 표시" },
+  { key: "OXY_FLOW", label: "oxy-flow", hint: "작업 기록 (커밋 단위 결정) · compaction 을 작업 상태로 교체" },
+  { key: "OXY_FLOW_ROLLOVER", label: "세션 넘기기 (oxy-flow)", hint: "컨텍스트가 찬 뒤 새 메시지는 새 세션에서 이어감" },
   { key: "OXY_JOBS", label: "oxy-jobs", hint: "백그라운드 작업 · subagent · 작업 패널" },
   { key: "OXY_VLLM_METRICS", label: "vLLM 혼잡 감지 (oxy-jobs)", hint: "subagent 시작 전 vLLM /metrics 확인 · 기본 꺼짐", defaultOff: true },
 ];
@@ -210,6 +212,7 @@ const LIMITS = [
   { key: "OXY_TOOL_OUTPUT_MAX_CHARS", label: "bash·grep·find 출력 상한 (자)", def: 12000 },
   { key: "OXY_READ_MAX_CHARS", label: "read 출력 상한 (자)", def: 40000 },
   { key: "OXY_REPEAT_LIMIT", label: "같은 호출 반복 차단 횟수", def: 3 },
+  { key: "OXY_FLOW_ROLLOVER_PCT", label: "세션 넘기기 기준 컨텍스트 사용률 (%)", def: 50 },
   { key: "OXY_LLM_MAX_CONCURRENT", label: "subagent 동시 실행 수 (vLLM KV 캐시 고려)", def: 2 },
   { key: "OXY_JOBS_MAX_CONCURRENT", label: "백그라운드 bash 동시 실행 수", def: 4 },
 ];
