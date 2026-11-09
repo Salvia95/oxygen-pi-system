@@ -130,7 +130,23 @@ export function renderConfig(agentDir, vars) {
     writeFileSync(out, JSON.stringify(json, null, 2) + "\n");
     written.push(out);
   }
+  // psmux(선택 구성요소) 설정: wrappers/psmux 가 하네스 전용 서버(-L oxy)에 이 파일을 쓴다. pane 셸은 Git Bash
+  if (vars.OXY_SHELL_PATH) {
+    const out = join(agentDir, "psmux.conf");
+    writeFileSync(out, psmuxConf(vars.OXY_SHELL_PATH));
+    written.push(out);
+  }
   return written;
+}
+
+export function psmuxConf(shellPath) {
+  return [
+    "# oxygen-pi-system 이 만든 psmux 설정 (configure · 설치 TUI 가 다시 만든다 — 직접 고치지 말 것)",
+    `set -g default-shell "${String(shellPath).replace(/\\/g, "/")}"`,
+    "set -g history-limit 20000",
+    "set -g mouse on",
+    "",
+  ].join("\n");
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

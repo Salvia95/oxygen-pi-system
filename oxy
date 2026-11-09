@@ -9,4 +9,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 [[ -x "$OXY_NODE" ]] || { echo "[oxy] 번들 Node 없음: $OXY_NODE (설치가 끝났는지 확인)" >&2; exit 1; }
 [[ -f "$PI_CODING_AGENT_DIR/models.json" ]] || { echo "[oxy] models.json 없음 → 'just configure' 먼저 실행" >&2; exit 1; }
 
+# oxy mux [pi 인자…]: 지금 폴더 이름의 psmux 세션 안에서 pi 를 실행한다 (있으면 다시 붙음).
+#   세션 안에서는 /jobs 의 로그를 옆 pane 으로 열 수 있고, 창을 닫아도 psmux 세션은 남는다 (oxy mux 로 다시 붙음).
+if [[ "${1:-}" == mux ]]; then
+  shift
+  [[ -x "$OXY_HOME/bin/psmux.exe" ]] || { echo "[oxy] psmux 가 반입되지 않았습니다 (선택 구성요소 dev-tools/psmux)" >&2; exit 1; }
+  [[ -n "${TMUX:-}" ]] && exec "$OXY_NODE" "$OXY_PI_CLI" "$@"   # 이미 psmux 안
+  name="oxy-$(basename "$PWD" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-40)"
+  cmd="$(printf '%q' "$OXY_HOME/oxy")"; for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done   # pane 의 bash 가 해석
+  exec "$OXY_HOME/wrappers/psmux" new-session -A -s "$name" -c "$(cygpath -w "$PWD")" "$cmd"
+fi
+
 exec "$OXY_NODE" "$OXY_PI_CLI" "$@"

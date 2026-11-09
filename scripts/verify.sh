@@ -68,6 +68,7 @@ opt_tool "gh"            bin/gh.exe            github-workflow      gh --version
 opt_tool "agent-browser" bin/agent-browser.exe web-page-automation  agent-browser --version
 opt_tool "obscura"       bin/obscura.exe       web-page-reading     obscura --version
 opt_tool "usql"          bin/usql.exe          sql-querying         usql --version
+opt_tool "psmux"         bin/psmux.exe         terminal-session-control psmux -V
 opt_tool "ast-grep"      bin/ast-grep.exe      structural-code-search ast-grep --version
 if [[ -f "$OXY_HOME/vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" ]]; then
   # mcp.json 이 없거나 dbhub 항목이 없으면 0 (set -e/pipefail 에서 멈추지 않도록 || true)

@@ -69,6 +69,10 @@ install_component() {
     fd|rg|just|glab|gh|usql)
       t=$(fresh_tmp "$name"); extract_zip "$file" "$t"
       copy_found "$t" "$BIN" "$name.exe" ;;
+    psmux)
+      # 같은 바이너리의 별칭 pmux.exe · tmux.exe 는 두지 않는다 (명령 이름은 psmux 로 통일)
+      t=$(fresh_tmp psmux); extract_zip "$file" "$t"
+      copy_found "$t" "$BIN" "psmux.exe" ;;
     ast-grep)
       # 압축 안에 ast-grep.exe 와 같은 바이너리의 별칭 sg.exe 가 있다 → ast-grep.exe 만 둔다
       t=$(fresh_tmp ast-grep); extract_zip "$file" "$t"
@@ -115,6 +119,7 @@ prune_paths() {
     gh) echo bin/gh.exe ;;
     usql) echo bin/usql.exe ;;
     ast-grep) echo bin/ast-grep.exe ;;
+    psmux) echo bin/psmux.exe ;;
     obscura) echo bin/obscura.exe bin/obscura-worker.exe ;;
     dbhub) echo vendor/dbhub ;;
     agent-browser) echo bin/agent-browser.exe vendor/agent-browser-skill-data ;;

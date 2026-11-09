@@ -32,6 +32,13 @@ function shellPath(agentDir: string): string {
   return process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
 }
 
+/** 하네스에 반입된 psmux.exe (없으면 null). pane 안에서는 $TMUX 로 같은 서버를 찾는다 */
+function psmuxExe(): string | null {
+  const home = process.env.OXY_HOME;
+  const p = home ? join(home, "bin", "psmux.exe") : "";
+  return p && existsSync(p) ? p : null;
+}
+
 const ok = (text: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text" as const, text }], details });
 
 export default function (pi: ExtensionAPI) {
@@ -235,14 +242,21 @@ export default function (pi: ExtensionAPI) {
       const pick = await ctx.ui.select("작업", jobs.map((j) => `${ICON[j.state]} ${j.id}  ${j.kind}  ${j.label.slice(0, 50)}`));
       const job = jobs.find((j) => pick?.includes(` ${j.id} `));
       if (!job) return;
-      const actions = ["로그 보기", ...(process.env.WT_SESSION ? ["옆 창에 로그 열기 (Windows Terminal)"] : []),
+      // psmux 안($TMUX)이면 같은 세션에 pane 을 나누고, 아니면 Windows Terminal 창을 나눈다
+      const psmux = process.env.TMUX ? psmuxExe() : null;
+      const actions = ["로그 보기",
+        ...(psmux ? ["옆 pane 에 로그 열기 (psmux)"] : process.env.WT_SESSION ? ["옆 창에 로그 열기 (Windows Terminal)"] : []),
         ...(job.state === "running" || job.state === "queued" ? ["중지"] : []), "닫기"];
       const act = await ctx.ui.select(`${job.id} · ${job.state}`, actions);
+      const posix = job.logFile.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_m: string, d: string) => `/${d.toLowerCase()}`);
       if (act === "로그 보기") {
         const text = existsSync(job.logFile) ? readFileSync(job.logFile, "utf8").split(/\r?\n/).slice(-300).join("\n") : job.tail.join("\n");
         await ctx.ui.editor(`${job.id} 로그 (마지막 300줄 · 편집 내용은 저장되지 않음)`, text);
+      } else if (act?.startsWith("옆 pane") && psmux) {
+        // pane 셸(Git Bash)이 명령을 해석한다. -d: 포커스는 pi 에 둔다
+        spawn(psmux, ["split-window", "-h", "-d", "-l", "40%", `tail -n 100 -f '${posix}'`],
+          { detached: true, stdio: "ignore", windowsHide: true }).unref();
       } else if (act?.startsWith("옆 창")) {
-        const posix = job.logFile.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_m: string, d: string) => `/${d.toLowerCase()}`);
         spawn("wt.exe", ["-w", "0", "split-pane", "--title", job.id, shellPath(agentDir), "-c", `tail -n 100 -f '${posix}'`],
           { detached: true, stdio: "ignore", windowsHide: true }).unref();
       } else if (act === "중지") {

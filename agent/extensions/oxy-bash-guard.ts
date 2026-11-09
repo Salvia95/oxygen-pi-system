@@ -118,10 +118,67 @@ function normalizeSegment(seg: string): string {
       .replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)\s+/, "")
       .replace(/^(?:sudo|command|builtin|exec|time|nohup|env|nice)\s+(?:-\S+\s+)*/, "")
       .replace(/^xargs\s+(?:-\S+\s+)*/, "")
-      .replace(/^(?:\S*[\\/])?(rm|git|glab|gh|u?sql|npm|pnpm|yarn|pip3?|dd)(?:\.exe)?(?=\s|$)/i, "$1");
+      .replace(/^(?:\S*[\\/])?(rm|git|glab|gh|u?sql|npm|pnpm|yarn|pip3?|dd|psmux|pmux|tmux)(?:\.exe)?(?=\s|$)/i, "$1");
     if (next === s) return s;
     s = next;
   }
+}
+
+/** 따옴표를 풀어 인자 목록으로 (작은따옴표는 그대로, 큰따옴표 안의 \" \\ 처리) */
+function tokenize(seg: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  let has = false;
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === '"' && /["\\$`]/.test(seg[i + 1] ?? "")) cur += seg[++i];
+      else cur += c;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; has = true; continue; }
+    if (c === "\\") { cur += seg[++i] ?? ""; has = true; continue; }
+    if (/\s/.test(c)) { if (cur || has) out.push(cur); cur = ""; has = false; continue; }
+    cur += c; has = true;
+  }
+  if (cur || has) out.push(cur);
+  return out;
+}
+
+const MUX_RUN = /^(?:new-session|new|split-window|splitw|new-window|neww|respawn-pane|respawnp|respawn-window|respawnw|run-shell|run|pipe-pane|pipep|display-popup|popup)$/;
+const MUX_SEND = /^(?:send-keys|send)$/;
+/** 값을 받는 옵션 (psmux/tmux 공통) */
+const MUX_VALUE_FLAGS = /^-[tscnxyleFN]$/; // -d -h -v -b -P 등은 값 없음
+/** send-keys 의 키 이름 (명령 텍스트가 아님) */
+const MUX_KEY = /^(?:Enter|C-m|C-j|KPEnter|Escape|Tab|BTab|Space|BSpace|Up|Down|Left|Right|Home|End|PageUp|PageDown|PPage|NPage|IC|DC|F\d{1,2}|[CMS]-.+)$/;
+
+/**
+ * psmux/tmux 로 다른 명령을 실행시키는 경우(send-keys 로 타이핑, new-session·split-window 의 시작 명령, run-shell)
+ * 그 안의 명령 텍스트를 꺼낸다. bash-guard 를 우회하지 못하도록 같은 규칙으로 다시 검사한다.
+ * send-keys -H(16진 바이트)는 내용을 검사할 수 없으므로 null 이 아닌 "" 를 돌려 확인 대상으로 만든다.
+ */
+export function muxPayloads(segment: string): string[] {
+  const t = tokenize(segment);
+  if (!/^(?:psmux|pmux|tmux)$/i.test(t[0] ?? "")) return [];
+  let i = 1;
+  while (i < t.length && t[i].startsWith("-")) i += /^-[LSf]$/.test(t[i]) ? 2 : 1; // 전역 옵션
+  const sub = t[i] ?? "";
+  if (!MUX_RUN.test(sub) && !MUX_SEND.test(sub)) return [];
+  const send = MUX_SEND.test(sub);
+  const rest: string[] = [];
+  let hex = false;
+  for (let j = i + 1; j < t.length; j++) {
+    const a = t[j];
+    if (a === "--") { rest.push(...t.slice(j + 1)); break; }
+    if (send && a === "-H") { hex = true; continue; }
+    if (/^-[A-Za-z]+$/.test(a)) { if (MUX_VALUE_FLAGS.test(a) && !(send && a === "-l")) j++; continue; }
+    rest.push(a);
+  }
+  if (hex) return [""];
+  const text = (send ? rest.filter((a) => !MUX_KEY.test(a)) : rest).join(send ? "" : " ");
+  return text.trim() ? [text] : [];
 }
 
 function sqlScriptsText(command: string, cwd: string): string {
@@ -157,6 +214,15 @@ export function inspect(command: string, cwd: string): Finding[] {
   for (const segment of segments) {
     for (const rule of RULES) {
       if (rule.test.test(segment)) { findings.push({ rule, segment }); break; }
+    }
+    // psmux/tmux 로 실행시키는 명령도 같은 규칙으로 (send-keys 타이핑 · 세션 시작 명령 · run-shell)
+    for (const payload of muxPayloads(segment)) {
+      if (!payload) {
+        findings.push({ segment, rule: { id: "mux-raw", level: "ask", title: "psmux 로 원시 바이트 전송 (내용 검사 불가)",
+          hint: "Raw byte input (send-keys -H) cannot be checked. Send the command as text instead." } });
+        continue;
+      }
+      for (const f of inspect(payload, cwd)) findings.push({ rule: f.rule, segment: `${segment.slice(0, 120)} → ${f.segment}` });
     }
   }
   if (segments.some((s) => /^u?sql(?:\s|$)/i.test(s)) && SQL_WRITE.test(command + sqlScriptsText(command, cwd))) {

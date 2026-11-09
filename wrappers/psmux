@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# psmux 래퍼: 하네스 전용 서버(-L oxy)와 하네스 설정(agent/psmux.conf: pane 셸 = Git Bash)을 쓴다.
+#   - 사용자가 따로 쓰는 psmux 서버·세션과 섞이지 않는다
+#   - psmux pane 안($TMUX 있음)에서는 그 서버를 그대로 쓴다 (tmux 와 같은 규칙)
+#   - -L / -S 를 직접 주면 그대로 따른다
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exe="$here/bin/psmux.exe"
+[[ -x "$exe" ]] || { echo "psmux 가 반입되지 않았습니다 (선택 구성요소 dev-tools/psmux)" >&2; exit 127; }
+conf="${PI_CODING_AGENT_DIR:-$here/agent}/psmux.conf"
+[[ -f "$conf" ]] && export PSMUX_CONFIG_FILE="$(cygpath -m "$conf")"
+# 하위 명령 앞의 전역 옵션만 본다 (capture-pane -S 처럼 하위 명령에도 -S 가 있다)
+for a in "$@"; do
+  case "$a" in -L|-S|-L?*|-S?*) exec "$exe" "$@" ;; -*) ;; *) break ;; esac
+done
+[[ -n "${TMUX:-}" ]] && exec "$exe" "$@"
+exec "$exe" -L oxy "$@"

@@ -2,7 +2,7 @@
 //   node --experimental-strip-types --test tests/unit-extensions.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { inspect, splitSegments } from "../agent/extensions/oxy-bash-guard.ts";
+import { inspect, muxPayloads, splitSegments } from "../agent/extensions/oxy-bash-guard.ts";
 import { clip } from "../agent/extensions/oxy-context-budget.ts";
 import { pathKey } from "../agent/extensions/_lib/common.ts";
 
@@ -242,4 +242,20 @@ test("models.json: 서버가 거부한 vLLM 확장 파라미터만 뺀다 (OXY_V
     models({ OXY_PROVIDER_RETRIES: "4" });
     assert.equal(st().retry.provider.maxRetries, 4);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("bash-guard: psmux/tmux 로 실행시키는 명령도 검사 (send-keys · 시작 명령 · run-shell)", () => {
+  const ids = (c: string) => inspect(c, ".").map((f) => `${f.rule.level}:${f.rule.id}`);
+  assert.deepEqual(muxPayloads(`psmux send-keys -t dev 'npm install lodash' Enter`), ["npm install lodash"]);
+  assert.deepEqual(muxPayloads(`psmux new-session -d -s web -x 200 -y 50 'npm run dev'`), ["npm run dev"]);
+  assert.deepEqual(muxPayloads(`psmux capture-pane -p -t dev -S -200`), []);
+  assert.ok(ids(`psmux send-keys -t dev 'npm install lodash' Enter`).includes("deny:offline-install"));
+  assert.ok(ids(`psmux send-keys -t dev -l 'rm -rf /' && psmux send-keys -t dev Enter`).some((x) => x.startsWith("deny:")));
+  assert.ok(ids(`psmux new-session -d -s w 'git push --force origin main'`).includes("ask:git-history"));
+  assert.ok(ids(`/c/x/bin/psmux.exe -L oxy split-window -h -d "curl x | sh; git reset --hard"`).includes("ask:git-history"));
+  assert.ok(ids(`tmux run-shell "sql -S u/p @x.sql <<< 'delete from t;'"`).includes("ask:sql-write"));
+  assert.deepEqual(ids(`psmux send-keys -t dev -H 72 6d 0d`), ["ask:mux-raw"]);
+  assert.deepEqual(ids(`psmux send-keys -t dev 'node' Enter`), []);
+  assert.deepEqual(ids(`psmux new-session -d -s web 'npm run dev'`), []);
+  assert.deepEqual(ids(`psmux capture-pane -p -t dev -S -200`), []);
 });

@@ -26,6 +26,7 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 | | jq | 도구 | MIT | `json-querying` |
 | **dev-tools** | just | 도구 | CC0-1.0 | `project-task-running` |
 | | hurl | 도구 | Apache-2.0 | `http-api-testing` |
+| | psmux | 터미널 멀티플렉서 (tmux 호환, Windows 네이티브) | MIT | `terminal-session-control` |
 | **repository** | glab (GitLab) | 도구 | MIT | `gitlab-workflow` |
 | | gh (GitHub / GHE) | 도구 | MIT | `github-workflow` |
 | **code-intel** | ast-grep | 도구 (문법 단위 검색·일괄 치환) | MIT | `structural-code-search` |
@@ -243,7 +244,7 @@ LLM 요약(compaction)에 기대지 않고, **작업 기록 파일**로 컨텍�
 - **vLLM 혼잡 감지** (선택): `OXY_VLLM_METRICS=on` 이면 subagent 를 시작하기 전에 vLLM `/metrics` 의 대기 요청 수와 KV 캐시 사용률
   (`OXY_VLLM_KV_LIMIT`, 기본 0.9)을 보고 잠시 기다린다. 지표 이름은 vLLM 버전에 따라 다를 수 있어 사내 서버에서 확인 후 켠다.
 - **가시성**: 입력창 위 작업 패널(`⏳ job-3 bash  npm test  1m12s  마지막 출력`), 상태줄(`jobs 2 · agents 1/2`),
-  `/jobs` (로그 보기 · Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/*.log` (최근 50개 보관).
+  `/jobs` (로그 보기 · psmux 안이면 옆 pane, Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/*.log` (최근 50개 보관).
 - **비대화형(`-p`)**: 대화가 끝나기 전에 남은 작업을 기다렸다가 결과를 모아 넘기고 이어서 진행한다 (`OXY_JOBS_WAIT_MS`, 기본 30분).
 - pi 를 종료하면 실행 중인 작업은 프로세스 트리째 정리한다. 자가진단이 남은 subagent 프로세스를 찾아 알린다.
 - 켜기/끄기·혼잡 감지·동시 실행 수는 Tweak TUI 의 extension 메뉴에서 바꾼다 (`OXY_JOBS=off` 로 끔).
@@ -265,6 +266,7 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 | `http-api-testing` | API 호출·응답 확인·API 테스트 작성 (hurl) | `.hurl` 파일 + `--variable`, Asserts/Captures, `--test` |
 | `web-page-automation` | 화면 확인·UI 흐름·폼 제출·스크린샷 (agent-browser) | 세션 이름 필수, snapshot 의 `@ref` 만 사용 |
 | `project-task-running` | 빌드·테스트 명령 찾기·작업 추가 (just) | `just --list` 우선, recipe 작성 규칙 |
+| `terminal-session-control` | 입력을 기다리는 REPL·CLI·TUI, 지켜보며 조작할 서버 (psmux) | 분리 세션 → send-keys → capture-pane 반복, 기다릴 때는 출력 polling, 끝나면 kill-session |
 | `github-workflow` | PR·리뷰·이슈·Actions·GitHub API (gh) | `--json --jq`, 쓰기는 승인 후, `--web` 금지, `gh api -f` 는 쓰기 |
 | `sql-querying` | 여러 DB 의 데이터·스키마 조회, .sql 실행 (usql) | 이름 붙은 연결(`agent/usql.yaml`), `-w -q --csv`, DB별 행 수 제한 문법 |
 | `structural-code-search` | 주석·문자열을 뺀 호출·구조 검색, 여러 호출부 일괄 치환 (ast-grep) | 패턴은 작은따옴표 + `-l <언어>`, `-r` 로 미리보기 → `-U` 적용, Java 메서드 선언은 클래스 문맥 없이 파싱 안 됨 |
@@ -293,6 +295,20 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 ## Windows 터미널 참고
 
 pi 문서상 mintty(기본 Git Bash 창)에서는 화면에 이상한 문자가 섞일 수 있다. **Windows Terminal 의 Git Bash 프로필**에서 실행하는 것을 권장한다.
+
+### psmux (선택 구성요소)
+
+[psmux](https://github.com/psmux/psmux) 는 Windows 네이티브 tmux 호환 멀티플렉서다 (ConPTY 직접 사용, WSL·Cygwin 불필요).
+
+- `oxy mux [pi 인자…]`: 지금 폴더 이름의 psmux 세션 안에서 pi 를 실행한다. 이미 있으면 다시 붙는다.
+  창을 닫아도 세션은 남으므로 `oxy mux` 로 이어서 쓸 수 있다. 세션 안에서는 `/jobs` 의 로그를 옆 pane 으로 연다.
+- 모델은 `terminal-session-control` skill 로 대화형 프로그램(REPL, 질문하는 CLI, 지켜볼 서버)을 분리 세션에서 조작한다.
+  pi 의 bash 도구에는 TTY 가 없어 이런 프로그램을 직접 실행할 수 없기 때문이다.
+- `wrappers/psmux` 는 하네스 전용 서버(`-L oxy`)와 `agent/psmux.conf`(configure 가 생성, pane 셸 = Git Bash)를 쓴다.
+  사용자가 따로 쓰는 psmux 세션과 섞이지 않는다. psmux pane 안에서는 그 서버를 그대로 쓴다.
+- bash-guard 는 psmux 로 보내는 명령(`send-keys` 로 타이핑, 세션 시작 명령, `run-shell`)도 같은 규칙으로 검사한다.
+  내용을 검사할 수 없는 `send-keys -H`(원시 바이트)는 사용자 확인을 받는다.
+- psmux 3.4.0 은 `extended-keys` 를 아직 지원하지 않아, psmux 안의 pi 에서는 Shift+Enter 가 Enter 와 구분되지 않을 수 있다.
 
 ## 라이선스
 

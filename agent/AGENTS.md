@@ -4,7 +4,8 @@
 - Native Windows programs need Windows paths: convert with `cygpath -m <path>` when passing paths to them.
 - **No internet access.** Never run `npm install`, `pip install`, `curl` to public hosts, or anything that downloads. If a dependency is missing, stop and tell the user.
 - CLI tools: `fd`, `rg`, `jq`, `git` are always present. Optional ones (only if brought in): `just`, `hurl`, `glab`, `gh`,
-  `ast-grep`, `usql`, `sql` (Oracle SQLcl), `agent-browser`, `obscura`. If `mcp__graphin__*` tools exist, use them to navigate code.
+  `ast-grep`, `psmux`, `usql`, `sql` (Oracle SQLcl), `agent-browser`, `obscura`.
+- Never run a program that waits for keyboard input in `bash` (it hangs). If `psmux` is present, use it (terminal-session-control skill). If `mcp__graphin__*` tools exist, use them to navigate code.
   A skill is listed only for tools that are installed. Read the matching skill before using a tool: usage here differs from the defaults you may know.
   If a command is not found, tell the user it was not brought in. Never try to install it.
 - Prefer the `grep`, `find`, `ls`, `read` tools over shell equivalents for exploring code.

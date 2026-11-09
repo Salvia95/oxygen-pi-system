@@ -55,7 +55,7 @@ log "압축 중: $out"
     --exclude="$base/agent/auth.json" --exclude="$base/agent/models-store.json" --exclude="$base/agent/skills" \
     --exclude="$base/agent/usql.yaml" --exclude="$base/agent/dbhub.toml" --exclude="$base/agent/connections.json" \
     --exclude="$base/agent/secrets.json" --exclude="$base/agent/mcp.json" --exclude="$base/agent/mcp.log*" \
-    --exclude="$base/agent/mcp-auth.json" --exclude="$base/agent/jobs" \
+    --exclude="$base/agent/mcp-auth.json" --exclude="$base/agent/jobs" --exclude="$base/agent/psmux.conf" \
     "$base"
 )
 (cd "$OXY_HOME/dist" && sha256sum "$name.zip" > "$name.zip.sha256")

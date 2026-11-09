@@ -49,6 +49,7 @@ export const CATALOG = {
   hurl: { title: "hurl", kind: "tool", purpose: "HTTP API 호출·테스트", check: "bin/hurl.exe", skills: ["http-api-testing"] },
   glab: { title: "glab", kind: "tool", purpose: "GitLab MR·이슈·CI", check: "bin/glab.exe", skills: ["gitlab-workflow"] },
   gh: { title: "gh", kind: "tool", purpose: "GitHub / GitHub Enterprise PR·이슈·Actions", check: "bin/gh.exe", skills: ["github-workflow"] },
+  psmux: { title: "psmux", kind: "tool", purpose: "터미널 멀티플렉서 (tmux 호환) · 대화형 프로그램 조작 · oxy mux · /jobs 로그 pane", check: "bin/psmux.exe", skills: ["terminal-session-control"] },
   "ast-grep": { title: "ast-grep", kind: "tool", purpose: "문법(AST) 단위 코드 검색·일괄 치환 (주석·문자열 제외, 구조로 매칭)", check: "bin/ast-grep.exe", skills: ["structural-code-search"] },
   // graphin: Windows 빌드가 아직 배포되지 않아 manifest(fetch) 에는 없다. 직접 빌드한 graphin.exe 를 vendor/graphin/ 에 넣으면
   // pi MCP 서버로 등록되고 skill 이 켜진다 (external: fetch 대상 아님)

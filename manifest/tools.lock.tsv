@@ -11,6 +11,7 @@ rg	15.2.0	https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep
 jq	1.8.2	https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe	a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627	MIT	required	core
 just	1.59.0	https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-x86_64-pc-windows-msvc.zip	9c5463e2d0974e31bee71346aa5cbf19167de1585a4abc1bae7b3b04604ea9c0	CC0-1.0	optional	dev-tools
 hurl	8.1.0	https://github.com/Orange-OpenSource/hurl/releases/download/8.1.0/hurl-8.1.0-x86_64-pc-windows-msvc.zip	dd4eb70d966f37f872d5df9be3926ea18d97e9a93f216cd0875bf0db447d7798	Apache-2.0	optional	dev-tools
+psmux	3.4.0	https://github.com/psmux/psmux/releases/download/v3.4.0/psmux-v3.4.0-windows-x64.zip	a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721	MIT	optional	dev-tools
 glab	1.128.0	https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.128.0/glab_1.128.0_windows_amd64.zip	641d86af5d72c17a7d79154a6436e9c68a54c69db2172020cc4036e0776a4832	MIT	optional	repository
 gh	2.103.3	https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_windows_amd64.zip	98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0	MIT	optional	repository
 ast-grep	0.51.1	https://github.com/ast-grep/ast-grep/releases/download/0.51.1/app-x86_64-pc-windows-msvc.zip	12a0cefb77498820ef6fb302ed8758cbda39be87d4c15120dc74c1dea968a50d	MIT	optional	code-intel
