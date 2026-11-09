@@ -100,7 +100,19 @@ if (( HAS_AB )); then
   else fail "agent-browser 가이드 없음: $AGENT_BROWSER_SKILLS_DIR"; fi
 fi
 
-section "4. skill / Git Bash 보정"
+section "4. 백그라운드 작업 · subagent (oxy-jobs)"
+if [[ -f "$OXY_HOME/agent/extensions/oxy-jobs/index.ts" ]]; then
+  agents=$(find "$OXY_HOME/agent/agents" -name '*.md' 2>/dev/null | sed 's|.*/||; s|\.md$||' | sort | tr '\n' ' ')
+  [[ -n "$agents" ]] && pass "subagent 정의: $agents(동시 실행 ${OXY_LLM_MAX_CONCURRENT:-2})" || wrn "agent/agents 에 정의 없음 → subagent 도구 비활성"
+  # 이전 세션에서 남은 작업 프로세스 (pi 를 강제 종료하면 남을 수 있음)
+  # node.exe 만 센다 (이 검사를 실행하는 PowerShell 의 명령줄에도 같은 문자열이 들어가므로)
+  left=$(powershell -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -like '*--mode json -p --no-session*' }).Count" 2>/dev/null | tr -d '\r ')
+  if [[ "${left:-0}" =~ ^[0-9]+$ ]] && (( left > 0 )); then wrn "실행 중인 subagent 프로세스 ${left}개 (pi 가 실행 중이 아니면 작업 관리자에서 정리)"
+  else pass "남은 subagent 프로세스 없음"; fi
+  [[ "${OXY_VLLM_METRICS:-off}" =~ ^(on|1|true)$ ]] && pass "vLLM 혼잡 감지 사용 (/metrics)" || pass "vLLM 혼잡 감지 꺼짐 (OXY_VLLM_METRICS=on 으로 켬)"
+else wrn "oxy-jobs extension 없음"; fi
+
+section "5. skill / Git Bash 보정"
 skills=$(find "$OXY_HOME/agent/skills" -name SKILL.md 2>/dev/null | sed 's|/SKILL.md$||; s|.*/||' | sort | tr '\n' ' ')
 [[ -n "$skills" ]] && pass "pi skill: $skills" || fail "agent/skills 에 SKILL.md 없음"
 if jq -n '1' | od -c | grep -q '\\r'; then fail "jq 출력에 CR 포함 (wrappers/jq 확인)"; else pass "jq 출력 LF (wrappers/jq)"; fi
@@ -109,7 +121,7 @@ if [[ -z "$rgout" ]]; then fail "rg 실행 결과 없음"
 elif [[ "$rgout" == *'\'* ]]; then fail   # 주의: Git Bash 에서 *\\* 패턴은 역슬래시와 매칭되지 않음 "rg 가 역슬래시 경로 출력 (RIPGREP_CONFIG_PATH 확인)"
 else pass "rg 경로 / 구분 (config/ripgreprc)"; fi
 
-section "5. pi 설정"
+section "6. pi 설정"
 for f in settings.json models.json; do
   p="$OXY_HOME/agent/$f"
   if [[ -f "$p" ]] && "$OXY_NODE" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$(winpath "$p")" 2>/dev/null; then
@@ -125,7 +137,7 @@ if [[ -f "$OXY_HOME/agent/models.json" && -f "$OXY_PI_CLI" ]]; then
 fi
 
 if [[ $CHECK_LLM == 1 ]]; then
-  section "6. 사내 vLLM (${OXY_VLLM_BASE_URL:-미설정})"
+  section "7. 사내 vLLM (${OXY_VLLM_BASE_URL:-미설정})"
   if [[ -z "${OXY_VLLM_BASE_URL:-}" ]]; then fail "OXY_VLLM_BASE_URL 미설정 (agent/oxy.env)"
   elif resp=$(curl -fsS -m 5 -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" "$OXY_VLLM_BASE_URL/models" 2>&1); then
     # jq.exe 는 CRLF 로 출력하므로 \r 제거 (안 하면 모델명 비교가 항상 실패)

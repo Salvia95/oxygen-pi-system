@@ -27,3 +27,5 @@
 /agent/mcp.json
 /agent/mcp.log*
 /agent/mcp-auth.json
+# oxy-jobs 작업 로그
+/agent/jobs/

@@ -107,3 +107,18 @@ test("skill 자동 활성화: 설치된 구성요소의 skill 만", async () => 
   assert.deepEqual(syncSkills(root, join(root, "agent"), { browser: "none" }), ["find-code", "json-querying", "sql-querying"]);
   assert.ok(readdirSync(join(root, "agent", "skills")).includes("my-custom"), "사용자 skill 은 유지");
 });
+
+test("oxy-jobs: Semaphore 동시 실행 제한 · vLLM metrics 해석", async () => {
+  const { Semaphore, parseVllmMetrics, fmtDuration } = await import("../agent/extensions/oxy-jobs/manager.ts");
+  const s = new Semaphore(2);
+  const order: string[] = [];
+  const work = async (n: string, ms: number) => { const rel = await s.acquire(); order.push(`+${n}`); await new Promise((r) => setTimeout(r, ms)); order.push(`-${n}`); rel(); };
+  await Promise.all([work("a", 30), work("b", 30), work("c", 5)]);
+  assert.deepEqual(order.slice(0, 2).sort(), ["+a", "+b"]);          // c 는 앞의 둘 중 하나가 끝난 뒤에 시작
+  assert.ok(order.indexOf("+c") > Math.min(order.indexOf("-a"), order.indexOf("-b")));
+  assert.equal(s.running, 0);
+  const m = parseVllmMetrics('# HELP\nvllm:num_requests_waiting{model_name="a"} 2\nvllm:num_requests_waiting{model_name="b"} 1\nvllm:num_requests_running{model_name="a"} 4\nvllm:gpu_cache_usage_perc{model_name="a"} 0.93\n');
+  assert.deepEqual(m, { waiting: 3, running: 4, kvCache: 0.93 });
+  assert.deepEqual(parseVllmMetrics("other_metric 1\n"), { waiting: 0, running: 0, kvCache: null });
+  assert.equal(fmtDuration(72000), "1m12s");
+});

@@ -10,7 +10,7 @@ source "$OXY_HOME/env.sh"
 PORT="${1:-18000}"
 TMP="$(mktemp -d)"; trap 'kill "${MOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/agent" "$TMP/work"
-cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skill-library" "$TMP/agent/"
+cp -r "$OXY_HOME/agent/AGENTS.md" "$OXY_HOME/agent/templates" "$OXY_HOME/agent/bin" "$OXY_HOME/agent/extensions" "$OXY_HOME/agent/skill-library" "$OXY_HOME/agent/agents" "$TMP/agent/"
 cat > "$TMP/agent/oxy.env" <<ENV
 OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1
 OXY_VLLM_API_KEY=mock-key
@@ -30,7 +30,7 @@ if (( HAS_DBHUB )); then
 fi
 
 REQLOG="$TMP/requests.jsonl"
-"$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$PORT" "$(winpath "$REQLOG")" >/dev/null & MOCK_PID=$!
+MOCK_CHILD_DELAY_MS=300 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$PORT" "$(winpath "$REQLOG")" >/dev/null & MOCK_PID=$!
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && break; sleep 0.1; done
 
 F=0
@@ -56,7 +56,7 @@ chk "요청 2회 (tool call → 결과 회신)"          '[[ $(nreq) -eq 2 ]]'
 chk "model id / Authorization"               '[[ $(first .body.model) == qwen3.6-coder-30b && $(first .headers.authorization) == "Bearer mock-key" ]]'
 chk "max_tokens 사용, store·developer role 없음" '[[ $(first ".body.max_tokens // empty") != "" && $(first ".body | has(\"store\")") == false && $(first "[.body.messages[].role] | index(\"developer\")") == null ]]'
 chk "sampling (temperature 0.7, top_k 20)"   '[[ $(first .body.temperature) == 0.7 && $(first .body.top_k) == 20 ]]'
-chk "내장 tools 7종 (+MCP direct 도구)"        '[[ $(first "[.body.tools[].function.name | select(startswith(\"mcp__\") | not)] | sort | join(\",\")") == "bash,edit,find,grep,ls,read,write" ]]'
+chk "내장 tools 7종 + oxy-jobs 2종 (+MCP direct)" '[[ $(first "[.body.tools[].function.name | select(startswith(\"mcp__\") | not)] | sort | join(\",\")") == "background,bash,edit,find,grep,ls,read,subagent,write" ]]'
 chk "AGENTS.md 가 시스템 프롬프트에 포함"        '[[ $(first ".body.messages[0].content | tostring | contains(\"oxygen-pi-system\")") == true ]]'
 SYS="$(first '.body.messages[0].content | tostring')"
 ENABLED=$(ls "$TMP/agent/skills")
@@ -98,6 +98,35 @@ if (( HAS_DBHUB )); then
 else
   log "dbhub 미포함 → DB MCP 시나리오 생략"
 fi
+
+# ---- oxy-jobs: 백그라운드 작업 · subagent ----
+run bg-start
+chk "background: 끝나면 결과를 알리고 이어서 응답"  '[[ "$out" == *"[oxy-jobs] job-1 done (exit 0)"* && "$out" == *"bg-finished-ok"* ]]'
+chk "background: 작업 로그 파일"               '[[ -n "$(ls "$TMP/agent/jobs/"*-job-1.log 2>/dev/null)" ]]'
+
+run bg-guard
+chk "background 도 bash-guard 검사 (npm install 차단)" '[[ "$out" == *"oxy-guard/offline-install"* ]]'
+
+run sub-sync
+chk "subagent: 별도 컨텍스트 실행 후 결과 반환"     '[[ "$out" == *"(scout: scenario:env check the environment) done"* && "$out" == *"hello-from-Msys"* ]]'
+chk "subagent: 자식에는 지정한 도구만 (재귀 방지)"   '[[ $(jq -r "select(.body.messages | map(select(.role==\"user\"))[0].content | tostring | contains(\"Task:\")) | [.body.tools[].function.name] | sort | join(\",\")" "$REQ" | sort -u) == "bash,find,grep,ls,read" ]]'
+
+run sub-async
+chk "subagent wait=false: 완료 후 결과 알림"        '[[ "$out" == *"(scout: scenario:env async check) done"* ]]'
+
+# 동시 실행 제한: 자식 요청을 300ms 씩 늦춘 상태에서 요청이 들어온 순서로 판별
+order() { jq -r '.body.messages | map(select(.role=="user"))[0].content | if type=="string" then . else map(.text // "") | join("") end | select(startswith("Task:")) | capture("env (?<x>[ABC])").x' "$REQ" | tr -d '\n'; }
+export OXY_LLM_MAX_CONCURRENT=1; run sub-par; o1=$(order)
+chk "동시 실행 제한 1: 자식이 하나씩 순서대로 ($o1)"    '[[ "$o1" =~ ^(AA|BB|CC)(AA|BB|CC)(AA|BB|CC)$ ]]'
+export OXY_LLM_MAX_CONCURRENT=3; run sub-par; o3=$(order); unset OXY_LLM_MAX_CONCURRENT
+chk "동시 실행 제한 3: 자식 3개가 함께 시작 ($o3)"      '[[ ${#o3} -eq 6 && $(printf %s "${o3:0:3}" | fold -w1 | sort -u | wc -l) -eq 3 ]]'
+
+# 대화형 경로 (RPC 모드: 작업 패널·상태줄, 완료 시 새 턴, /jobs 로그 보기)
+rpc=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-jobs.mjs")" "$OXY_PI_CLI" "$(winpath "$TMP/work")" 2>&1 | tail -1)
+printf '\n\033[1m[rpc-jobs]\033[0m %s\n' "$rpc"
+chk "대화형: 작업 패널·상태줄 표시"            '[[ "$rpc" == *"\"widgetRunning\":true"* && "$rpc" == *"\"statusRunning\":true"* && "$rpc" == *"\"widgetDone\":true"* ]]'
+chk "대화형: 작업이 끝나면 새 턴으로 결과 전달"   '[[ "$rpc" == *"\"followUpTurn\":true"* ]]'
+chk "대화형: /jobs → 로그 보기"               '[[ "$rpc" == *"\"jobsLogView\":true"* ]]'
 
 run repeat
 chk "loop-guard: 같은 호출 3번째 차단"            '[[ "$out" == *"oxy-loop-guard"* && "$out" == *"2 times"* ]]'

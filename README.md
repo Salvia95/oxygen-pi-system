@@ -185,6 +185,25 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
 `just demo` 는 mock vLLM 으로 pi TUI 를 직접 써 보는 명령이다 (프롬프트에 `scenario:git-push` 등 입력).
 
+## 백그라운드 작업 · subagent (`agent/extensions/oxy-jobs/`)
+
+작은 컨텍스트를 아끼기 위해, 오래 걸리는 명령과 넓은 탐색을 본 대화 밖으로 뺀다.
+
+| 도구 | 동작 |
+|---|---|
+| `background` | `action=start` 로 명령을 백그라운드 실행 → 바로 작업 id 반환. **끝나면 결과(종료 코드·마지막 출력)를 메시지로 알려 새 턴을 시작**하므로 모델이 polling 하지 않는다. `status` / `output` / `stop`. bash-guard 검사를 똑같이 거친다 |
+| `subagent` | `agent/agents/*.md` 의 도우미(scout · reviewer · worker)를 별도 pi 프로세스(독립 컨텍스트)로 실행. `tasks=[...]` 로 병렬, `wait=false` 면 백그라운드로 돌리고 완료 시 결과를 알린다. 자식에는 agent 에 지정한 도구만 주어 재귀 실행을 막는다 |
+
+- **동시 실행 제한**: `OXY_LLM_MAX_CONCURRENT` (subagent, 기본 2) · `OXY_JOBS_MAX_CONCURRENT` (bash, 기본 4). 넘치는 작업은 대기열에서 순서대로 시작한다.
+  사내 vLLM 의 실제 한계는 요청 수보다 **동시에 처리하는 긴 컨텍스트 요청의 KV 캐시**이므로, 128K 기준으로 2 에서 시작해 조정한다.
+- **vLLM 혼잡 감지** (선택): `OXY_VLLM_METRICS=on` 이면 subagent 를 시작하기 전에 vLLM `/metrics` 의 대기 요청 수와 KV 캐시 사용률
+  (`OXY_VLLM_KV_LIMIT`, 기본 0.9)을 보고 잠시 기다린다. 지표 이름은 vLLM 버전에 따라 다를 수 있어 사내 서버에서 확인 후 켠다.
+- **가시성**: 입력창 위 작업 패널(`⏳ job-3 bash  npm test  1m12s  마지막 출력`), 상태줄(`jobs 2 · agents 1/2`),
+  `/jobs` (로그 보기 · Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/*.log` (최근 50개 보관).
+- **비대화형(`-p`)**: 대화가 끝나기 전에 남은 작업을 기다렸다가 결과를 모아 넘기고 이어서 진행한다 (`OXY_JOBS_WAIT_MS`, 기본 30분).
+- pi 를 종료하면 실행 중인 작업은 프로세스 트리째 정리한다. 자가진단이 남은 subagent 프로세스를 찾아 알린다.
+- 켜기/끄기·혼잡 감지·동시 실행 수는 Tweak TUI 의 extension 메뉴에서 바꾼다 (`OXY_JOBS=off` 로 끔).
+
 ## 도구별 skill (`agent/skill-library/` → `agent/skills/`)
 
 skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "무엇을 · 언제 쓰는지"를 구체적으로 적는다.

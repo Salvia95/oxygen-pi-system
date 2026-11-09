@@ -15,7 +15,7 @@ const WT_GUID = "{6f1d3c2a-8b4e-4c7d-9a2f-0e5b7c3d1a90}";
 const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "agent/oxy.env", "agent/settings.json",
   "agent/models.json", "agent/auth.json", "agent/models-store.json", "agent/sessions", "agent/skills",
   "agent/usql.yaml", "agent/dbhub.toml", "agent/connections.json", "agent/secrets.json", "agent/mcp.json",
-  "agent/mcp.log", "agent/mcp.log.1", "agent/mcp-auth.json"];
+  "agent/mcp.log", "agent/mcp.log.1", "agent/mcp-auth.json", "agent/jobs"];
 
 /** 하네스 자체 파일 (구성요소 바이너리 외) */
 const HARNESS_FILES = [

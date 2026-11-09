@@ -32,22 +32,40 @@ const SCENARIOS = {
   "db-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__dbhub__execute_sql(_|$)/.test(n)) ?? "missing_dbhub_tool",
     args: { sql: "select count(*) as n from t" } }],
   "env-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__envcheck__check$/.test(n)) ?? "missing_envcheck_tool", args: {} }],
+  // oxy-jobs: 백그라운드 작업 → 대화 종료 전 결과 알림 → 이어서 응답
+  "bg-start": [{ tool: "background", args: { action: "start", command: "sleep 2; echo bg-finished-ok" } }, { text: "Waiting for the background job." }],
+  "bg-guard": [{ tool: "background", args: { action: "start", command: "npm install lodash" } }],
+  // oxy-jobs: subagent (자식 pi 의 첫 메시지 "Task: scenario:env ..." 도 env 시나리오로 응답)
+  "sub-sync": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env check the environment" } }],
+  "sub-par": [{ tool: "subagent", args: { tasks: [
+    { agent: "scout", task: "scenario:env A" }, { agent: "scout", task: "scenario:env B" }, { agent: "scout", task: "scenario:env C" },
+  ] } }],
+  "sub-async": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env async check", wait: false } }, { text: "Delegated; waiting." }],
 };
 
+let busySince = null;
 const sse = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 const contentText = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => p.text ?? "").join("") : JSON.stringify(c));
 
 http.createServer((req, res) => {
   let raw = "";
   req.on("data", (c) => (raw += c));
-  req.on("end", () => {
+  req.on("end", async () => {
+    // vLLM /metrics 흉내: 첫 요청 후 MOCK_BUSY_MS 동안은 대기 요청 1건으로 응답 (oxy-jobs 혼잡 감지 점검)
+    if (req.method === "GET" && req.url === "/metrics") {
+      busySince ??= Date.now();
+      const busy = Date.now() - busySince < Number(process.env.MOCK_BUSY_MS ?? 0);
+      res.writeHead(200, { "content-type": "text/plain" });
+      return res.end(`# HELP vllm:num_requests_waiting x\nvllm:num_requests_waiting{model_name="m"} ${busy ? 1 : 0}\n` +
+        `vllm:num_requests_running{model_name="m"} 1\nvllm:kv_cache_usage_perc{model_name="m"} 0.3\n`);
+    }
     if (req.method === "GET" && req.url.endsWith("/models")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({ object: "list", data: MODELS.map((id) => ({ id, object: "model", max_model_len: 131072 })) }));
     }
     if (req.method !== "POST" || !req.url.endsWith("/chat/completions")) { res.writeHead(404); return res.end(); }
     const body = JSON.parse(raw);
-    fs.appendFileSync(logFile, JSON.stringify({ headers: req.headers, body }) + "\n");
+    fs.appendFileSync(logFile, JSON.stringify({ t: Date.now(), headers: req.headers, body }) + "\n");
     const base = { id: "mock-1", object: "chat.completion.chunk", created: 0, model: body.model };
 
     if (!body.stream) { // verify.sh 의 비스트리밍 tool call 점검
@@ -74,6 +92,11 @@ http.createServer((req, res) => {
     const step = body.messages.slice(anchor + 1).filter((m) => m.role === "assistant").length;
     const choice = (delta, finish_reason = null) => ({ ...base, choices: [{ index: 0, delta, finish_reason }] });
 
+    // subagent(자식 pi) 요청을 늦춰 동시 실행 여부를 관찰할 수 있게 한다 (MOCK_CHILD_DELAY_MS)
+    const firstUser = contentText(body.messages.find((m) => m.role === "user")?.content ?? "");
+    if (/^Task:/.test(firstUser) && Number(process.env.MOCK_CHILD_DELAY_MS)) {
+      await new Promise((r) => setTimeout(r, Number(process.env.MOCK_CHILD_DELAY_MS)));
+    }
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
     const item = script[step];
     if (item?.tool) {
