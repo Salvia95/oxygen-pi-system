@@ -37,6 +37,7 @@ export interface Flow {
   startedAt: number;
   updatedAt: number;
   baseCommit: string | null; // 작업을 시작할 때의 HEAD
+  continueAt?: number;       // 세션 넘기기 표시 (store.markContinue)
   nodes: FlowNode[];
   buffer: Buffer;
 }
@@ -136,8 +137,14 @@ export class FileFlowEngine implements FlowEngine {
   /** 기록이 실제로 있는가 (빈 작업이면 컨텍스트에 넣지 않는다) */
   hasContent(): boolean {
     const f = this.load();
+    return Boolean(f.goal || this.hasWork());
+  }
+
+  /** 목표 말고 진행 기록이 있는가 (커밋 노드 · 결정 · 변경 · 실패 · 다음 단계 · 막힌 점). 목표만 있으면 주입할 가치가 없다 */
+  hasWork(): boolean {
+    const f = this.load();
     const b = f.buffer;
-    return Boolean(f.goal || f.next || f.blocked || f.nodes.length || b.decisions.length || b.files.length || b.failures.length);
+    return Boolean(f.next || f.blocked || f.nodes.length || b.decisions.length || b.files.length || b.failures.length);
   }
 
   private save(): void {
@@ -158,6 +165,20 @@ export class FileFlowEngine implements FlowEngine {
     if (kind !== "done" && f.status === "done") f.status = "active";
     this.save();
     return f;
+  }
+
+  /** 세션 넘기기 직전에 표시: 다음 세션의 첫 요청은 같은 작업을 이어 가는 것 (2분 안에 쓰지 않으면 무효) */
+  markContinue(): void {
+    this.load().continueAt = Date.now();
+    this.save();
+  }
+
+  /** 이어 가기 표시가 있으면 지우고 true */
+  takeContinue(): boolean {
+    const f = this.load();
+    const on = typeof f.continueAt === "number" && Date.now() - f.continueAt < 120000;
+    if (f.continueAt !== undefined) { delete f.continueAt; this.save(); }
+    return on;
   }
 
   /** 첫 요청을 목표로 삼는다 (목표가 비어 있을 때만) */
@@ -259,10 +280,16 @@ const dec = (d: Decision) => `${d.text}${d.why ? ` (why: ${d.why})` : ""}`;
 /**
  * 모델 컨텍스트에 넣을 작업 상태. maxChars 안에 들어가도록 최근 노드는 결정 사항까지, 오래된 노드는 제목만 넣는다.
  */
-export function renderContext(f: Flow, maxChars = 6000): string {
+export function renderContext(f: Flow, maxChars = 6000, mode: "continue" | "reference" = "continue"): string {
   const b = f.buffer;
-  const head: string[] = ["[oxy-flow] Task state (from .oxy/flow — this is the source of truth for earlier work)"];
-  head.push(`Goal: ${f.goal || "(not set — record it with flow_note kind=goal)"}`);
+  // continue: 같은 작업을 이어서 하는 경우 (세션 넘기기 · compaction 교체)
+  // reference: 새 세션의 새 요청 — 마지막 기록이 이번 요청과 다른 작업일 수 있다
+  const head: string[] = mode === "continue"
+    ? ["[oxy-flow] Task state (from .oxy/flow — this is the source of truth for earlier work)",
+      `Goal: ${f.goal || "(not set — record it with flow_note kind=goal)"}`]
+    : ["[oxy-flow] Task state — the last task recorded in this project (from .oxy/flow). Use it if the request continues that work.",
+      `Last task goal: ${f.goal || "(not set)"}`,
+      "If the user's request is a different task, first call flow_note(kind=\"goal\") with the new goal."];
   if (f.status === "done") head.push("Status: done");
   if (f.next) head.push(`Next: ${f.next}`);
   if (f.blocked) head.push(`Blocked: ${f.blocked}`);

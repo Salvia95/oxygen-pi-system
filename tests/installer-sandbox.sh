@@ -70,6 +70,19 @@ chk "Tweak 항목별: GitLab 호스트만 변경"           'grep -q "^GITLAB_HO
 chk "Tweak 항목별: 한도 값 하나만 저장"            'grep -q "^OXY_TOOL_OUTPUT_MAX_CHARS=9000$" "$I/agent/oxy.env" && ! grep -q "^OXY_READ_MAX_CHARS=" "$I/agent/oxy.env"'
 chk "Tweak 항목별: 단계 흐름 없이 바로 저장"        '! grep -q "설정 적용 중" "$SB/out.txt" && grep -q "GitLab 호스트 적용 중" "$SB/out.txt"'
 
+# 3-3) 확장 파라미터를 거부하는 게이트웨이 (사내에서 받은 400 "property 'repetition_penalty' is unsupported")
+#      Tweak 의 vLLM 항목이 하나씩 시험해서 거부된 것만 뺀다 → 그 설정으로 pi 요청이 통과
+SPORT=$((PORT + 1))
+MOCK_STRICT_PARAMS=repetition_penalty "$NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$SPORT" "$(winpath "$SB/req2.jsonl")" >/dev/null & STRICT_PID=$!
+for _ in $(seq 50); do curl -fs "http://127.0.0.1:$SPORT/v1/models" >/dev/null 2>&1 && break; sleep 0.1; done
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: 엄격한 게이트웨이로 vLLM 변경" "$I/runtime/node/node.exe" 1 "http://127.0.0.1:$SPORT" mock-key "" "" 12
+chk "게이트웨이 판정: 거부된 repetition_penalty 만 기록"   'grep -q "^OXY_VLLM_DROP_PARAMS=repetition_penalty$" "$I/agent/oxy.env" && grep -q "repetition_penalty: 서버가 거부" "$SB/out.txt"'
+chk "models.json: repetition_penalty 빠지고 top_k 유지"   '! grep -q repetition_penalty "$I/agent/models.json" && grep -q "\"top_k\": 20" "$I/agent/models.json"'
+pi_out=$(cd "$SB" && PI_CODING_AGENT_DIR="$(winpath "$I/agent")" OXY_VLLM_API_KEY=mock-key OXY_FLOW=off timeout 120 "$I/runtime/node/node.exe" \
+  "$I/vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" --no-session -p "scenario:flow-half" < /dev/null 2>&1 | tail -1)
+chk "그 설정으로 pi 요청 통과 (400 없음): $pi_out"        '[[ "$pi_out" == half-full ]]'
+kill "$STRICT_PID" 2>/dev/null || true
+
 # 4) 설치된 복사본으로 제거 (실행 중인 node.exe 가 설치 폴더 안 → 종료 후 삭제 예약)
 INSTALLER="$I/installer/install.mjs" run "자기 제거" "$I/runtime/node/node.exe" 3 1 ""
 chk "제거 종료코드 0"                      '[[ $RC == 0 ]]'

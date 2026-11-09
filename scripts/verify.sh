@@ -172,6 +172,15 @@ if [[ $CHECK_LLM == 1 ]]; then
          && [[ "$(jq -r '.choices[0].message.tool_calls[0].function.name // empty' <<< "$r")" == ping ]]; then
         pass "tool calling 정상 (vLLM --enable-auto-tool-choice / --tool-call-parser 설정 확인됨)"
       else wrn "tool call 이 구조화되어 오지 않음 → vLLM 의 --enable-auto-tool-choice, --tool-call-parser 확인"; fi
+      # pi 가 실제로 붙여 보내는 samplingParams (models.json) 를 서버가 받는지 — 게이트웨이가 확장 파라미터를 거부하면 첫 요청부터 400
+      sp=$(jq -c --arg m "$OXY_DEFAULT_MODEL" '[.providers[].models[] | select(.id==$m) | .samplingParams // {}][0] // {}' "$OXY_HOME/agent/models.json" 2>/dev/null | tr -d '\r')
+      body=$(jq -nc --arg m "$OXY_DEFAULT_MODEL" --argjson sp "${sp:-{\}}" '{model:$m,max_tokens:1,messages:[{role:"user",content:"hi"}]} + $sp')
+      out_f=$(mktemp)  # 설치 폴더에는 .cache 가 없다
+      code=$(curl -sS -m 60 -o "$out_f" -w '%{http_code}' -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" \
+        -H 'Content-Type: application/json' -d "$body" "$OXY_VLLM_BASE_URL/chat/completions" 2>/dev/null || true)
+      if [[ "$code" == 2* ]]; then pass "샘플링 파라미터 수락: ${sp}"
+      else fail "서버가 샘플링 파라미터를 거부 (HTTP $code): $(head -c 200 "$out_f" 2>/dev/null) → tweak.cmd 의 'vLLM 주소 · API 키' 를 다시 저장하면 자동으로 판정해 뺍니다 (또는 agent/oxy.env 의 OXY_VLLM_DROP_PARAMS 에 거부된 이름을 적고 just configure)"; fi
+      rm -f "$out_f"
     fi
   else wrn "vLLM 접속 불가: $resp"; fi
 fi

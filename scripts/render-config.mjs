@@ -53,11 +53,58 @@ function substitute(template, vars, name) {
 }
 
 /** models.json 후처리: id 가 빈 모델 제거, 중복 id 제거 */
-function cleanModels(json) {
+/**
+ * OpenAI 표준이 아닌 vLLM 확장 파라미터. vLLM 은 받지만, 앞단 게이트웨이(LiteLLM 등)가 거부하는 경우가 있다.
+ * 설치 TUI·Tweak 의 vLLM 단계가 하나씩 시험해서, 거부된 것만 OXY_VLLM_DROP_PARAMS 에 적는다.
+ */
+export const VLLM_EXTRA_PARAMS = ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs"];
+
+/**
+ * vars.OXY_VLLM_DROP_PARAMS (쉼표 구분) 에 든 파라미터를 요청에서 뺀다.
+ *   top_k · repetition_penalty · min_p → samplingParams 에서 삭제
+ *   chat_template_kwargs → 범용 모델의 thinking 제어를 보내지 않는다 (reasoning:false, thinking 끈 상태의 샘플링 사용)
+ */
+export function dropList(vars = {}) {
+  return String(vars.OXY_VLLM_DROP_PARAMS ?? "").split(/[\s,]+/).filter((k) => VLLM_EXTRA_PARAMS.includes(k));
+}
+
+function cleanModels(json, vars = {}) {
+  const drop = dropList(vars);
+  // OXY_MAX_OUTPUT_TOKENS: 응답 최대 토큰 상한 (분당 출력 토큰 제한이 있는 엔드포인트용 — 예: Groq 무료 등급 OTPM 1000)
+  const cap = Number.parseInt(vars.OXY_MAX_OUTPUT_TOKENS ?? "", 10);
   for (const p of Object.values(json.providers ?? {})) {
     if (!Array.isArray(p.models)) continue;
     const seen = new Set();
     p.models = p.models.filter((m) => m.id && !seen.has(m.id) && seen.add(m.id));
+    for (const m of p.models) {
+      if (Number.isInteger(cap) && cap > 0 && m.maxTokens > cap) m.maxTokens = cap;
+      for (const k of drop) {
+        delete m.samplingParams?.[k];
+        for (const lv of Object.values(m.samplingParamsByThinkingLevel ?? {})) delete lv[k];
+      }
+      if (drop.includes("chat_template_kwargs") && m.compat?.thinkingFormat) {
+        delete m.compat.thinkingFormat;
+        if (!Object.keys(m.compat).length) delete m.compat;
+        m.reasoning = false;
+        if (m.samplingParamsByThinkingLevel?.off) m.samplingParams = { ...m.samplingParams, ...m.samplingParamsByThinkingLevel.off };
+        delete m.samplingParamsByThinkingLevel;
+      }
+    }
+  }
+  return json;
+}
+
+/**
+ * settings.json 후처리.
+ * OXY_PROVIDER_RETRIES: 요청 단계 재시도 횟수 (서버가 알려 준 대기 시간 Retry-After 를 지킨다, 기본 0).
+ *   rate limit 메시지에 "billing" 같은 말이 섞인 게이트웨이(Groq 등)는 pi 가 할당량 소진으로 보고 재시도하지 않으므로,
+ *   이런 곳에서는 이 값을 켠다.
+ */
+function tuneSettings(json, vars = {}) {
+  const n = Number.parseInt(vars.OXY_PROVIDER_RETRIES ?? "", 10);
+  if (Number.isInteger(n) && n > 0) {
+    json.retry ??= {};
+    json.retry.provider = { ...json.retry.provider, maxRetries: n, maxRetryDelayMs: 90000 };
   }
   return json;
 }
@@ -69,7 +116,8 @@ export function renderConfig(agentDir, vars) {
   const outputs = {};
   for (const file of readdirSync(tplDir).filter((f) => f.endsWith(".json"))) {
     let json = JSON.parse(substitute(readFileSync(join(tplDir, file), "utf8"), vars, file));
-    if (file === "models.json") json = cleanModels(json);
+    if (file === "models.json") json = cleanModels(json, vars);
+    if (file === "settings.json") json = tuneSettings(json, vars);
     outputs[file] = json;
   }
   // defaultModel 이 실제 모델 목록에 있는지 확인

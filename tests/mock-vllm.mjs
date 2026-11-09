@@ -74,6 +74,15 @@ http.createServer((req, res) => {
     if (req.method !== "POST" || !req.url.endsWith("/chat/completions")) { res.writeHead(404); return res.end(); }
     const body = JSON.parse(raw);
     fs.appendFileSync(logFile, JSON.stringify({ t: Date.now(), headers: req.headers, body }) + "\n");
+    // OpenAI 표준이 아닌 파라미터를 거부하는 앞단 게이트웨이 흉내 (사내에서 실제로 받은 오류 형식)
+    //   MOCK_STRICT=1: 확장 파라미터 전부 거부 · MOCK_STRICT_PARAMS=a,b: 지정한 것만 거부
+    const strictList = process.env.MOCK_STRICT === "1" ? ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs"]
+      : (process.env.MOCK_STRICT_PARAMS ?? "").split(",").filter(Boolean);
+    const strictBad = strictList.find((k) => k in body);
+    if (strictBad) {
+      res.writeHead(400, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ message: `property '${strictBad}' is unsupported`, type: "invalid_request_error" }));
+    }
     const base = { id: "mock-1", object: "chat.completion.chunk", created: 0, model: body.model };
 
     if (!body.stream) { // verify.sh 의 비스트리밍 tool call 점검

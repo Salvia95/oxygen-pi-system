@@ -271,6 +271,38 @@ async function fetchModels(baseUrl, apiKey) {
   return models;
 }
 
+/** 확장 파라미터마다 시험할 값 */
+const PROBE_VALUES = { top_k: 20, repetition_penalty: 1.05, min_p: 0, chat_template_kwargs: { enable_thinking: false } };
+
+/**
+ * 서버(또는 앞단 게이트웨이)가 vLLM 확장 파라미터를 받는지 1토큰 요청으로 하나씩 시험한다.
+ * → { results: {param: true|false}, drop: [거부된 것], detail } · 기본 요청부터 실패하면 results 가 null (판단 못 함)
+ */
+async function probeParams(baseUrl, apiKey, model) {
+  const call = async (extra) => {
+    const r = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST", signal: AbortSignal.timeout(30000),
+      headers: { Authorization: `Bearer ${apiKey || "EMPTY"}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], max_tokens: 1, ...extra }),
+    });
+    return { status: r.status, text: r.ok ? "" : (await r.text()).slice(0, 200) };
+  };
+  try {
+    const base = await call({});
+    if (base.status >= 300) return { results: null, drop: [], detail: `기본 요청 HTTP ${base.status} ${base.text}` };
+    const results = {};
+    const errors = [];
+    for (const [k, v] of Object.entries(PROBE_VALUES)) {
+      const r = await call({ [k]: v });
+      results[k] = r.status < 300;
+      if (!results[k]) errors.push(r.text);
+    }
+    return { results, drop: Object.keys(results).filter((k) => !results[k]), detail: errors[0] ?? "" };
+  } catch (e) {
+    return { results: null, drop: [], detail: e.cause?.code ?? e.message };
+  }
+}
+
 async function stepVllm(state) {
   for (;;) {
     const url = await ui.input("사내 vLLM 주소 (OpenAI 호환 엔드포인트)", {
@@ -291,7 +323,18 @@ async function stepVllm(state) {
     ui.screen(`  ${c.bold("vLLM 연결 확인")}\n`);
     try {
       state.models = await ui.task(`${state.baseUrl}/models`, async () => fetchModels(state.baseUrl, state.apiKey));
-      ui.print("\n  " + ok(`모델 ${state.models.length}개: ${state.models.map((m) => m.id).join(", ")}`));
+      const probeModel = state.models.some((m) => m.id === state.coder) ? state.coder : state.models[0].id;
+      const p = await ui.task(`확장 파라미터 지원 확인 (${probeModel})`, async () => probeParams(state.baseUrl, state.apiKey, probeModel));
+      // 판단할 수 없으면 이전 값 유지
+      if (p.results) state.dropParams = p.drop;
+      const lines = p.results
+        ? Object.entries(p.results).map(([k, v]) => "  " + (v ? ok(`${k}: 지원`) : warnMark(`${k}: 서버가 거부 → 요청에서 뺌`)))
+        : ["  " + warnMark(`확장 파라미터: 확인 못 함 (기존 설정 유지) ${c.gray(p.detail)}`)];
+      ui.print([
+        "", "  " + ok(`모델 ${state.models.length}개: ${state.models.map((m) => m.id).join(", ")}`),
+        ...lines,
+        ...(p.results && p.detail ? ["  " + c.gray(`  ${p.detail}`)] : []),
+      ].join("\n"));
       await ui.pause();
       return "next";
     } catch (e) {
@@ -399,6 +442,7 @@ function writeSiteConfig(installDir, state) {
     OXY_VLLM_BASE_URL: state.baseUrl, OXY_VLLM_API_KEY: state.apiKey,
     OXY_MODEL_CODER: state.coder, OXY_MODEL_GENERAL: state.general ?? "", OXY_DEFAULT_MODEL: state.defaultModel,
     OXY_CONTEXT_WINDOW: String(state.contextWindow),
+    ...(state.dropParams ? { OXY_VLLM_DROP_PARAMS: state.dropParams.join(",") } : {}),
     ...(state.gitlabHost ? { GITLAB_HOST: state.gitlabHost } : {}),
     // 번들 안의 브라우저(chrome-for-testing, chromium)는 env.sh 가 OXY_HOME 기준으로 경로를 계산한다
     ...(state.browser ? { OXY_BROWSER: state.browser.id, OXY_BROWSER_PATH: (state.browser.path ?? "").replace(/\\/g, "/") } : {}),
@@ -492,6 +536,7 @@ function stateFromInstall(reg) {
     baseUrl: env.OXY_VLLM_BASE_URL, apiKey: env.OXY_VLLM_API_KEY, coder: env.OXY_MODEL_CODER,
     general: env.OXY_MODEL_GENERAL ?? "", defaultModel: env.OXY_DEFAULT_MODEL,
     contextWindow: Number(env.OXY_CONTEXT_WINDOW) || 131072, gitlabHost: env.GITLAB_HOST,
+    ...(env.OXY_VLLM_DROP_PARAMS != null ? { dropParams: env.OXY_VLLM_DROP_PARAMS.split(/[\s,]+/).filter(Boolean) } : {}),
     integrations: reg.integrations ?? [],
     ...(env.OXY_BROWSER ? { browser: { id: env.OXY_BROWSER, path: env.OXY_BROWSER_PATH ?? "" } } : {}),
   };

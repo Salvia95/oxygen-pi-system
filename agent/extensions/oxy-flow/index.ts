@@ -67,14 +67,14 @@ export default function (pi: ExtensionAPI) {
     const e = eng(ctx);
     const prompt = String(event.prompt ?? "");
     if (!prompt.startsWith("[oxy-")) lastPrompt = prompt;
-    const had = e.hasContent();
-    if (e.writable) {
-      e.syncCommits(true);
-      e.ensureGoal(prompt);
-    }
+    if (e.writable) e.syncCommits(true);
+    // 목표만 있고 진행 기록이 없으면 넣지 않는다 (이전 요청 하나가 남긴 목표로 새 요청을 오해하지 않도록)
+    const work = e.hasWork();
+    const continuing = e.takeContinue();
+    if (e.writable) e.ensureGoal(prompt);
     status(ctx);
-    if (!had || injected(ctx)) return undefined;
-    return { message: { customType: CUSTOM, content: renderContext(e.load(), ctxMax), display: false } };
+    if (!work || injected(ctx)) return undefined;
+    return { message: { customType: CUSTOM, content: renderContext(e.load(), ctxMax, continuing ? "continue" : "reference"), display: false } };
   });
 
   // ---------------------------------------------------------------- 사실 자동 기록 · 커밋 → 노드
@@ -141,6 +141,7 @@ export default function (pi: ExtensionAPI) {
       if (e.writable) e.syncCommits(true);
       const u = ctx.getContextUsage?.();
       const kickoff = args.trim() || "Continue the task from the recorded state. Start with the Next step.";
+      e.markContinue(); // 새 세션의 첫 요청은 같은 작업의 연속으로 표시한다
       const parentSession = ctx.sessionManager.getSessionFile();
       if (ctx.hasUI) ctx.ui.notify(`[oxy-flow] 컨텍스트 ${u?.percent != null ? `${Math.round(u.percent)}% ` : ""}→ 작업 기록을 가지고 새 세션에서 이어갑니다`, "info");
       await ctx.newSession({

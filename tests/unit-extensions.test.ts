@@ -207,3 +207,39 @@ test("code-intel: ast-grep skill · graphin 을 넣으면 MCP 등록 + skill, �
     assert.ok(existsSync(join(agent, "mcp.json")));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("models.json: 서버가 거부한 vLLM 확장 파라미터만 뺀다 (OXY_VLLM_DROP_PARAMS)", async () => {
+  const { renderConfig } = await import("../scripts/render-config.mjs");
+  const { mkdtempSync, cpSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "oxyrc-"));
+  const vars = { OXY_VLLM_BASE_URL: "http://x/v1", OXY_MODEL_CODER: "c", OXY_MODEL_GENERAL: "g", OXY_DEFAULT_MODEL: "c", OXY_CONTEXT_WINDOW: "131072", OXY_SHELL_PATH: "C:/bash.exe" };
+  const models = (extra: Record<string, string>) => {
+    renderConfig(dir, { ...vars, ...extra });
+    return Object.fromEntries(JSON.parse(readFileSync(join(dir, "models.json"), "utf8")).providers["oxy-vllm"].models.map((m: any) => [m.id, m]));
+  };
+  try {
+    cpSync(join(import.meta.dirname, "..", "agent", "templates"), join(dir, "templates"), { recursive: true });
+    let m = models({});
+    assert.equal(m.c.samplingParams.repetition_penalty, 1.05);
+    assert.equal(m.g.compat.thinkingFormat, "qwen-chat-template");
+    m = models({ OXY_VLLM_DROP_PARAMS: "repetition_penalty" });       // 사내 게이트웨이에서 실제로 거부된 값
+    assert.equal(m.c.samplingParams.repetition_penalty, undefined);
+    assert.equal(m.c.samplingParams.top_k, 20);                          // 받아 주는 것은 남긴다
+    assert.equal(m.g.reasoning, true);
+    m = models({ OXY_VLLM_DROP_PARAMS: "top_k, repetition_penalty,chat_template_kwargs,bogus" });
+    assert.deepEqual(m.c.samplingParams, { temperature: 0.7, top_p: 0.8 });
+    assert.equal(m.g.reasoning, false);
+    assert.equal(m.g.compat, undefined);
+    assert.deepEqual(m.g.samplingParams, { temperature: 0.7, top_p: 0.8 });   // thinking 끈 상태의 샘플링
+    m = models({ OXY_MAX_OUTPUT_TOKENS: "1000" });                     // 분당 출력 토큰 제한이 있는 엔드포인트
+    assert.equal(m.c.maxTokens, 1000);
+    assert.equal(m.g.maxTokens, 1000);
+    const st = () => JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
+    assert.equal(st().enabledModels[0], "oxy-vllm/**");                  // 모델 id 에 / 가 있어도 일치 (qwen/qwen3.8-27b)
+    assert.equal(st().retry.provider.maxRetries ?? 0, 0);
+    models({ OXY_PROVIDER_RETRIES: "4" });
+    assert.equal(st().retry.provider.maxRetries, 4);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

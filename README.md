@@ -152,7 +152,20 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 # 하이브리드 thinking 모델: --reasoning-parser qwen3
 ```
 
-`just verify` 가 `/v1/models` 조회와 tool call 왕복을 실제로 시험한다.
+`just verify` 가 `/v1/models` 조회와 tool call 왕복, 그리고 pi 가 보내는 샘플링 파라미터를 서버가 받는지 실제로 시험한다.
+
+**앞단 게이트웨이 · 다른 OpenAI 호환 엔드포인트**: vLLM 확장 파라미터(`top_k`, `repetition_penalty`, `min_p`,
+thinking 제어용 `chat_template_kwargs`)를 400 `property '…' is unsupported` 로 거부하는 곳이 있다.
+설치 TUI·Tweak 의 vLLM 단계가 1토큰 요청으로 하나씩 시험해서 거부된 것만 `OXY_VLLM_DROP_PARAMS` 에 적고 요청에서 뺀다.
+
+외부망에서 Groq 같은 사용량 제한 엔드포인트로 시험할 때는 `agent/oxy.env` 에 다음을 더한다 (사내 vLLM 에는 필요 없음).
+Groq 무료 등급은 분당 입력 7,000 · 출력 1,000 토큰이라, 하네스 요청(약 5,000토큰) 기준으로 1분에 한 번 정도만 보낼 수 있다.
+
+| 설정 | 이유 |
+|---|---|
+| `OXY_PROVIDER_RETRIES=4` | Groq 의 429 문구에 "billing" 이 섞여 있어 pi 가 할당량 소진으로 보고 재시도하지 않는다 → 요청 단계에서 서버가 알려 준 대기 시간만큼 기다렸다 재시도 |
+| `OXY_MAX_OUTPUT_TOKENS=1000` | `max_tokens` 가 분당 출력 한도를 넘으면 재시도해도 안 되는 "Request too large" 로 거부된다 |
+| `OXY_LLM_MAX_CONCURRENT=1` | subagent 를 동시에 돌리면 한도에 더 빨리 걸린다 |
 
 ## 오프라인 보장 장치
 

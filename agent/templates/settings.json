@@ -2,7 +2,7 @@
   "defaultProvider": "oxy-vllm",
   "defaultModel": "@@OXY_DEFAULT_MODEL@@",
   "defaultThinkingLevel": "off",
-  "enabledModels": ["oxy-vllm/*"],
+  "enabledModels": ["oxy-vllm/**"],
 
   "shellPath": "@@OXY_SHELL_PATH@@",
   "defaultTools": ["read", "bash", "edit", "write", "grep", "find", "ls"],

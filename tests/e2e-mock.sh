@@ -6,6 +6,8 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../scripts/lib.sh"
 # shellcheck disable=SC1091
 source "$OXY_HOME/env.sh"
+# env.sh 가 읽어 온 이 PC 의 사이트 설정(agent/oxy.env)이 mock 환경으로 새지 않게 한다 (임시 oxy.env 만 쓰도록)
+while IFS= read -r k; do unset "$k"; done < <(grep -oE '^[A-Z_][A-Z0-9_]*' "$OXY_HOME/agent/oxy.env" 2>/dev/null | grep -vE '^(OXY_HOME|OXY_NODE|OXY_PI_CLI|OXY_SHELL_PATH)$')
 
 PORT="${1:-18000}"
 TMP="$(mktemp -d)"; trap 'kill "${MOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
@@ -143,7 +145,7 @@ chk "flow: 커밋 → 노드 n1 + 결정 + 커밋 파일"       '[[ $(jq -r ".no
 chk "flow: 커밋 결과에 기록 안내"                 '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Recorded step n1"* ]]'
 chk "flow: .oxy 는 사용자 git 에 안 잡힘"          '[[ -z "$(cd "$FW" && git status --porcelain)" ]]'
 frun "scenario:env continue"
-chk "flow: 다음 세션 첫 요청에 작업 상태 주입"       '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Goal: scenario:flow-commit add the f file"*"Store sessions in SQLite"* ]]'
+chk "flow: 다음 세션 첫 요청에 마지막 작업 기록 주입 (참고용)" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Last task goal: scenario:flow-commit add the f file"*"different task"*"Store sessions in SQLite"* ]]'
 cp "$TMP/agent/settings.json" "$TMP/settings.bak"
 jq '.compaction.keepRecentTokens = 50' "$TMP/settings.bak" > "$TMP/agent/settings.json"   # 작은 대화로도 compaction 이 일어나게
 frun "scenario:flow-big refactor the parser"
