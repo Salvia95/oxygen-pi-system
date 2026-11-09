@@ -2,7 +2,7 @@
 # name	version	url(npm은 package spec)	sha256 ("-" = 미고정, fetch --update-lock 으로 채움)	license	role	group
 #   role=required : 하네스 동작에 필요. fetch 선택 화면에서 기본 체크(해제 불가), 번들링 시 없으면 실패
 #   role=optional : 사용자가 골라서 받음. 오픈소스가 아닌 라이선스는 고를 때 약관 동의를 받는다
-#   group         : 상위 계층 (core / dev-tools / repository / internet-browsing / database). 표시 정보는 installer/components.mjs
+#   group         : 상위 계층 (core / dev-tools / repository / code-intel / internet-browsing / database). 표시 정보는 installer/components.mjs
 # 순서 중요: node 가 pi·dbhub(npm) 보다 먼저 와야 함
 node	22.23.4	https://nodejs.org/dist/v22.23.4/node-v22.23.4-win-x64.zip	cbc74b5e0982c9dbb41525fd8fb5dcd32fbee237863f7829072f4639a1ce5f20	MIT	required	core
 pi	1.5.0	@earendil-works/pi-coding-agent@1.5.0	npm-lock	MIT	required	core
@@ -13,6 +13,7 @@ just	1.59.0	https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-x
 hurl	8.1.0	https://github.com/Orange-OpenSource/hurl/releases/download/8.1.0/hurl-8.1.0-x86_64-pc-windows-msvc.zip	dd4eb70d966f37f872d5df9be3926ea18d97e9a93f216cd0875bf0db447d7798	Apache-2.0	optional	dev-tools
 glab	1.128.0	https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1.128.0/glab_1.128.0_windows_amd64.zip	641d86af5d72c17a7d79154a6436e9c68a54c69db2172020cc4036e0776a4832	MIT	optional	repository
 gh	2.103.3	https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_windows_amd64.zip	98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0	MIT	optional	repository
+ast-grep	0.51.1	https://github.com/ast-grep/ast-grep/releases/download/0.51.1/app-x86_64-pc-windows-msvc.zip	12a0cefb77498820ef6fb302ed8758cbda39be87d4c15120dc74c1dea968a50d	MIT	optional	code-intel
 agent-browser	0.41.2	https://registry.npmjs.org/agent-browser/-/agent-browser-0.41.2.tgz	f0d26595c766e54eedcd44324b67fb93b73fd003bd05237414b2513e75444bb0	Apache-2.0	optional	internet-browsing
 obscura	0.2.6	https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.6/obscura-x86_64-windows.zip	0a110d0693753a252ed7ffd61e682363e8622caf79697f564c529099a31a6242	Apache-2.0	optional	internet-browsing
 chromium	1717343	https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1717343/chrome-win.zip	fdb6a09c42e99ad3ea11ab7f9300f35e2de23750d5d6b354dbfac2b72d528a62	BSD-3-Clause	optional	internet-browsing

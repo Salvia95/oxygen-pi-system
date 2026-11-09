@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BACK, UI, banner, c } from "./tui.mjs";
+import { BACK, UI, banner, c, stepArt } from "./tui.mjs";
 import { WT_PROFILE_NAME, createSystem, toPosix } from "./system.mjs";
 import { OPTIONAL, browserChoices, checkArchive, findArchives, hasComponent, installOptional, isInstalled, syncSkills } from "./components.mjs";
 
@@ -21,11 +21,8 @@ const warnMark = (s) => `${c.yellow("!")} ${s}`;
 
 // ------------------------------------------------------------------ 단계 표시
 const STEP_NAMES = ["점검", "위치", "선택", "vLLM", "모델", "GitLab", "등록", "확인"];
-function stepBar(current, names) {
-  return "  " + names.map((n, i) => (i < current ? c.green("● " + n) : i === current ? c.cyan(c.bold("◉ " + n)) : c.gray("○ " + n))).join(c.gray("  ─  "));
-}
 function setFrame(stepIndex = null, names = STEP_NAMES) {
-  ui.frame = () => banner(VERSION) + (stepIndex === null ? "" : stepBar(stepIndex, names) + "\n" + c.gray("  " + "─".repeat(64)) + "\n");
+  ui.frame = () => banner(VERSION) + (stepIndex === null ? "" : stepArt(names, stepIndex) + "\n");
 }
 
 /** 단계 배열을 순서대로 실행. 단계가 BACK 을 돌려주면 이전 단계로 */
@@ -155,8 +152,16 @@ async function pickArchive(name, { skipLabel = "설치하지 않음" } = {}) {
   }
 }
 
+/** 선택 단계 = SQLcl → 브라우저. 브라우저에서 이전을 누르면 SQLcl 로 돌아간다 */
 async function stepOptional(state) {
-  // 1) SQLcl
+  for (;;) {
+    if ((await stepSqlcl(state)) === BACK) return BACK;
+    if ((await stepBrowser(state)) === BACK) continue;
+    return "next";
+  }
+}
+
+async function stepSqlcl(state) {
   const target = state.installDir;
   if (target && isInstalled("sqlcl", target)) {
     const v = await ui.select("Oracle SQLcl", [
@@ -167,7 +172,7 @@ async function stepOptional(state) {
     if (v === "keep") state.sqlcl = { action: "keep" };
     else {
       const a = await pickArchive("sqlcl", { skipLabel: "교체하지 않음 (유지)" });
-      if (a === BACK) return stepOptional(state);
+      if (a === BACK) return stepSqlcl(state);
       state.sqlcl = a === "skip" ? { action: "keep" } : { action: "install", archive: a };
     }
   } else if (hasComponent("sqlcl", ROOT)) {
@@ -181,7 +186,7 @@ async function stepOptional(state) {
     if (v === BACK) return BACK;
     if (v === "zip") {
       const a = await pickArchive("sqlcl");
-      if (a === BACK) return stepOptional(state);
+      if (a === BACK) return stepSqlcl(state);
       state.sqlcl = a === "skip" ? { action: "skip" } : { action: "install", archive: a };
     } else state.sqlcl = { action: v };
   } else {
@@ -189,7 +194,11 @@ async function stepOptional(state) {
     if (a === BACK) return BACK;
     state.sqlcl = a === "skip" ? { action: "skip" } : { action: "install", archive: a };
   }
+  return "next";
+}
 
+async function stepBrowser(state) {
+  const target = state.installDir;
   // agent-browser 를 반입하지 않았으면 브라우저 선택은 의미가 없다
   if (!hasComponent("agent-browser", ROOT) && !(target && hasComponent("agent-browser", target))) {
     state.browser = { id: "none", label: "사용 안 함 (agent-browser 미포함)" };
@@ -209,7 +218,7 @@ async function stepOptional(state) {
     const id = await ui.select("agent-browser 가 사용할 브라우저", opts, {
       initial, note: c.gray("  web-page-automation skill 이 이 브라우저로 사내 웹 페이지를 엽니다. 나중에 '설정 변경'에서 바꿀 수 있습니다."),
     });
-    if (id === BACK) return stepOptional(state);
+    if (id === BACK) return BACK;
     const pick = choices.find((b) => b.id === id);
     state.browser = { id, path: pick.path ?? "", label: pick.label };
     if (pick.needs && !cftReady) {
@@ -591,7 +600,10 @@ async function main() {
 }
 
 // Tweak TUI(installer/tweak.mjs) 가 import 해서 쓸 수 있도록, 직접 실행할 때만 main 을 돈다
-export { ui, sys, ROOT, VERSION, setFrame, finishWithVerify, reconfigure, stateFromInstall, writeSiteConfig };
+export {
+  ui, sys, ROOT, VERSION, setFrame, finishWithVerify, reconfigure, stateFromInstall, writeSiteConfig,
+  stepSqlcl, stepBrowser, stepVllm, stepModel, stepGitlab, stepIntegrate, applyOptional, applyIntegrations, fetchModels,
+};
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   let code = 1;

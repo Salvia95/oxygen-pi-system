@@ -28,6 +28,8 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 | | hurl | 도구 | Apache-2.0 | `http-api-testing` |
 | **repository** | glab (GitLab) | 도구 | MIT | `gitlab-workflow` |
 | | gh (GitHub / GHE) | 도구 | MIT | `github-workflow` |
+| **code-intel** | ast-grep | 도구 (문법 단위 검색·일괄 치환) | MIT | `structural-code-search` |
+| | graphin | MCP (하이브리드 검색·코드 그래프) · **Windows 빌드 직접 반입** | Apache-2.0 | `code-graph-search` |
 | **internet-browsing** | agent-browser **추천** | 도구 (페이지 조작) | Apache-2.0 | `web-page-automation` |
 | | obscura | 도구 (읽기·수집) + 엔진 | Apache-2.0 | `web-page-reading` |
 | | Chrome for Testing **추천** | 엔진 | Google Chrome 약관 (비오픈소스) | — |
@@ -38,6 +40,9 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 
 - agent-browser 의 브라우저 엔진은 설치 TUI 에서 고른다: Chrome for Testing (추천) / Chromium / obscura / PC 의 Edge·Chrome / 사용 안 함.
   obscura 를 고르면 `wrappers/agent-browser` 가 obscura CDP 서버를 필요할 때 띄우고 연결한다 (Chrome 대비 약 1/3 용량, 일부 CDP 기능 미지원).
+- 기본 코드 탐색은 core 의 rg/fd 와 pi 내장 grep/find 로 충분하다. code-intel 은 보조 수단이다.
+  - ast-grep: 주석·문자열을 빼고 코드 구조로 찾거나, 여러 호출부를 같은 규칙으로 바꿀 때. Windows 빌드가 경로를 `\` 로 출력하므로 `wrappers/ast-grep` 가 `/` 로 바꾼다.
+  - graphin: 아직 Windows 릴리스가 없어 fetch 대상이 아니다. 직접 빌드한 `graphin.exe` 를 `vendor/graphin/` 에 넣으면(의미 검색은 `models/`, `onnxruntime.dll` 도 함께) configure·설치 TUI 가 `agent/mcp.json` 에 `--workspace . --offline` 으로 등록하고 skill 을 켠다. MCP 서버는 pi 를 실행한 폴더를 작업 폴더로 받는다.
 - usql 의 Oracle 드라이버는 순수 Go 라 Oracle Instant Client 가 필요 없다. SQLcl 은 Oracle 전용 기능(`info`, `ddl` 등)이 필요할 때 추가한다.
 
 전제: 폐쇄망 PC에 **Git for Windows** 가 설치되어 있어야 한다. **Java 17 이상**은 SQLcl 을 쓸 때만 필요하다.
@@ -109,14 +114,21 @@ bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
 
 ## 3) 종합 설정 (Tweak TUI)
 
-설치 폴더의 **`tweak.cmd`** (Git Bash 에서는 `./tweak.sh`, `just tweak`) 로 설치 후 설정을 한곳에서 바꾼다.
+설치 폴더의 **`tweak.cmd`** (Git Bash 에서는 `./tweak.sh`, `just tweak`) 로 이미 설치된 항목을 **순서와 상관없이 하나씩** 바꾼다.
+메인 메뉴에 항목마다 현재 값이 보이고, 고른 항목만 바꿔 바로 저장한 뒤 메뉴로 돌아온다 (Esc 는 바꾸지 않고 복귀).
 
-| 메뉴 | 내용 |
+| 항목 | 내용 |
 |---|---|
-| 모델 · vLLM · 브라우저 · SQLcl · 시스템 등록 | 설치 TUI 의 "설정 변경"과 같은 흐름 (Esc 로 메뉴 복귀) |
+| vLLM 주소 · API 키 | 연결 확인 후 저장. 지금 모델이 새 서버에 없으면 이어서 모델을 고른다 |
+| 모델 · 컨텍스트 | vLLM 의 모델 목록에서 코딩·범용 모델과 컨텍스트 길이 (연결이 안 되면 직접 입력) |
+| GitLab 호스트 · 브라우저 (agent-browser) · Oracle SQLcl · 시스템 등록 | 각각 단독으로 변경 (브라우저는 agent-browser 를 반입한 경우만) |
 | DB 연결 | PostgreSQL · MySQL · MariaDB · SQL Server · Oracle · SQLite 연결 추가·편집·연결 시험·삭제. 연결마다 **usql**(CLI) / **dbhub**(pi MCP 도구) 중 쓸 도구와 읽기 전용 여부를 고른다 |
-| extension | 안전장치 4종 켜기/끄기, 출력 한도·반복 차단 횟수 |
+| extension 켜기/끄기 | 안전장치·작업 기록·백그라운드 작업 등 |
+| 한도 · 동시 실행 | 출력 상한, 반복 차단 횟수, 세션 넘기기 기준, subagent·bash 동시 실행 수 — 값 하나씩 |
+| 설치된 구성요소 보기 | 계층별 설치 여부·버전과 켜진 skill |
 | 자가진단 | verify 실행 |
+
+입력 칸에서는 붙여넣기(우클릭 · Ctrl+V · Windows Terminal 의 bracketed paste)를 그대로 받는다. 붙여넣은 내용의 줄바꿈은 입력 확정으로 보지 않는다.
 
 DB 연결은 다음처럼 저장된다 (모두 PC 로컬, git·번들 제외):
 
@@ -242,6 +254,8 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 | `project-task-running` | 빌드·테스트 명령 찾기·작업 추가 (just) | `just --list` 우선, recipe 작성 규칙 |
 | `github-workflow` | PR·리뷰·이슈·Actions·GitHub API (gh) | `--json --jq`, 쓰기는 승인 후, `--web` 금지, `gh api -f` 는 쓰기 |
 | `sql-querying` | 여러 DB 의 데이터·스키마 조회, .sql 실행 (usql) | 이름 붙은 연결(`agent/usql.yaml`), `-w -q --csv`, DB별 행 수 제한 문법 |
+| `structural-code-search` | 주석·문자열을 뺀 호출·구조 검색, 여러 호출부 일괄 치환 (ast-grep) | 패턴은 작은따옴표 + `-l <언어>`, `-r` 로 미리보기 → `-U` 적용, Java 메서드 선언은 클래스 문맥 없이 파싱 안 됨 |
+| `code-graph-search` | 기능·심볼 위치, 호출자/피호출자, 변경 영향 (graphin MCP) | search_hybrid → explore_graph → read_code, 받은 node id 만 사용 |
 | `web-page-reading` | 페이지 내용·링크 추출, 여러 페이지 수집 (obscura) | `--dump markdown/text`, `--selector` 는 대기만, 일부 추출은 `scrape --eval` |
 
 환경 쪽 보정:

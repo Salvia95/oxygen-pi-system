@@ -40,7 +40,7 @@ e2e:
 
 # extension 단위 테스트
 unit:
-    ./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts
+    ./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts tests/unit-tui.test.mjs
 
 # 전체 테스트 (단위 + E2E)
 test: unit e2e

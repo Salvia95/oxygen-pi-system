@@ -69,6 +69,10 @@ install_component() {
     fd|rg|just|glab|gh|usql)
       t=$(fresh_tmp "$name"); extract_zip "$file" "$t"
       copy_found "$t" "$BIN" "$name.exe" ;;
+    ast-grep)
+      # 압축 안에 ast-grep.exe 와 같은 바이너리의 별칭 sg.exe 가 있다 → ast-grep.exe 만 둔다
+      t=$(fresh_tmp ast-grep); extract_zip "$file" "$t"
+      copy_found "$t" "$BIN" "ast-grep.exe" ;;
     obscura)
       t=$(fresh_tmp obscura); extract_zip "$file" "$t"
       copy_found "$t" "$BIN" "obscura.exe" "obscura-worker.exe" ;;
@@ -110,6 +114,7 @@ prune_paths() {
     glab) echo bin/glab.exe ;;
     gh) echo bin/gh.exe ;;
     usql) echo bin/usql.exe ;;
+    ast-grep) echo bin/ast-grep.exe ;;
     obscura) echo bin/obscura.exe bin/obscura-worker.exe ;;
     dbhub) echo vendor/dbhub ;;
     agent-browser) echo bin/agent-browser.exe vendor/agent-browser-skill-data ;;

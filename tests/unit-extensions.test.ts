@@ -175,3 +175,35 @@ test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 ·
     assert.equal(existsSync(lock), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("code-intel: ast-grep skill · graphin 을 넣으면 MCP 등록 + skill, 빼면 해제 (다른 서버 유지)", async () => {
+  const { syncSkills } = await import("../installer/components.mjs");
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "oxyci-"));
+  const agent = join(root, "agent");
+  try {
+    cpSync(join(import.meta.dirname, "..", "agent", "skill-library"), join(agent, "skill-library"), { recursive: true });
+    mkdirSync(join(root, "bin"), { recursive: true });
+    writeFileSync(join(root, "bin", "ast-grep.exe"), "");
+    writeFileSync(join(agent, "mcp.json"), JSON.stringify({ mcpServers: { dbhub: { command: "x" } } }));
+    let skills = syncSkills(root, agent);
+    assert.ok(skills.includes("structural-code-search"));
+    assert.ok(!skills.includes("code-graph-search"));
+    assert.equal(JSON.parse(readFileSync(join(agent, "mcp.json"), "utf8")).mcpServers.graphin, undefined);
+    mkdirSync(join(root, "vendor", "graphin", "models"), { recursive: true });
+    writeFileSync(join(root, "vendor", "graphin", "graphin.exe"), "");
+    skills = syncSkills(root, agent);
+    assert.ok(skills.includes("code-graph-search"));
+    const g = JSON.parse(readFileSync(join(agent, "mcp.json"), "utf8")).mcpServers;
+    assert.ok(g.dbhub, "다른 MCP 서버 유지");
+    assert.deepEqual(g.graphin.args.slice(0, 3), ["--workspace", ".", "--offline"]);
+    assert.ok(g.graphin.args.includes("--model-dir") && !g.graphin.args.includes("--ort-lib"));
+    assert.equal(g.graphin.exposure, "direct");
+    rmSync(join(root, "vendor"), { recursive: true });
+    syncSkills(root, agent);
+    assert.equal(JSON.parse(readFileSync(join(agent, "mcp.json"), "utf8")).mcpServers.graphin, undefined);
+    assert.ok(existsSync(join(agent, "mcp.json")));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

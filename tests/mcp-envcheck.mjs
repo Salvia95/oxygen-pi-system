@@ -15,7 +15,8 @@ rl.on("line", (line) => {
     send({ jsonrpc: "2.0", id: m.id, result: { tools: [{ name: "check", description: "Report whether the injected secret env var matches", inputSchema: { type: "object", properties: {} } }] } });
   } else if (m.method === "tools/call") {
     const v = process.env.OXY_ENVCHECK;
-    const text = v === undefined ? "ENVCHECK: unset" : v === expected ? "ENVCHECK: match" : `ENVCHECK: mismatch (len ${v.length})`;
+    const text = (v === undefined ? "ENVCHECK: unset" : v === expected ? "ENVCHECK: match" : `ENVCHECK: mismatch (len ${v.length})`) +
+      ` CWD: ${process.cwd().replace(/\\/g, "/")}`;
     send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text }] } });
   } else if (m.id !== undefined) {
     send({ jsonrpc: "2.0", id: m.id, result: {} });

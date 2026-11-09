@@ -1,4 +1,5 @@
 // 의존성 없는 최소 TUI. 진짜 터미널(TTY)에서는 방향키 UI, 아니면(파이프, mintty) 줄 단위 입력으로 동작한다.
+import { execFileSync } from "node:child_process";
 import readline from "node:readline";
 
 const useColor = !process.env.NO_COLOR && process.stdout.isTTY;
@@ -113,46 +114,96 @@ export function banner(version) {
   return out.join("\n");
 }
 
+
+// ---------------------------------------------------------------- 단계 표시 (상자 그림)
+/** 터미널 표시 폭 (한글·전각 문자는 2칸) */
+export function displayWidth(s) {
+  return [...String(s).replace(/\x1b\[[0-9;]*m/g, "")]
+    .reduce((n, ch) => n + (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1), 0);
+}
+
+/**
+ * 진행 단계를 상자로 그린다. 지난 단계 ✔(초록) · 현재 단계 굵은 상자(청록) · 남은 단계(회색).
+ * 폭이 모자라면 여러 줄로 나눈다.
+ *   ╭──────╮  ╭──────╮  ┏━━━━━━━━┓  ╭──────╮
+ *   │✔ 점검│──│✔ 위치│━━┃▶ 선택  ┃──│ vLLM │
+ *   ╰──────╯  ╰──────╯  ┗━━━━━━━━┛  ╰──────╯
+ */
+export function stepArt(names, current, cols = process.stdout.columns || 100) {
+  const boxes = names.map((n, i) => {
+    const label = ` ${i < current ? "✔" : i === current ? "▶" : " "} ${n} `;
+    const w = displayWidth(label);
+    const [tl, tr, bl, br, h, v] = i === current ? ["┏", "┓", "┗", "┛", "━", "┃"] : ["╭", "╮", "╰", "╯", "─", "│"];
+    const paint = i < current ? c.green : i === current ? (s) => c.cyan(c.bold(s)) : c.gray;
+    return { w: w + 2, rows: [paint(tl + h.repeat(w) + tr), paint(v) + (i === current ? c.bold(label) : i < current ? label : c.gray(label)) + paint(v), paint(bl + h.repeat(w) + br)] };
+  });
+  const lines = [];
+  let row = [["", "", ""]];
+  let width = 2;
+  boxes.forEach((b, i) => {
+    const link = i === 0 ? null : i <= current ? c.green("──") : c.gray("──");
+    if (i > 0 && width + 2 + b.w > cols - 2) { lines.push(row); row = [["", "", ""]]; width = 2; }
+    const r = row[0];
+    if (width > 2) { r[0] += "  "; r[1] += link; r[2] += "  "; width += 2; }
+    r[0] += b.rows[0]; r[1] += b.rows[1]; r[2] += b.rows[2]; width += b.w;
+  });
+  lines.push(row);
+  return lines.map(([[a, b, d]]) => `  ${a}\n  ${b}\n  ${d}`).join("\n");
+}
+
 // ---------------------------------------------------------------- UI
 export class UI {
-  constructor() {
-    this.tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  /** input/output/tty 는 테스트에서 가짜 터미널을 넣을 때만 쓴다 */
+  constructor({ input = process.stdin, output = process.stdout, tty } = {}) {
+    this.in = input;
+    this.out = output;
+    this.tty = tty ?? Boolean(input.isTTY && output.isTTY);
     /** 매 화면 위쪽에 그릴 내용 (배너 + 단계 표시) */
     this.frame = () => "";
     this.lines = null;
+    /** 받은 키 대기열. 붙여넣기는 keypress 가 한꺼번에 여러 개 오므로, 리스너를 하나만 상주시켜 하나도 잃지 않는다 */
+    this.queue = [];
+    this.waiter = null;
   }
 
   // ---- 공통 출력
-  clear() { if (this.tty) process.stdout.write("\x1b[2J\x1b[3J\x1b[H"); }
-  screen(body) { this.clear(); process.stdout.write(this.frame() + "\n" + body + "\n"); }
-  print(s = "") { process.stdout.write(s + "\n"); }
+  clear() { if (this.tty) this.out.write("\x1b[2J\x1b[3J\x1b[H"); }
+  screen(body) { this.clear(); this.out.write(this.frame() + "\n" + body + "\n"); }
+  print(s = "") { this.out.write(s + "\n"); }
 
   // ---- TTY 키 입력
   #raw(on) {
     if (!this.tty) return;
-    if (on && !this.keysReady) { readline.emitKeypressEvents(process.stdin); this.keysReady = true; }
-    process.stdin.setRawMode(on);
-    if (on) process.stdin.resume(); else process.stdin.pause();
+    if (on && !this.keysReady) {
+      readline.emitKeypressEvents(this.in);
+      this.in.on("keypress", (str, key = {}) => {
+        if (key.ctrl && key.name === "c") { this.#raw(false); this.out.write("\x1b[?25h\n"); process.exit(130); }
+        const ev = { str, key };
+        if (this.waiter) { const w = this.waiter; this.waiter = null; w(ev); } else this.queue.push(ev);
+      });
+      this.keysReady = true;
+    }
+    if (on) this.queue.length = 0; // 이전 화면에서 남은 키는 버린다
+    this.in.setRawMode?.(on);
+    // bracketed paste: 붙여넣기 구간을 paste-start / paste-end 로 알려 준다 (Windows Terminal 등)
+    this.out.write(on ? "\x1b[?2004h" : "\x1b[?2004l");
+    if (on) this.in.resume(); else this.in.pause();
   }
   #key() {
-    return new Promise((resolve) => {
-      process.stdin.once("keypress", (str, key = {}) => {
-        if (key.ctrl && key.name === "c") { this.#raw(false); process.stdout.write("\x1b[?25h\n"); process.exit(130); }
-        resolve({ str, key });
-      });
-    });
+    if (this.queue.length) return Promise.resolve(this.queue.shift());
+    return new Promise((resolve) => { this.waiter = resolve; });
   }
 
   // ---- 줄 입력 (TTY 아님)
   async #line(prompt) {
     if (!this.lines) {
-      this.rl = readline.createInterface({ input: process.stdin, terminal: false });
+      this.rl = readline.createInterface({ input: this.in, terminal: false });
       this.lines = this.rl[Symbol.asyncIterator]();
     }
-    process.stdout.write(prompt);
+    this.out.write(prompt);
     const { value, done } = await this.lines.next();
     if (done) throw new Error("입력이 끝났습니다 (stdin EOF)");
-    process.stdout.write(value + "\n");
+    this.out.write(value + "\n");
     return value.trim();
   }
 
@@ -261,22 +312,43 @@ export class UI {
     }
     let v = initial;
     let err = null;
+    let pasting = false;
+    const name = (ev) => ev.key.name ?? "";
+    const printable = (ev) => Boolean(ev.str) && !ev.key.ctrl && !ev.key.meta && ev.str >= " " && !name(ev).startsWith("paste-");
     this.#raw(true);
     try {
       for (;;) {
-        const shown = mask ? "•".repeat(v.length) : v;
+        const shown = mask ? "•".repeat([...v].length) : v;
         this.screen(
           `  ${c.bold(question)}\n${hint ? "  " + c.gray(hint) + "\n" : ""}\n  ${c.cyan("❯")} ${shown}${c.inverse(" ")}\n` +
-          `${err ? "\n  " + c.red("✖ " + err) + "\n" : "\n"}\n  ${c.gray(`Enter 확인 · Ctrl+U 지우기${back ? " · Esc 이전" : ""}`)}`,
+          `${err ? "\n  " + c.red("✖ " + err) + "\n" : "\n"}\n  ${c.gray(`Enter 확인 · Ctrl+U 지우기 · Ctrl+V/우클릭 붙여넣기${back ? " · Esc 이전" : ""}`)}`,
         );
-        const { str, key } = await this.#key();
-        if (key.name === "return" || key.name === "enter") {
+        const ev = await this.#key();
+        const { key } = ev;
+        if (name(ev) === "paste-start") { pasting = true; continue; }
+        if (name(ev) === "paste-end") { pasting = false; continue; }
+        if (name(ev) === "return" || name(ev) === "enter") {
+          // 붙여넣은 내용 안의 줄바꿈은 확정으로 보지 않는다 (붙여넣기 구간이거나, 바로 뒤에 글자가 이어서 들어온 경우)
+          if (pasting || this.queue.length) continue;
           err = validate(v);
           if (!err) return v;
-        } else if (back && key.name === "escape") return BACK;
-        else if (key.name === "backspace") v = [...v].slice(0, -1).join("");
-        else if (key.ctrl && key.name === "u") v = "";
-        else if (str && !key.ctrl && !key.meta && str >= " ") { v += str.replace(/[\r\n]/g, ""); err = null; }
+        } else if (back && name(ev) === "escape" && !pasting) return BACK;
+        else if (name(ev) === "backspace") v = [...v].slice(0, -1).join("");
+        else if (key.ctrl && name(ev) === "u") v = "";
+        else if (key.ctrl && name(ev) === "v") { v += readClipboard(); err = null; } // Ctrl+V 가 그대로 들어오는 콘솔
+        else if (printable(ev)) {
+          v += ev.str;
+          // 한꺼번에 들어온 글자(붙여넣기)는 화면을 다시 그리지 않고 모두 받는다
+          while (this.queue.length) {
+            const n = this.queue[0];
+            if (name(n) === "paste-start") pasting = true;
+            else if (name(n) === "paste-end") pasting = false;
+            else if (printable(n)) v += n.str;
+            else if (!(name(n) === "return" || name(n) === "enter") || !(pasting || this.queue.length > 1)) break;
+            this.queue.shift();
+          }
+          err = null;
+        }
       }
     } finally { this.#raw(false); }
   }
@@ -293,7 +365,7 @@ export class UI {
     let k = 0;
     let extra = "";
     const draw = (mark) => {
-      if (this.tty) process.stdout.write(`\r\x1b[2K  ${mark} ${label}${extra ? c.gray("  " + extra) : ""}`);
+      if (this.tty) this.out.write(`\r\x1b[2K  ${mark} ${label}${extra ? c.gray("  " + extra) : ""}`);
     };
     const timer = this.tty ? setInterval(() => draw(c.cyan(frames[k++ % frames.length])), 80) : null;
     if (!this.tty) this.print(`  … ${label}`);
@@ -301,12 +373,12 @@ export class UI {
       const r = await fn((t) => { extra = t; });
       if (timer) clearInterval(timer);
       extra = typeof r === "string" ? r : extra;
-      if (this.tty) { draw(c.green("✔")); process.stdout.write("\n"); } else this.print(`  ✔ ${label}${extra ? "  " + extra : ""}`);
+      if (this.tty) { draw(c.green("✔")); this.out.write("\n"); } else this.print(`  ✔ ${label}${extra ? "  " + extra : ""}`);
       return r;
     } catch (e) {
       if (timer) clearInterval(timer);
       extra = "";
-      if (this.tty) { draw(c.red("✖")); process.stdout.write("\n"); } else this.print(`  ✖ ${label}`);
+      if (this.tty) { draw(c.red("✖")); this.out.write("\n"); } else this.print(`  ✖ ${label}`);
       this.print(c.red(`    ${e.message}`));
       throw e;
     }
@@ -323,8 +395,17 @@ export class UI {
   close() { this.rl?.close(); }
 }
 
+/** 클립보드 텍스트 (Windows). 줄바꿈과 제어 문자는 뺀다 */
+function readClipboard() {
+  if (process.platform !== "win32") return "";
+  try {
+    const t = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+      { encoding: "utf8", windowsHide: true, timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    return t.replace(/[\r\n]+$/, "").replace(/[\r\n]+/g, "").replace(/[\x00-\x1f]/g, "");
+  } catch { return ""; }
+}
+
 /** 터미널 표시 폭 기준으로 오른쪽을 공백으로 채운다 (한글·전각 문자는 2칸) */
 export function padDisplay(s, width) {
-  const w = [...s].reduce((n, ch) => n + (/[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(ch) ? 2 : 1), 0);
-  return s + " ".repeat(Math.max(0, width - w));
+  return s + " ".repeat(Math.max(0, width - displayWidth(s)));
 }

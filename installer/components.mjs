@@ -7,7 +7,7 @@
 //   CLI: node installer/components.mjs install <name> <archive> [--root <dir>]
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +26,7 @@ export const GROUPS = {
   core: { title: "core", desc: "하네스 동작에 필요 (필수)" },
   "dev-tools": { title: "dev-tools", desc: "작업 실행 · API 테스트" },
   repository: { title: "repository", desc: "저장소·코드 리뷰 (사내 환경에 열린 것 선택, 여러 개 가능)" },
+  "code-intel": { title: "code-intel", desc: "코드 탐색 보조 (기본 탐색은 rg/fd · 문법 단위 검색 · 코드 그래프)" },
   "internet-browsing": { title: "internet-browsing", desc: "사내 웹 페이지 읽기·조작 (도구 + 브라우저 엔진)" },
   database: { title: "database", desc: "DB 조회 (CLI 클라이언트 · MCP 커넥터)" },
 };
@@ -48,6 +49,10 @@ export const CATALOG = {
   hurl: { title: "hurl", kind: "tool", purpose: "HTTP API 호출·테스트", check: "bin/hurl.exe", skills: ["http-api-testing"] },
   glab: { title: "glab", kind: "tool", purpose: "GitLab MR·이슈·CI", check: "bin/glab.exe", skills: ["gitlab-workflow"] },
   gh: { title: "gh", kind: "tool", purpose: "GitHub / GitHub Enterprise PR·이슈·Actions", check: "bin/gh.exe", skills: ["github-workflow"] },
+  "ast-grep": { title: "ast-grep", kind: "tool", purpose: "문법(AST) 단위 코드 검색·일괄 치환 (주석·문자열 제외, 구조로 매칭)", check: "bin/ast-grep.exe", skills: ["structural-code-search"] },
+  // graphin: Windows 빌드가 아직 배포되지 않아 manifest(fetch) 에는 없다. 직접 빌드한 graphin.exe 를 vendor/graphin/ 에 넣으면
+  // pi MCP 서버로 등록되고 skill 이 켜진다 (external: fetch 대상 아님)
+  graphin: { title: "graphin", kind: "connector", purpose: "코드베이스 탐색 MCP (하이브리드 검색 · 코드 그래프 · 정확한 소스 조각) · Windows 빌드 직접 반입", check: "vendor/graphin/graphin.exe", skills: ["code-graph-search"], external: true, group: "code-intel" },
   "agent-browser": { title: "agent-browser", kind: "tool", purpose: "페이지 조작 (클릭·입력·스크린샷) · 브라우저 엔진 필요", check: "bin/agent-browser.exe", skills: ["web-page-automation"], recommended: true },
   obscura: { title: "obscura", kind: "tool", purpose: "가벼운 페이지 읽기·수집 (JS 렌더링) · agent-browser 엔진으로도 사용", check: "bin/obscura.exe", skills: ["web-page-reading"] },
   chromium: { title: "Chromium 오픈소스 빌드", kind: "engine", purpose: "agent-browser 용 브라우저 엔진 (오픈소스)", check: "vendor/browsers/chromium/chrome.exe" },
@@ -85,7 +90,36 @@ export function syncSkills(root, agentDir, opts = {}) {
     rmSync(join(dst, s), { recursive: true, force: true });
     if (enabled.has(s)) cpSync(join(lib, s), join(dst, s), { recursive: true });
   }
+  syncMcp(root, agentDir); // MCP 로 붙는 구성요소(graphin)도 함께 맞춘다
   return managed.filter((s) => enabled.has(s)).sort();
+}
+
+const fwd = (p) => p.replace(/\\/g, "/");
+
+/**
+ * graphin MCP 등록: vendor/graphin/graphin.exe 가 있으면 agent/mcp.json 에 넣고, 없으면 뺀다 (다른 서버는 유지).
+ * MCP 서버는 pi 를 실행한 폴더(프로젝트)를 cwd 로 받으므로 --workspace . 로 프로젝트마다 색인한다.
+ * 의미 검색용 모델·onnxruntime 을 함께 반입했으면 (vendor/graphin/models, onnxruntime.dll) 오프라인 경로로 넘긴다.
+ */
+export function syncMcp(root, agentDir) {
+  const file = join(agentDir, "mcp.json");
+  let mcp = {};
+  try { mcp = JSON.parse(readFileSync(file, "utf8")); } catch { /* 새로 만든다 */ }
+  mcp.mcpServers ??= {};
+  const before = JSON.stringify(mcp.mcpServers.graphin ?? null);
+  if (hasComponent("graphin", root)) {
+    const dir = join(root, "vendor", "graphin");
+    const args = ["--workspace", ".", "--offline"];
+    if (existsSync(join(dir, "models"))) args.push("--model-dir", fwd(join(dir, "models")));
+    if (existsSync(join(dir, "onnxruntime.dll"))) args.push("--ort-lib", fwd(join(dir, "onnxruntime.dll")));
+    mcp.mcpServers.graphin = {
+      command: fwd(join(dir, "graphin.exe")), args, exposure: "direct",
+      description: "코드베이스 탐색 (search_hybrid → explore_graph → read_code)",
+    };
+  } else delete mcp.mcpServers.graphin;
+  if (JSON.stringify(mcp.mcpServers.graphin ?? null) === before) return;
+  if (Object.keys(mcp.mcpServers).length) writeFileSync(file, JSON.stringify(mcp, null, 2) + "\n");
+  else rmSync(file, { force: true });
 }
 
 /**

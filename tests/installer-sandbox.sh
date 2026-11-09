@@ -54,12 +54,21 @@ chk "바로가기만 해제"                       '[[ ! -f "$SB/Desktop/Oxygen 
 
 # 3-1) 설치된 복사본의 Tweak TUI: SQLite 연결 추가 (usql + dbhub) → 설치 위치 기준 파일 생성
 "$I/bin/usql.exe" "sqlite:$(winpath "$SB/t.db")" -c "create table t(a int); insert into t values (5),(6);" >/dev/null 2>&1
-INSTALLER="$I/installer/tweak.mjs" run "Tweak: DB 연결 추가" "$I/runtime/node/node.exe" 2 1 6 tdb "$(winpath "$SB/t.db")" 1 "" 1 "" 3 5
+# Tweak 메인 메뉴: 1 vLLM · 2 모델 · 3 GitLab · 4 브라우저 · 5 SQLcl · 6 시스템 등록 · 7 DB 연결 · 8 extension · 9 한도 · 10 구성요소 · 11 자가진단 · 12 종료
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: DB 연결 추가" "$I/runtime/node/node.exe" 7 1 6 tdb "$(winpath "$SB/t.db")" 1 "" 1 "" 3 12
 chk "Tweak 종료코드 0"                         '[[ $RC == 0 ]]'
 chk "연결 시험 성공"                            'grep -q "tdb 접속  성공" "$SB/out.txt"'
 chk "usql.yaml / dbhub.toml / mcp.json 생성"     '[[ -f "$I/agent/usql.yaml" && -f "$I/agent/dbhub.toml" && -f "$I/agent/mcp.json" ]]'
 chk "mcp.json 이 설치 위치의 dbhub 를 가리킴"     'grep -q "$(winpath "$I" | sed "s|\\|/|g")/vendor/dbhub" "$I/agent/mcp.json"'
 chk "설치된 usql 래퍼로 이름 붙은 연결 조회"        '[[ "$(bash "$I/wrappers/usql" tdb -w -q --csv -c "select count(*) as n from t" | tail -1)" == 2 ]]'
+
+# 3-2) Tweak: 항목 하나씩 (순서 무관) — GitLab 호스트만 바꾸기 → 한도 값 하나만 바꾸기 → 종료. 나머지 설정은 그대로여야 한다
+before_url=$(grep "^OXY_VLLM_BASE_URL=" "$I/agent/oxy.env")
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: 항목별 조정" "$I/runtime/node/node.exe" 3 gitlab2.example.internal "" 9 1 9000 7 12
+chk "Tweak 항목별: 종료코드 0"                   '[[ $RC == 0 ]]'
+chk "Tweak 항목별: GitLab 호스트만 변경"           'grep -q "^GITLAB_HOST=gitlab2.example.internal$" "$I/agent/oxy.env" && [[ "$(grep "^OXY_VLLM_BASE_URL=" "$I/agent/oxy.env")" == "$before_url" ]]'
+chk "Tweak 항목별: 한도 값 하나만 저장"            'grep -q "^OXY_TOOL_OUTPUT_MAX_CHARS=9000$" "$I/agent/oxy.env" && ! grep -q "^OXY_READ_MAX_CHARS=" "$I/agent/oxy.env"'
+chk "Tweak 항목별: 단계 흐름 없이 바로 저장"        '! grep -q "설정 적용 중" "$SB/out.txt" && grep -q "GitLab 호스트 적용 중" "$SB/out.txt"'
 
 # 4) 설치된 복사본으로 제거 (실행 중인 node.exe 가 설치 폴더 안 → 종료 후 삭제 예약)
 INSTALLER="$I/installer/install.mjs" run "자기 제거" "$I/runtime/node/node.exe" 3 1 ""

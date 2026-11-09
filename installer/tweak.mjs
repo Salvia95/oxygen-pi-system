@@ -1,14 +1,17 @@
 // oxygen-pi-system 종합 설정 (Tweak TUI). 설치된 하네스 폴더에서 실행한다: tweak.cmd / tweak.sh / just tweak
-//   - 모델 · vLLM · 브라우저 · SQLcl · 시스템 등록  (설치 TUI 의 "설정 변경"과 같은 흐름)
+// 이미 설치된 항목을 순서와 상관없이 하나씩 골라 바꾼다 (고른 항목만 바꾸고 바로 저장).
+//   - vLLM · 모델 · GitLab · 브라우저 · SQLcl · 시스템 등록  (설치 TUI 의 단계를 하나씩 재사용)
 //   - DB 연결: usql 이름 붙은 연결 + dbhub MCP 소스 (비밀번호는 DPAPI 로 암호화해 저장)
-//   - extension: 안전장치 켜기/끄기, 출력 한도
-//   - 자가진단
+//   - extension 켜기/끄기 · 한도 값 · 설치된 구성요소 보기 · 자가진단
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BACK, banner, c } from "./tui.mjs";
-import { ROOT, VERSION, reconfigure, sys, ui } from "./install.mjs";
-import { hasComponent } from "./components.mjs";
+import {
+  ROOT, VERSION, applyIntegrations, applyOptional, fetchModels, stateFromInstall, stepBrowser, stepGitlab, stepIntegrate,
+  stepModel, stepSqlcl, stepVllm, sys, ui, writeSiteConfig,
+} from "./install.mjs";
+import { CATALOG, GROUPS, OPTIONAL, enabledSkills, hasComponent, isInstalled, readLock } from "./components.mjs";
 import { DB_TYPES, ID_RE, loadConnections, probeConnection, saveConnections, secretKey } from "./connections.mjs";
 import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
 
@@ -217,33 +220,110 @@ const LIMITS = [
   { key: "OXY_JOBS_MAX_CONCURRENT", label: "백그라운드 bash 동시 실행 수", def: 4 },
 ];
 
+const readEnv = () => { const text = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : ""; return { text, env: parseEnv(text) }; };
+const isOn = (env, e) => (e.defaultOff ? /^(on|1|true)$/i.test(env[e.key] ?? "") : !/^(off|0|false)$/i.test(env[e.key] ?? ""));
+const SAVED = `${c.green("✔")} 저장했습니다 (agent/oxy.env). 실행 중인 pi 는 다시 시작하면 적용됩니다.`;
+
 async function extensionMenu() {
-  ui.frame = frame("extension");
-  const text = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
-  const env = parseEnv(text);
-  const isOn = (e) => (e.defaultOff ? /^(on|1|true)$/i.test(env[e.key] ?? "") : !/^(off|0|false)$/i.test(env[e.key] ?? ""));
-  const on = await ui.multiselect("켤 extension", EXTENSIONS.map((e) => ({ label: e.label, value: e.key, hint: e.hint, checked: isOn(e) })),
+  ui.frame = frame("extension 켜기/끄기");
+  const { text, env } = readEnv();
+  const on = await ui.multiselect("켤 extension", EXTENSIONS.map((e) => ({ label: e.label, value: e.key, hint: e.hint, checked: isOn(env, e) })),
     { note: c.gray("  끄면 소형 모델의 실수를 막는 장치가 사라집니다. 특별한 이유가 없으면 모두 켜 두세요.") });
   if (on === BACK) return;
   const updates = Object.fromEntries(EXTENSIONS.map((e) => [e.key, on.includes(e.key) ? "on" : "off"]));
-  if (await ui.confirm("출력 한도 값을 바꿀까요?", { initial: false })) {
-    for (const l of LIMITS) {
-      const v = await ui.input(l.label, { initial: String(env[l.key] ?? l.def), validate: (s) => (/^\d+$/.test(s) && Number(s) > 0 ? null : "양의 정수") });
-      if (v === BACK) return;
-      updates[l.key] = v;
-    }
-  }
   writeFileSync(ENV_FILE, mergeEnv(text, updates));
-  await notice(`${c.green("✔")} 저장했습니다 (agent/oxy.env). 다음에 pi 를 시작할 때 적용됩니다.\n\n` +
-    EXTENSIONS.map((e) => `    ${updates[e.key] === "on" ? c.green("●") : c.gray("○")} ${e.label}`).join("\n"));
+  await notice(`${SAVED}\n\n` + EXTENSIONS.map((e) => `    ${updates[e.key] === "on" ? c.green("●") : c.gray("○")} ${e.label}`).join("\n"));
 }
 
-// ------------------------------------------------------------------ 모델 · vLLM 등 (설치 TUI 재사용)
-async function generalSettings() {
-  let reg = sys.loadRegistry();
-  const registered = reg?.installDir && sys.isSameDir(reg.installDir, ROOT);
-  if (!registered) reg = { installDir: ROOT, copied: false, gitBash: sys.findGitBash(), integrations: [] };
-  await reconfigure(reg, { saveRegistry: Boolean(registered) });
+/** 한도 값: 목록에서 하나 골라 그 값만 바꾼다 */
+async function limitsMenu() {
+  for (;;) {
+    ui.frame = frame("한도 · 동시 실행");
+    const { text, env } = readEnv();
+    const k = await ui.select("바꿀 값", [
+      ...LIMITS.map((l) => ({ label: l.label, value: l.key, hint: `${env[l.key] ?? l.def}${env[l.key] ? "" : " (기본)"}` })),
+      { label: "← 뒤로", value: "__back" },
+    ]);
+    if (k === BACK || k === "__back") return;
+    const l = LIMITS.find((x) => x.key === k);
+    const v = await ui.input(l.label, { initial: String(env[l.key] ?? l.def), hint: `기본값 ${l.def}`, validate: (s) => (/^\d+$/.test(s) && Number(s) > 0 ? null : "양의 정수") });
+    if (v === BACK) continue;
+    writeFileSync(ENV_FILE, mergeEnv(text, { [l.key]: v }));
+  }
+}
+
+// ------------------------------------------------------------------ 설치 항목 (설치 TUI 의 단계를 하나씩 재사용)
+function registry() {
+  const reg = sys.loadRegistry();
+  const registered = Boolean(reg?.installDir && sys.isSameDir(reg.installDir, ROOT));
+  return { registered, reg: registered ? reg : { installDir: ROOT, copied: false, gitBash: sys.findGitBash(), integrations: [] } };
+}
+
+/** 고른 항목 하나만 바꾸고 바로 저장한다. step 이 BACK 이면 아무것도 바꾸지 않는다 */
+async function editItem(title, run) {
+  const { registered, reg } = registry();
+  const state = { ...stateFromInstall(reg), installDir: ROOT };
+  ui.frame = frame(title);
+  const r = await run(state);
+  if (r === BACK || r === "cancel") return;
+  ui.screen(`  ${c.bold(`${title} 적용 중`)}\n`);
+  try {
+    await applyOptional(state);
+    await ui.task("설정 생성 (oxy.env, settings.json, models.json, skill)", async () => `${writeSiteConfig(ROOT, state)}개 파일`);
+    if (r === "integrations") {
+      await applyIntegrations(state, reg);
+      if (registered) sys.saveRegistry({ ...reg, integrations: state.integrations, updatedAt: new Date().toISOString() });
+    }
+  } catch { await ui.pause(); return; }
+  ui.print(`\n  ${SAVED}`);
+  await ui.pause();
+}
+
+/** vLLM 에서 모델 목록을 받아 둔다 (모델 단계에서 고를 수 있게). 실패하면 직접 입력 */
+async function withModels(state) {
+  ui.screen(`  ${c.bold("vLLM 모델 목록")}\n`);
+  try { state.models = await ui.task(`${state.baseUrl}/models`, async () => fetchModels(state.baseUrl, state.apiKey)); }
+  catch { state.models = []; await ui.pause("모델 이름을 직접 입력합니다. Enter"); }
+}
+
+const items = {
+  vllm: { title: "vLLM 주소 · API 키", run: async (state) => {
+    const r = await stepVllm(state);
+    if (r === BACK) return BACK;
+    // 지금 쓰는 모델이 새 서버에 없으면 이어서 모델을 고른다
+    if (state.models?.length && !state.models.some((m) => m.id === state.coder)) {
+      await notice(`${c.yellow("!")} 지금 모델 ${state.coder} 이(가) 이 서버에 없습니다. 모델을 다시 고르세요.`);
+      return stepModel(state);
+    }
+    return r;
+  } },
+  model: { title: "모델 · 컨텍스트", run: async (state) => { await withModels(state); return stepModel(state); } },
+  gitlab: { title: "GitLab 호스트", run: (state) => stepGitlab(state) },
+  browser: { title: "브라우저 (agent-browser)", run: (state) => stepBrowser(state) },
+  sqlcl: { title: "Oracle SQLcl", run: (state) => stepSqlcl(state) },
+  integrations: { title: "시스템 등록", run: async (state) => ((await stepIntegrate(state)) === BACK ? BACK : "integrations") },
+};
+
+/** 설치된 구성요소와 켜진 skill (읽기 전용) */
+async function componentsView() {
+  ui.frame = frame("설치된 구성요소");
+  const lines = [];
+  const lock = readLock(ROOT);
+  for (const [group, g] of Object.entries(GROUPS)) {
+    // manifest(fetch) 대상 + 직접 반입하는 구성요소(external, 예: graphin)
+    const rows = [...lock.filter((x) => x.group === group && CATALOG[x.name]),
+      ...Object.entries(CATALOG).filter(([, x]) => x.external && x.group === group).map(([name]) => ({ name, version: "직접 반입" }))];
+    if (!rows.length) continue;
+    lines.push(`  ${c.bold(c.cyan(g.title))}  ${c.gray(g.desc)}`);
+    for (const x of rows) {
+      const on = hasComponent(x.name, ROOT);
+      lines.push(`    ${on ? c.green("●") : c.gray("○")} ${on ? x.name : c.gray(x.name)}  ${c.gray(`${x.version} · ${CATALOG[x.name].purpose}`)}`);
+    }
+  }
+  const skills = [...enabledSkills(ROOT, { browser: readEnv().env.OXY_BROWSER })].sort();
+  lines.push("", `  ${c.bold("켜진 skill")}  ${skills.join(", ") || c.gray("없음")}`,
+    "", c.gray("  구성요소 추가·제거: 인터넷 PC 에서 fetch → 번들링 → 반입 후 install.cmd 로 업데이트"));
+  await notice(lines.join("\n"));
 }
 
 async function verifyNow() {
@@ -262,20 +342,36 @@ async function main() {
     await notice(`${c.yellow("!")} 아직 설치(설정)되지 않은 하네스입니다. 먼저 install.cmd 를 실행하세요.`);
     return 1;
   }
+  let last = 0;
   for (;;) {
     ui.frame = frame();
-    const nconn = loadConnections(AGENT).length;
-    const v = await ui.select("무엇을 설정할까요?", [
-      { label: "모델 · vLLM · 브라우저 · SQLcl · 시스템 등록", value: "general", hint: "설치 TUI 의 설정 변경과 같은 흐름" },
-      { label: `DB 연결 (${nconn}개)`, value: "db", hint: "usql 이름 붙은 연결 · dbhub MCP" },
-      { label: "extension", value: "ext", hint: "안전장치 켜기/끄기 · 출력 한도" },
+    const { env } = readEnv();
+    const { reg } = registry();
+    const gray = (s) => s || c.gray("없음");
+    const onCount = EXTENSIONS.filter((e) => isOn(env, e)).length;
+    const menu = [
+      { label: "vLLM 주소 · API 키", value: "vllm", hint: gray(env.OXY_VLLM_BASE_URL) },
+      { label: "모델 · 컨텍스트", value: "model", hint: `${env.OXY_MODEL_CODER ?? "?"}${env.OXY_MODEL_GENERAL ? ` + ${env.OXY_MODEL_GENERAL}` : ""} · ${Math.round(Number(env.OXY_CONTEXT_WINDOW || 0) / 1024)}K` },
+      { label: "GitLab 호스트", value: "gitlab", hint: gray(env.GITLAB_HOST) },
+      ...(hasComponent("agent-browser", ROOT) ? [{ label: "브라우저 (agent-browser)", value: "browser", hint: gray(env.OXY_BROWSER) }] : []),
+      ...(hasComponent("sqlcl", ROOT) || OPTIONAL.sqlcl ? [{ label: "Oracle SQLcl", value: "sqlcl", hint: isInstalled("sqlcl", ROOT) ? "설치됨" : c.gray("설치 안 됨") }] : []),
+      { label: "시스템 등록", value: "integrations", hint: gray((reg.integrations ?? []).map((k) => ({ path: "PATH", wt: "Windows Terminal", shortcut: "바로가기" })[k]).join(", ")) },
+      { label: "DB 연결", value: "db", hint: `${loadConnections(AGENT).length}개` },
+      { label: "extension 켜기/끄기", value: "ext", hint: `${onCount}/${EXTENSIONS.length} 켜짐` },
+      { label: "한도 · 동시 실행", value: "limits", hint: "출력 상한 · 세션 넘기기 · subagent 동시 실행" },
+      { label: "설치된 구성요소 보기", value: "components" },
       { label: "자가진단", value: "verify" },
       { label: "종료", value: "exit" },
-    ], { back: false });
+    ];
+    const v = await ui.select("바꿀 항목을 고르세요", menu, { back: false, initial: Math.min(last, menu.length - 1),
+      note: c.gray("  항목마다 따로 바꾸고 바로 저장합니다. 순서는 상관없습니다.") });
+    last = menu.findIndex((m) => m.value === v);
     if (v === "exit") return 0;
-    if (v === "general") await generalSettings();
+    if (items[v]) await editItem(items[v].title, items[v].run);
     else if (v === "db") await dbMenu();
     else if (v === "ext") await extensionMenu();
+    else if (v === "limits") await limitsMenu();
+    else if (v === "components") await componentsView();
     else if (v === "verify") await verifyNow();
   }
 }
