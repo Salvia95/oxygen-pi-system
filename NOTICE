@@ -1,0 +1,9 @@
+oxygen-pi-system
+Copyright 2026 Salvia95
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The offline bundle built by scripts/fetch-bundle.sh downloads third-party
+components (Node.js, pi coding agent, fd, ripgrep, jq, just, hurl, glab,
+agent-browser, Chrome for Testing, Oracle SQLcl). They are not part of this
+repository and remain under their own licenses.

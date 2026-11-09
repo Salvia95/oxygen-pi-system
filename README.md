@@ -146,3 +146,11 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 ## Windows 터미널 참고
 
 pi 문서상 mintty(기본 Git Bash 창)에서는 화면에 이상한 문자가 섞일 수 있다. **Windows Terminal 의 Git Bash 프로필**에서 실행하는 것을 권장한다.
+
+## 라이선스
+
+이 저장소의 코드는 [Apache License 2.0](LICENSE) 을 따른다 (저작권 표기: [NOTICE](NOTICE)).
+
+`scripts/fetch-bundle.sh` 가 내려받아 번들에 넣는 서드파티 구성요소(Node.js, pi, fd, ripgrep, jq, just, hurl, glab,
+agent-browser, Chrome for Testing, Oracle SQLcl)는 이 저장소에 포함되지 않으며 각자의 라이선스를 따른다.
+특히 Oracle SQLcl 은 Oracle 의 라이선스 조건이 적용되므로, 번들을 사내에 배포하기 전에 해당 조건을 확인한다.
