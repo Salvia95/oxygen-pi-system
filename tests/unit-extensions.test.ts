@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspect, muxPayloads, splitSegments } from "../agent/extensions/oxy-bash-guard.ts";
 import { clip } from "../agent/extensions/oxy-context-budget.ts";
+import { docsPointer } from "../agent/extensions/oxy-prompt-trim.ts";
 import { pathKey } from "../agent/extensions/_lib/common.ts";
 
 const ids = (cmd: string) => inspect(cmd, process.cwd()).map((f) => `${f.rule.level}:${f.rule.id}`);
@@ -88,6 +89,25 @@ test("clip: 앞/뒤 보존 + 안내", () => {
   assert.ok(out.startsWith("H".repeat(100)) && out.endsWith("T".repeat(80)));
   assert.match(out, /1000 characters omitted.*narrow it/);
   assert.equal(clip("short", 200, "x"), "short");
+});
+
+test("prompt-trim: pi 문서 안내를 한 문단으로 (경로는 pi 프롬프트에서 읽음)", () => {
+  const base = [
+    "<docs>",
+    "Pi documentation (read only when the user asks about the harness itself):",
+    String.raw`- Main documentation: C:\oxy\vendor\pi\README.md`,
+    String.raw`- Additional docs: C:\oxy\vendor\pi\docs`,
+    String.raw`- Examples: C:\oxy\vendor\pi\examples (extensions, custom tools, SDK)`,
+    "- Before implementing harness changes, read the relevant docs and examples in full.",
+    "</docs>",
+  ].join("\n");
+  const out = docsPointer(base)!;
+  assert.ok(out.includes("C:/oxy/vendor/pi/docs/<topic>.md"), out);
+  assert.ok(out.includes("examples: C:/oxy/vendor/pi/examples."), out);
+  assert.ok(out.includes("prompt-templates"), out);
+  assert.ok(!out.includes("\\") && !out.includes("in full") && out.length < 500, out);
+  // 문서 위치를 찾지 못하면(사용자 지정 프롬프트 등) 손대지 않는다
+  assert.equal(docsPointer("You are a custom agent."), undefined);
 });
 
 test("skill 자동 활성화: 설치된 구성요소의 skill 만", async () => {

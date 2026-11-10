@@ -7,7 +7,7 @@ description: Locate code and files across a repository with `rg` (contents) and 
 
 ## First: built-in tools or CLI?
 
-- One simple search ("where is `UserService`?", "list `*.sql` under db/") → use the built-in `grep` / `find` tools.
+- One simple search ("where is `UserService`?", "list `*.sql` under db/") → use the `grep` tool, or `fd` in `bash` for file names.
 - Use `rg` / `fd` in `bash` when you need a **pipeline or a filter the built-ins lack**: file type, context lines, counts, date/size, multiple patterns, or acting on each result.
 
 Both respect `.gitignore` and skip hidden files by default. Paths are printed with `/`, safe to pipe in Git Bash.

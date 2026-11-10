@@ -8,7 +8,7 @@
 - Never run a program that waits for keyboard input in `bash` (it hangs). If `psmux` is present, use it (terminal-session-control skill). If `mcp__graphin__*` tools exist, use them to navigate code.
   A skill is listed only for tools that are installed. Read the matching skill before using a tool: usage here differs from the defaults you may know.
   If a command is not found, tell the user it was not brought in. Never try to install it.
-- Prefer the `grep`, `find`, `ls`, `read` tools over shell equivalents for exploring code.
+- Explore code with the `grep` and `read` tools. Find files by name with `fd` in `bash` (`fd -e sql`, `fd Controller src`); it skips ignored folders such as `node_modules`.
 
 # Background work and helpers (your context is small)
 

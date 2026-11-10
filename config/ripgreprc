@@ -1,2 +1,5 @@
 # oxygen-pi-system ripgrep 기본 설정 (RIPGREP_CONFIG_PATH). Git Bash 에서 쓰기 좋게 / 구분자로 출력
 --path-separator=/
+# 한 줄이 아주 긴 파일(minified js 등)이 출력을 채우지 않게 300자에서 자르고 앞부분만 보여 준다
+--max-columns=300
+--max-columns-preview

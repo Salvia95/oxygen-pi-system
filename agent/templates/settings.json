@@ -5,7 +5,7 @@
   "enabledModels": ["oxy-vllm/**"],
 
   "shellPath": "@@OXY_SHELL_PATH@@",
-  "defaultTools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+  "defaultTools": ["read", "bash", "edit", "write", "grep"],
 
   "compaction": {
     "enabled": true,

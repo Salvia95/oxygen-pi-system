@@ -59,7 +59,7 @@ chk "요청 2회 (tool call → 결과 회신)"          '[[ $(nreq) -eq 2 ]]'
 chk "model id / Authorization"               '[[ $(first .body.model) == qwen3.6-coder-30b && $(first .headers.authorization) == "Bearer mock-key" ]]'
 chk "max_tokens 사용, store·developer role 없음" '[[ $(first ".body.max_tokens // empty") != "" && $(first ".body | has(\"store\")") == false && $(first "[.body.messages[].role] | index(\"developer\")") == null ]]'
 chk "sampling (temperature 0.7, top_k 20)"   '[[ $(first .body.temperature) == 0.7 && $(first .body.top_k) == 20 ]]'
-chk "내장 tools 7종 + oxy-jobs 2종 (+MCP direct)" '[[ $(first "[.body.tools[].function.name | select(startswith(\"mcp__\") | not)] | sort | join(\",\")") == "background,bash,edit,find,grep,ls,read,subagent,write" ]]'
+chk "내장 tools 5종 + oxy-jobs 2종 (+MCP direct)" '[[ $(first "[.body.tools[].function.name | select(startswith(\"mcp__\") | not)] | sort | join(\",\")") == "background,bash,edit,grep,read,subagent,write" ]]'
 chk "AGENTS.md 가 시스템 프롬프트에 포함"        '[[ $(first ".body.messages[0].content | tostring | contains(\"oxygen-pi-system\")") == true ]]'
 SYS="$(first '.body.messages[0].content | tostring')"
 ENABLED=$(ls "$TMP/agent/skills")

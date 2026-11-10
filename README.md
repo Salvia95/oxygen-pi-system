@@ -41,7 +41,10 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 
 - agent-browser 의 브라우저 엔진은 설치 TUI 에서 고른다: Chrome for Testing (추천) / Chromium / obscura / PC 의 Edge·Chrome / 사용 안 함.
   obscura 를 고르면 `wrappers/agent-browser` 가 obscura CDP 서버를 필요할 때 띄우고 연결한다 (Chrome 대비 약 1/3 용량, 일부 CDP 기능 미지원).
-- 기본 코드 탐색은 core 의 rg/fd 와 pi 내장 grep/find 로 충분하다. code-intel 은 보조 수단이다.
+- 기본 코드 탐색은 core 의 rg/fd 와 pi 내장 grep 으로 충분하다. code-intel 은 보조 수단이다.
+  - 주 에이전트의 기본 도구는 `read, bash, edit, write, grep` 이다 (`agent/templates/settings.json` 의 `defaultTools`). 내장 `ls`·`find` 는 뺐다:
+    매 요청에 실리는 도구 정의가 줄고, pi 1.5.0 의 `find` 는 Windows 에서 `/` 가 든 패턴(`**/*.sql`)을 하나도 찾지 못한다. 파일 이름 찾기는 bash 의 `fd` 로 한다.
+    근거 측정은 `tests/scenario-eval/` (실제 pi + 실제 모델, `bash tests/scenario-eval/run.sh --report`).
   - ast-grep: 주석·문자열을 빼고 코드 구조로 찾거나, 여러 호출부를 같은 규칙으로 바꿀 때. Windows 빌드가 경로를 `\` 로 출력하므로 `wrappers/ast-grep` 가 `/` 로 바꾼다.
   - graphin: 아직 Windows 릴리스가 없어 fetch 대상이 아니다. 직접 빌드한 `graphin.exe` 를 `vendor/graphin/` 에 넣으면(의미 검색은 `models/`, `onnxruntime.dll` 도 함께) configure·설치 TUI 가 `agent/mcp.json` 에 `--workspace . --offline` 으로 등록하고 skill 을 켠다. MCP 서버는 pi 를 실행한 폴더를 작업 폴더로 받는다.
 - usql 의 Oracle 드라이버는 순수 Go 라 Oracle Instant Client 가 필요 없다. SQLcl 은 Oracle 전용 기능(`info`, `ddl` 등)이 필요할 때 추가한다.
@@ -220,6 +223,7 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 | `oxy-read-before-edit` | 읽지 않았거나 읽은 뒤 디스크에서 바뀐 파일의 edit 차단, 기존 파일 write 는 read 후에만 허용. compaction 후 기록 초기화 | `OXY_READ_BEFORE_EDIT=off` |
 | `oxy-loop-guard` | 텍스트로 쓴 tool call(`<tool_call>` 등) 감지 시 재호출 안내(최대 2회), 빈 응답 1회 재촉, 같은 호출 3번째 차단(파일 수정 시 초기화) | `OXY_LOOP_GUARD=off` (`OXY_REPEAT_LIMIT`) |
 | `oxy-context-budget` | bash/grep/find/ls 출력 12K자, read 40K자 초과 시 앞뒤만 남김. 상태줄에 컨텍스트 사용률 표시, 압축 반복 경고 | `OXY_CONTEXT_BUDGET=off` (`OXY_TOOL_OUTPUT_MAX_CHARS`, `OXY_READ_MAX_CHARS`) |
+| `oxy-prompt-trim` | 매 요청에 실리는 pi 문서 안내(`<docs>`, 약 1,400자)를 한 문단으로 줄임. 문서 경로는 그대로 남아 pi 자체를 물을 때는 읽을 수 있다 | `OXY_PROMPT_TRIM=off` |
 
 컨텍스트 관리(작업 기록 · 세션 넘기기 · compaction 교체)는 아래 oxy-flow 참고.
 테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
@@ -273,7 +277,7 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 
 | skill | 쓰는 때 (도구) | 핵심 |
 |---|---|---|
-| `find-code` | 심볼 정의·사용처, 파일 유형·날짜별 목록, 일괄 처리 (rg, fd) | 단순 검색은 내장 grep/find 우선, fd 첫 인자는 패턴 |
+| `find-code` | 심볼 정의·사용처, 파일 유형·날짜별 목록, 일괄 처리 (rg, fd) | 단순 검색은 내장 grep 또는 `fd` 한 번, fd 첫 인자는 패턴 |
 | `json-querying` | JSON 필드 추출·필터·CSV 변환·값 수정 (jq) | `--arg` 로 값 전달, 파일 수정은 임시 파일 경유 |
 | `oracle-db-querying` | 테이블 데이터·스키마·DDL·PL/SQL 조회, .sql 실행 (sql) | 저장된 연결(`-name`), heredoc/`@script` 만 (`-e` 는 콘솔 없이 실패), SP2- 오류는 종료코드 0 |
 | `gitlab-workflow` | MR·리뷰 코멘트·이슈·파이프라인·GitLab API (glab) | `-F json --jq`, 쓰기는 승인 후, `glab api -F` 는 암묵적 POST |
@@ -293,7 +297,7 @@ skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "�
 - obscura: 기본은 사설망 주소 접속을 막으므로(SSRF 방지) `OBSCURA_ALLOW_PRIVATE_NETWORK=1` 을 켠다.
 - gh: 업데이트 확인·텔레메트리·진행 애니메이션을 끈다 (`GH_*`).
 - `wrappers/jq`: `jq.exe` 의 CRLF 출력을 막기 위해 `-b`(LF)를 항상 붙인다.
-- `config/ripgreprc`: rg 경로를 `/` 로 출력한다. pi 의 grep 도구는 `--no-config` 라 영향 없음.
+- `config/ripgreprc`: rg 경로를 `/` 로 출력하고, 300자가 넘는 줄은 앞부분만 보여 준다 (minified js 한 줄이 출력을 채우는 것을 막는다. 전체가 필요하면 `rg --max-columns=0`). pi 의 grep 도구는 `--no-config` 라 영향 없음.
 - `wrappers/sql`: SQLcl 에 `-noupdates` 를 붙인다.
 - glab: 업데이트 확인·텔레메트리·Duo CLI 자동 다운로드·하이퍼링크 제어문자를 끈다 (`GLAB_*`).
 - agent-browser: 버전 일치 가이드 `vendor/agent-browser-skill-data` 를 `AGENT_BROWSER_SKILLS_DIR` 로 지정한다.
