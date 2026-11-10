@@ -100,6 +100,9 @@ export function createSystem({ root, sandbox = null }) {
         }
       };
       walk(root);
+      // 복사 전에 설치 표시(partial)를 쓴다: 복사 중에 끊겨도 다음 실행이 이 폴더를 우리 설치(ours)로 보고 이어서 복사한다
+      mkdirSync(dest, { recursive: true });
+      sys.writeMarker(dest, { partial: true });
       let done = 0;
       let lastTick = 0;
       await cp(root, dest, {
@@ -118,8 +121,26 @@ export function createSystem({ root, sandbox = null }) {
       sys.writeMarker(dest);
       return total;
     },
-    writeMarker(dir) {
-      writeFileSync(join(dir, MARKER), JSON.stringify({ version: sys.version(), installedAt: new Date().toISOString() }) + "\n");
+    writeMarker(dir, extra = {}) {
+      writeFileSync(join(dir, MARKER), JSON.stringify({ version: sys.version(), installedAt: new Date().toISOString(), ...extra }) + "\n");
+    },
+    /** 설치 표시 내용 (없으면 null). partial: 복사가 끝나지 않은 폴더 */
+    readMarker(dir) {
+      try { return JSON.parse(readFileSync(join(dir, MARKER), "utf8")); } catch { return existsSync(join(dir, MARKER)) ? {} : null; }
+    },
+    /** 폴더 안 파일 수와 크기 (제거 확인 화면용) */
+    dirStats(dir) {
+      let files = 0;
+      let bytes = 0;
+      const walk = (d) => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const p = join(d, e.name);
+          if (e.isDirectory()) walk(p);
+          else { files++; try { bytes += statSync(p).size; } catch { /* 사라진 파일 */ } }
+        }
+      };
+      try { walk(dir); } catch { /* 읽을 수 없는 폴더 */ }
+      return { files, bytes };
     },
 
     // ---------------------------------------------------------- PATH (사용자 환경변수)

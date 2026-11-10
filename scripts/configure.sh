@@ -25,9 +25,9 @@ export OXY_SHELL_PATH
   | while IFS= read -r f; do log "생성: $f"; done
 [[ ${PIPESTATUS[0]} == 0 ]] || die "설정 생성 실패"
 
-# 설치된 구성요소에 해당하는 skill 만 agent/skills 에 켠다 (원본: agent/skill-library)
+# 설치된 구성요소에 해당하는 skill 만 agent/skills 에 켠다 (원본: agent/skill-library). 사용자가 끈 OXY_SKILLS_OFF 는 뺀다
 skills=$("$OXY_HOME/runtime/node/node.exe" "$(winpath "$OXY_HOME/installer/components.mjs")" sync-skills \
-  --root "$(winpath "$OXY_HOME")" --agent "$(winpath "$AGENT")" --browser "${OXY_BROWSER:-}") || die "skill 동기화 실패"
+  --root "$(winpath "$OXY_HOME")" --agent "$(winpath "$AGENT")" --browser "${OXY_BROWSER:-}" --off "${OXY_SKILLS_OFF:-}") || die "skill 동기화 실패"
 log "skill: ${skills:-(없음)}"
 
 # 참고: vendor/agent-browser-skills 의 공식 skill 은 클라우드/Slack 등 폐쇄망과 무관한 내용이 많아

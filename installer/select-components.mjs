@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CATALOG, GROUPS, OPTIONAL, readLock } from "./components.mjs";
-import { UI, banner, c, padDisplay } from "./tui.mjs";
+import { UI, c, padDisplay } from "./tui.mjs";
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
 const ROOT = resolve(arg("--root") ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
@@ -19,7 +19,8 @@ const lock = readLock(ROOT);
 const previous = existsSync(SAVED) ? new Set(readFileSync(SAVED, "utf8").split(/\r?\n/).filter(Boolean)) : null;
 
 const ui = new UI();
-ui.frame = () => banner(VERSION) + "  " + c.bold("반입할 구성요소 선택") + c.gray("  (인터넷 PC 에서 공식 배포처로부터 직접 내려받습니다)") + "\n";
+ui.version = VERSION;
+ui.setFrame({ path: "반입할 구성요소 선택 · 인터넷 PC 에서 공식 배포처로부터 직접 받습니다" });
 
 let code = 1;
 try {
@@ -41,7 +42,7 @@ try {
         value: e.name,
         label: `${padDisplay(cat.title, 24)} ${padDisplay(e.version, 16)}`,
         hint: `${tags.join(" · ")} · ${e.license} · ${cat.purpose}`,
-        locked: e.required,
+        locked: e.required, status: "", // hint 맨 앞에 이미 '필수' 가 있다
         checked: e.required || Boolean(previous?.has(e.name)),
       });
     }
@@ -71,7 +72,7 @@ try {
       const e = lock.find((x) => x.name === name);
       const o = OPTIONAL[name];
       const ok = await ui.confirm(`${CATALOG[name].title} 의 약관에 동의하고 내려받을까요?`, {
-        initial: false,
+        yes: "약관에 동의하고 받기", no: "받지 않기", level: "medium", danger: false,
         note: [
           `  ${c.yellow("라이선스")} ${o?.license ?? e.license}  (오픈소스가 아님)`,
           `  ${c.gray("약관 원문")} ${o?.licenseUrl ?? "-"}`,

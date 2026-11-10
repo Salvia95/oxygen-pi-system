@@ -108,6 +108,32 @@ test("skill 자동 활성화: 설치된 구성요소의 skill 만", async () => 
   assert.ok(readdirSync(join(root, "agent", "skills")).includes("my-custom"), "사용자 skill 은 유지");
 });
 
+test("skill 끄기 (OXY_SKILLS_OFF): 끈 skill 은 지우고, 구성요소를 나중에 설치해도 꺼진 채 남는다 · CLI --off", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, cpSync, existsSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const { syncSkills, parseSkillsOff, CATALOG } = await import("../installer/components.mjs");
+  const root = mkdtempSync(join(tmpdir(), "oxy-skill-off-"));
+  try {
+    cpSync("agent/skill-library", join(root, "agent", "skill-library"), { recursive: true });
+    const touch = (rel: string) => { mkdirSync(join(root, rel, ".."), { recursive: true }); writeFileSync(join(root, rel), ""); };
+    for (const n of ["node", "pi", "fd", "rg", "jq", "just"]) touch((CATALOG as any)[n].check);
+    const agent = join(root, "agent");
+    assert.deepEqual(parseSkillsOff(" json-querying, ,psmux-x "), ["json-querying", "psmux-x"]);
+    assert.deepEqual(syncSkills(root, agent), ["find-code", "json-querying", "project-task-running"]);
+    // 켜져 있던 것을 끄면 agent/skills 에서 지운다
+    assert.deepEqual(syncSkills(root, agent, { off: "json-querying,terminal-session-control" }), ["find-code", "project-task-running"]);
+    assert.ok(!existsSync(join(agent, "skills", "json-querying")));
+    // 끈 skill 의 구성요소(psmux)를 나중에 설치해도 꺼진 채
+    touch((CATALOG as any).psmux.check);
+    assert.deepEqual(syncSkills(root, agent, { off: ["json-querying", "terminal-session-control"] }), ["find-code", "project-task-running"]);
+    // configure.sh 가 쓰는 CLI 경로도 --off 를 따른다
+    const out = execFileSync(process.execPath, ["installer/components.mjs", "sync-skills", "--root", root, "--agent", agent, "--browser", "", "--off", "project-task-running"], { encoding: "utf8" });
+    assert.equal(out.trim(), "find-code json-querying terminal-session-control");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("oxy-jobs: Semaphore 동시 실행 제한 · vLLM metrics 해석", async () => {
   const { Semaphore, parseVllmMetrics, fmtDuration } = await import("../agent/extensions/oxy-jobs/manager.ts");
   const s = new Semaphore(2);
