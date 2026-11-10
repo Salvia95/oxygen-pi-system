@@ -1,0 +1,50 @@
+captured before: system 12446자, skills 12개
+applied 13
+captured after: system 12338자, skills 12개
+16:42:27   429 → 12s 대기
+16:42:42   429 → 46s 대기
+16:43:30   429 → 47s 대기
+16:44:19   429 → 46s 대기
+16:45:07   429 → 47s 대기
+16:45:57   429 → 49s 대기
+16:46:48   429 → 46s 대기
+16:47:37 before #3 P PASS read=[structural-code-search] first=[read]
+16:47:37   429 → 1386s 대기
+17:10:45   429 → 2434s 대기
+17:51:22   429 → 71s 대기
+17:52:35   429 → 2404s 대기
+18:32:41   429 → 69s 대기
+18:33:52   429 → 2464s 대기
+19:14:59   429 → 24s 대기
+19:15:25   429 → 2386s 대기
+19:55:13 before #4 N PASS read=[] first=[] ERR retries exhausted
+19:55:13   429 → 108s 대기
+19:57:04   429 → 2474s 대기
+20:38:21 before #5 P PASS read=[terminal-session-control] first=[read]
+20:38:21   429 → 2484s 대기
+21:19:47   429 → 25s 대기
+21:20:15 before #6 N PASS read=[] first=[bash]
+21:20:15   429 → 2761s 대기
+22:06:19   429 → 2227s 대기
+22:43:28   429 → 251s 대기
+22:47:41   429 → 2189s 대기
+9 → 9s 대기
+19:56:50 before #7 P PASS read=[project-task-running] first=[read,bash]
+19:56:51   429 → 2498s 대기
+20:38:31   429 → 2439s 대기
+21:19:12   429 → 353s 대기
+21:25:07   429 → 2339s 대기
+22:04:09   429 → 2352s 대기
+22:43:23   429 → 253s 대기
+22:47:38   429 → 2183s 대기
+0:18   429 → 2441s 대기
+22:01:02 before #9 P FAIL read=[] first=[] ERR 400 {"error":{"message":"tool call validation failed: parameters for tool read did not match schema: errors: [missing properties: 'path']","type":"invalid_request_error","code":"tool_use_failed","failed_g
+22:01:02   429 → 2522s 대기
+22:43:07   429 → 266s 대기
+22:47:35 before #10 N PASS read=[] first=[read]
+22:47:35   429 → 2191s 대기
+--- resume 08:09 (단일 프로세스)
+23:09:38   429 → 870s 대기
+23:24:11   429 → 48s 대기
+23:25:01 before #11 P PASS read=[gitlab-workflow] first=[read]
+23:25:02   429 → 2475s 대기

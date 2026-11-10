@@ -1,0 +1,196 @@
+[
+ {
+  "variant": "before",
+  "id": 1,
+  "kind": "P",
+  "prompt": "src 아래에서 지난 일주일 사이에 바뀐 .java 파일 목록과, 그중 TODO가 몇 개씩 있는지 세어줘",
+  "expect": {
+   "want": "find-code"
+  },
+  "read": [
+   "find-code"
+  ],
+  "first": [
+   "read"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 2,
+  "kind": "N",
+  "prompt": "UserService 클래스가 어디에 정의돼 있는지 찾아줘",
+  "expect": {
+   "not": "find-code"
+  },
+  "read": [],
+  "first": [
+   "grep"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 3,
+  "kind": "P",
+  "prompt": "주석이나 문자열은 빼고, 코드에서 userRepo.findById(...)를 호출하는 곳만 전부 찾아줘",
+  "expect": {
+   "want": "structural-code-search"
+  },
+  "read": [
+   "structural-code-search"
+  ],
+  "first": [
+   "read"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 4,
+  "kind": "N",
+  "prompt": "OrderService.java 안의 calculateTotal 메서드 이름을 computeTotal로 바꿔줘 (그 파일 안에서만)",
+  "expect": {
+   "not": "structural-code-search"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 5,
+  "kind": "P",
+  "prompt": "node REPL을 띄워서 .help를 입력한 결과 화면을 보여줘",
+  "expect": {
+   "want": "terminal-session-control"
+  },
+  "read": [
+   "terminal-session-control"
+  ],
+  "first": [
+   "read"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 6,
+  "kind": "N",
+  "prompt": "npm test를 실행해서 결과를 알려줘",
+  "expect": {
+   "not": "terminal-session-control"
+  },
+  "read": [],
+  "first": [],
+  "text": "",
+  "error": "400 {\"error\":{\"message\":\"tool call validation failed: parameters for tool read did not match schema: errors: [missing properties: 'path']\",\"type\":\"invalid_request_error\",\"code\":\"tool_use_failed\",\"failed_g",
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 7,
+  "kind": "P",
+  "prompt": "이 프로젝트 justfile에 있는 작업 중 테스트를 돌리는 걸 찾아서 실행해줘",
+  "expect": {
+   "want": "project-task-running"
+  },
+  "read": [
+   "project-task-running"
+  ],
+  "first": [
+   "read",
+   "ls"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 8,
+  "kind": "N",
+  "prompt": "Gradle 프로젝트야. ./gradlew build로 빌드해줘",
+  "expect": {
+   "not": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "ls"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 9,
+  "kind": "P",
+  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
+  "expect": {
+   "want": "json-querying"
+  },
+  "read": [],
+  "first": [],
+  "text": "",
+  "error": "400 {\"error\":{\"message\":\"tool call validation failed: parameters for tool read did not match schema: errors: [missing properties: 'path']\",\"type\":\"invalid_request_error\",\"code\":\"tool_use_failed\",\"failed_g",
+  "pass": false,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 10,
+  "kind": "N",
+  "prompt": "package.json 내용 좀 보여줘",
+  "expect": {
+   "not": "json-querying"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 11,
+  "kind": "P",
+  "prompt": "내 MR 중에 파이프라인이 실패한 게 있는지 확인하고, 실패한 잡 로그를 요약해줘",
+  "expect": {
+   "want": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ }
+]
