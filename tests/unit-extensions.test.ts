@@ -338,8 +338,69 @@ test("oxy-monitor pane: 오른쪽 30% 열 · 호출 순서대로 위→아래 ·
     assert.equal(geo()[pi].w, 120);                                          // 모두 닫으면 pi 가 전체 폭
   } finally { run(["kill-server"]); }
   // pane 의 셸(Git Bash)이 해석하는 명령: exec 로 시작하고 경로는 / · 작은따옴표
-  assert.equal(monitorCommand("C:\\a b\\node.exe", "C:\\x\\monitor.ts", "jobs", 42, "C:\\it's"),
-    "exec 'C:/a b/node.exe' --disable-warning=ExperimentalWarning 'C:/x/monitor.ts' jobs --pi-pid 42 --cwd 'C:/it'\\''s'");
+  assert.equal(monitorCommand("C:\\a b\\node.exe", "C:\\x\\monitor.ts", "jobs", 42, "C:\\it's", { agent: "D:\\ag", root: "D:/h" }),
+    "exec 'C:/a b/node.exe' --disable-warning=ExperimentalWarning 'C:/x/monitor.ts' jobs --pi-pid 42 --cwd 'C:/it'\\''s' --agent 'D:/ag' --root 'D:/h'");
+});
+
+test("oxy-monitor 화면: jobs · flow 가 좁은 폭(23칸)에서도 폭 · 줄 수를 지킨다 (monitor-spec §5)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const { jobsView, flowView, flowKeys } = await import("../agent/extensions/oxy-monitor/view.ts");
+  const fit = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number) => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, "…")),
+    wrap: (s: string, w: number) => (s ? t.wrapTextWithAnsi(s, Math.max(1, w)) : [""]) };
+  const plain = (ls: string[]) => ls.map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+  const check = (ls: string[], w: number, h: number) => {
+    assert.equal(ls.length, h);
+    for (const l of ls) assert.ok(t.visibleWidth(l) <= w, `폭 ${t.visibleWidth(l)} > ${w}: ${JSON.stringify(l)}`);
+  };
+  const now = 1_000_000;
+  const job = (id: string, state: string, extra: any = {}) => ({ id, kind: "bash", state, label: `npm run 테스트 전체 ${id}`, createdAt: now - 90_000, startedAt: now - 72_000,
+    endedAt: state === "running" ? null : now - 10_000, exitCode: null, usage: null, log: `logs/${id}.log`, last: "통과 12 · 실패 0", result: null, ...extra });
+  const state: any = { version: 1, pid: 1, startedAt: 0, updatedAt: now, closed: false, cwd: "C:/w", slots: { agents: { running: 1, limit: 2, waiting: 0 }, bash: { running: 1, limit: 4, waiting: 0 } },
+    control: null, jobs: [job("job-1", "done"), job("job-2", "running", { kind: "agent", label: "scout: 결제 흐름 찾기", target: { level: "deep", model: "claude-haiku-5-5", thinking: "high" } })] };
+  for (const w of [23, 30, 60]) {
+    const ls = jobsView(fit, state, { sel: 0, mode: "list", scroll: 0 }, w, 14, now);
+    check(ls, w, 14);
+    const p = plain(ls);
+    assert.match(p[0], /^jobs/);
+    assert.match(p[1], /⏳.*scout: 결제|⏳.*결제/);                     // 실행 중인 작업이 위로
+    assert.match(p[1], /1m12s$/);
+    assert.ok(p.some((l) => /deep · claude-haiku-5-5 · high/.test(l) || /deep · claude-haiku/.test(l)), "작업 수준이 보인다");
+    check(jobsView(fit, state, { sel: 0, mode: "confirm", scroll: 0 }, w, 14, now), w, 14);
+    const log = jobsView(fit, state, { sel: 0, mode: "log", scroll: 0 }, w, 14, now, ["$ npm test", "\x1b[32mok\x1b[0m 아주 긴 출력 줄 ".repeat(5), "[exit 0]"]);
+    check(log, w, 14);
+    assert.match(plain(log).join("\n"), /\[exit 0\]/);                      // 로그 끝을 따라간다
+  }
+  assert.ok(plain(jobsView(fit, state, { sel: 0, mode: "confirm", scroll: 0 }, 40, 14, now)).some((l) => l.includes("job-2 작업을 중지할까요?")));
+  check(jobsView(fit, null, { sel: 0, mode: "list", scroll: 0 }, 23, 10, now), 23, 10);   // 상태 파일이 아직 없음
+
+  const flow: any = {
+    goal: "결제 모듈을 리팩터링하고 테스트를 보강한다", plan: [
+      { id: "p1", text: "기존 구조 파악", status: "done", at: 0, nodes: ["n1"], children: [{ id: "p1.1", text: "결제 흐름 읽기", status: "done", at: 0, nodes: [], children: [] }] },
+      { id: "p2", text: "PaymentService 분리", status: "doing", at: 0, nodes: [], children: [
+        { id: "p2.1", text: "인터페이스 정의", status: "done", at: 0, nodes: ["n2"], children: [] },
+        { id: "p2.2", text: "구현 옮기기", status: "doing", at: 0, nodes: [], children: [] }] },
+      { id: "p3", text: "통합 테스트", status: "todo", at: 0, nodes: [], children: [] }],
+    nodes: [{ id: "n1", commit: "a".repeat(40), title: "docs: 구조 메모", decisions: [], files: ["a.md"] },
+      { id: "n2", commit: "b".repeat(40), title: "refactor: PaymentService 인터페이스", decisions: [{ text: "인터페이스를 분리", why: "테스트 쉬움" }], files: ["p.ts"] },
+      { id: "n3", commit: "c".repeat(40), title: "chore: 사람이 한 커밋", decisions: [], files: [], external: true }],
+    buffer: { decisions: [{ text: "캐시는 나중에" }], files: ["x.ts", "y.ts"], failures: [{ command: "npm test" }] },
+  };
+  for (const w of [23, 30, 60]) check(flowView(fit, flow, { sel: 0, open: new Set() }, w, 20), w, 20);
+  const p = plain(flowView(fit, flow, { sel: 0, open: new Set() }, 60, 24)).join("\n");
+  assert.match(p, /flow\s+할 일 2\/4/);
+  assert.match(p, /✓ 기존 구조 파악 1\/1/);
+  assert.ok(!p.includes("결제 흐름 읽기"), "끝난 항목은 접혀 있다");
+  assert.match(p, /⏳ PaymentService 분리 1\/2\n\s+✓ 인터페이스 정의\n\s+n2 bbbbbbbb refactor/);
+  assert.match(p, /계획 밖 커밋\nn3 cccccccc chore: 사람이 한 커밋/);
+  assert.match(p, /커밋 전 작업\n· 캐시는 나중에\n변경 파일 2개\n✗ npm test/);
+  // Enter 로 펼치기: 끝난 항목은 펼치고, 커밋은 결정 · 파일을 보인다
+  const keys = flowKeys(flow, new Set());
+  assert.deepEqual(keys.slice(0, 4), ["p:p1", "p:p2", "p:p2.1", "n:n2"]);
+  const opened = plain(flowView(fit, flow, { sel: 0, open: new Set(["p:p1", "n:n2"]) }, 60, 30)).join("\n");
+  assert.match(opened, /결제 흐름 읽기/);
+  assert.match(opened, /· 인터페이스를 분리 \(테스트 쉬움\)/);
+  check(flowView(fit, null, { sel: 0, open: new Set() }, 23, 8), 23, 8);
 });
 
 test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결과 · 정리 규칙", async () => {

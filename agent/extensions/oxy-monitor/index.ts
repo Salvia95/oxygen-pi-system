@@ -30,14 +30,16 @@ export function paneManager(): { mgr: PaneManager | null; why?: string } {
 
 export default function (pi: ExtensionAPI) {
   if (!enabled("MONITOR")) return;
-  const script = join(process.env.PI_CODING_AGENT_DIR || getAgentDir(), "extensions", "oxy-monitor", "monitor.ts");
+  const agentDir = process.env.PI_CODING_AGENT_DIR || getAgentDir();
+  const script = join(agentDir, "extensions", "oxy-monitor", "monitor.ts");
+  const dirs = { agent: agentDir, root: harnessHome(join(agentDir, "..")) ?? join(agentDir, "..") };
   let cwd = process.cwd();
 
   const toggle = (kind: MonitorKind): { ok: boolean; message: string } => {
     const { mgr, why } = paneManager();
     if (!mgr) return { ok: false, message: why! };
     try {
-      const r = mgr.toggle(kind, monitorCommand(process.execPath, script, kind, process.pid, cwd), cwd);
+      const r = mgr.toggle(kind, monitorCommand(process.execPath, script, kind, process.pid, cwd, dirs), cwd);
       return { ok: true, message: r === "opened" ? `${kind} 모니터를 열었습니다.` : `${kind} 모니터를 닫았습니다.` };
     } catch (e: any) {
       return { ok: false, message: String(e?.message ?? e) };

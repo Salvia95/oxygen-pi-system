@@ -365,6 +365,7 @@ pi 문서상 mintty(기본 Git Bash 창)에서는 화면에 이상한 문자가 
   `oxy -p`, 파이프 입력, `--help` 같은 비대화형 실행과 이미 세션 안일 때는 바로 실행한다. 한 번만 바로 실행: `oxy --no-mux [인자…]`.
 - **모니터 pane** (`agent/extensions/oxy-monitor/`, [docs/monitor-spec.md](docs/monitor-spec.md)): psmux 세션 안의 pi 에서 `/monitor jobs` · `/monitor flow` 를 입력하면
   오른쪽 30% 열에 모니터 pane 이 열린다. 연 순서대로 위에서 아래로 쌓이고 같은 높이로 나뉜다. 같은 명령을 다시 입력하면 닫힌다.
+  jobs: 작업 목록 · 로그(Enter) · 중지(s 두 번). flow: 목표 → 항목 → 할 일 트리, 연결된 커밋, 커밋 전 작업 (Enter 로 펼치기). q 로 닫는다.
   pi 를 끝내면 함께 닫힌다. 끄기: `OXY_MONITOR=off`.
 - `oxy mux [pi 인자…]`: 설정과 관계없이 이번만 psmux 세션 안에서 실행한다.
   창을 닫아도 세션은 남으므로 `oxy` 로 이어서 쓸 수 있다. 세션 안에서는 `/jobs` 의 로그를 옆 pane 으로 연다.

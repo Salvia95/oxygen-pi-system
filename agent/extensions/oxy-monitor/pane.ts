@@ -98,7 +98,9 @@ export const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
  * 모니터 pane 에서 실행할 명령. 앞의 exec: psmux 는 첫 낱말이 파일 경로면 셸 없이 직접 실행하므로 셸 내장 명령으로 시작한다.
  * 경로의 역슬래시는 / 로 바꾼다 (Git Bash 에서 그대로 실행된다).
  */
-export function monitorCommand(node: string, script: string, kind: string, piPid: number, cwd: string): string {
+export function monitorCommand(node: string, script: string, kind: string, piPid: number, cwd: string, dirs: { agent: string; root: string }): string {
+  // agent 폴더 · 하네스 루트는 인자로 넘긴다: 새 pane 은 pi 프로세스가 아니라 psmux 서버의 환경을 물려받아
+  // PI_CODING_AGENT_DIR · OXY_HOME 이 pi 와 다를 수 있다 (실측: 다른 agent 폴더의 jobs 를 보고 있었다)
   const p = (s: string) => shQuote(s.replace(/\\/g, "/"));
-  return `exec ${p(node)} --disable-warning=ExperimentalWarning ${p(script)} ${kind} --pi-pid ${piPid} --cwd ${p(cwd)}`;
+  return `exec ${p(node)} --disable-warning=ExperimentalWarning ${p(script)} ${kind} --pi-pid ${piPid} --cwd ${p(cwd)} --agent ${p(dirs.agent)} --root ${p(dirs.root)}`;
 }
