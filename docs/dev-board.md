@@ -12,7 +12,7 @@
 | `monitor` | `docs/monitor-spec.md` 모니터 pane · 하단 바 | 검증 | 부모: `monitor/4` 캡처 기록 | 기록이 있으면 §5 에 적고 `완료`, 없으면 tuicap 캡처 (tui-implementer) | 2026-11-12 | fc5fee7 b141f3c a3a689b ca8dd05 3a8d810 e6d8475 46a5128 b2b1033 f2b2878 | 기록 없음 |
 | `llm-conn` | `docs/tui-spec.md` §11 LLM 연결 · 작업 수준 | 구현 | – | `llm-conn/3` 회귀 테스트 먼저 (부모) | 기록 없음 | a78dcae b2b1033 | 2026-11-12 (연결 편집으로 `dropParams` 보정) |
 | `anthropic-ws` | `docs/tui-spec.md` §11 "Anthropic 워크스페이스" | 검증 | 사용자: 실제 조직 키 · 설치본 반영 승인 | 키가 생기면 `anthropic-ws/1` `anthropic-ws/2` 실측 (부모) | 2026-11-12 | c424194 | 안 됨 |
-| `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 초안 | 사용자: 사후 명세 승인 · F1 ~ F3 | 승인되면 T3b: 자동 검증 다시 실행 (부모) | 기록 없음 | acd4aac | 안 됨 |
+| `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 검증 | 사용자: 설치본 반영 승인 (`flow-session/2`) · 유효한 Claude 키 (`flow-session/3`) | 설치본 반영 요청이 오면 `/2` (부모) | 2026-11-12 | acd4aac | 안 됨 |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -36,6 +36,7 @@
 | `flow-session/1` | 작업 기록을 세션 단위로 (§1) | 검증 | 단위 · E2E (커밋 당시). 2026-11-12 harness-engineer 가 `just test` 로 다시 실행: 통과 (`dev-process/1` 행) | 대화형 pi 1.5.0 + mock LLM: 새로 시작 → 빈 기록, `/resume` → 되살림. 실제 LLM 아님 | acd4aac `docs/flow-spec.md` §1 |
 | `flow-session/2` | 설치본 반영 | 예정 | – | 승인 필요: 실제 설치본, 반영 후 `verify.sh` | – |
 | `flow-session/3` | 실제 Claude Haiku 로 compaction (D4 로 `monitor` 에서 옮김) | 예정 | E2E (mock compaction) | 안 함: 유효한 Claude 키 필요 (저장소의 키는 401), 과금 | – |
+| `flow-session/4` | 보관 기록 최근 50개만 유지 (§1, F1) | 완료 | 단위 `# tests 60` `# pass 60` `# fail 0` (기준 `HEAD 4b3fb08 + 미커밋`, 2026-11-12 부모) | 자동 검증으로 대신 (명세 §2 4) | `docs/flow-spec.md` §1 |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |
@@ -58,7 +59,8 @@
 - 화면 프로그램의 새 릴리스는 필요 없다: 배포된 `oxy-tui` v0.1.0 exe 가 이미 `InputSpec.error` 를 읽는다 (tui-implementer 보고, Rust 변경은 주석 · 테스트뿐). 단계 `anthropic-ws/4` 는 지웠다.
 
 `flow-session`
-- 사후 명세 `docs/flow-spec.md` 를 썼다. 사용자 승인과 F1 ~ F3 결정이 남았다. 승인되면 T3b 로 `검증` 으로 옮긴다 (이번 `just test` 결과를 그때 다시 확인한다).
+- 사후 명세 `docs/flow-spec.md` 를 썼다. 2026-11-12 사용자가 승인하고 F1 ~ F3 을 권장안 (a) 로 정했다 (T2). 구현이 이미 있어 T3b 로 `검증` 에 옮겼다: `dev-process/1` 의 `just test` 통과 + 부모의 단위 60 통과.
+- F1 (보관 기록 50개)은 `flow-session/4` 로 구현했다 (`pruneArchive`). 커밋 메시지 "Keep only the latest 50 archived flow logs".
 - 다시 연 세션의 첫 요청에 계획 · `Next` 가 들어가는지 검사를 E2E 에 되살렸다 (`dev-process/1`, A9 (c)).
 
 `skill-eval`

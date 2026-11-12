@@ -915,3 +915,30 @@ test("oxy-flow: 작업 기록은 세션 단위 (새 세션은 빈 기록 · /res
     assert.equal(ro.bindSession("Z"), "readonly");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("oxy-flow: 보관 기록은 최근 50개만 남긴다 (flow-spec F1)", async () => {
+  const { FileFlowEngine, ARCHIVE_KEEP, pruneArchive } = await import("../agent/extensions/oxy-flow/store.ts");
+  const { mkdtempSync, rmSync, readdirSync, writeFileSync, utimesSync, mkdirSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "oxy-flow-arch-"));
+  try {
+    assert.equal(ARCHIVE_KEEP, 50);
+    const arch = join(dir, ".oxy/flow/archive");
+    mkdirSync(arch, { recursive: true });
+    const base = Date.now() / 1000 - 10000;
+    for (let i = 0; i < 55; i++) {           // 오래된 순서로 old-00 … old-54
+      const f = join(arch, `old-${String(i).padStart(2, "0")}.json`);
+      writeFileSync(f, JSON.stringify({ id: `old-${i}`, sessions: [`S${i}`], updatedAt: i }));
+      utimesSync(f, base + i, base + i);
+    }
+    // 새 세션이 지금 기록을 보관하면서 정리한다: 방금 보관한 것 + 최근 49개
+    const e = new FileFlowEngine(dir); e.bindSession("A"); e.ensureGoal("task A"); e.release();
+    const e2 = new FileFlowEngine(dir); assert.equal(e2.bindSession("B"), "parked"); e2.release();
+    const names = readdirSync(arch);
+    assert.equal(names.length, 50);
+    assert.ok(names.some((n) => n.startsWith("flow-")));                 // 방금 보관한 A
+    assert.equal(existsSync(join(arch, "old-54.json")), true);          // 최근 것은 남고
+    assert.equal(existsSync(join(arch, "old-05.json")), false);         // 오래된 것은 지운다
+    assert.equal(pruneArchive(join(dir, "nope"), 50), 0);               // 폴더가 없어도 오류 없음
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

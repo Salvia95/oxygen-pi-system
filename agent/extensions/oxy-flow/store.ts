@@ -5,7 +5,7 @@
 //   <프로젝트>/.oxy/flow/archive/    끝난 작업 · 다른 세션의 작업 (그 세션을 다시 열면 되살린다, bindSession)
 // 엔진 경계(FlowEngine)를 두어 나중에 flowout 으로 바꿀 수 있게 한다. pi 에 의존하지 않아 단위 테스트가 가능하다.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type PlanInput, type PlanItem, addItem, currentItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
 
@@ -63,6 +63,8 @@ export interface FlowEngine {
   release(): void;
 }
 
+/** 보관 기록(archive/)을 이만큼만 남긴다 (docs/flow-spec.md F1). 되살릴 기록을 찾을 때 모든 파일을 읽으므로 끝없이 쌓이지 않게 한다 */
+export const ARCHIVE_KEEP = 50;
 const MAX_COMMANDS = 15, MAX_FAILURES = 5, MAX_FILES = 200, MAX_JOBS = 10;
 const empty = (): Buffer => ({ decisions: [], files: [], commands: [], failures: [], jobs: [] });
 
@@ -269,6 +271,7 @@ export class FileFlowEngine implements FlowEngine {
     let file = join(arch, `${f.id}.json`);
     for (let i = 2; existsSync(file); i++) file = join(arch, `${f.id}-${i}.json`);
     writeAtomic(file, JSON.stringify(f, null, 1));
+    pruneArchive(arch, ARCHIVE_KEEP, file);
     return file;
   }
 
@@ -461,4 +464,24 @@ export function traceDecisions(f: Flow, keyword: string): string[] {
   for (const n of f.nodes) for (const d of n.decisions) if (dec(d).toLowerCase().includes(k)) hits.push(`${n.id} ${short(n.commit)} ${n.title}: ${dec(d)}`);
   for (const d of f.buffer.decisions) if (dec(d).toLowerCase().includes(k)) hits.push(`(uncommitted): ${dec(d)}`);
   return hits;
+}
+
+/** archive/ 의 보관 기록을 최근 keep 개만 남긴다 (수정 시각 기준, 방금 쓴 파일은 지우지 않는다) */
+export function pruneArchive(dir: string, keep: number, justWritten?: string): number {
+  let files: { path: string; at: number }[] = [];
+  try {
+    files = readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => {
+      const path = join(dir, n);
+      let at = 0;
+      try { at = statSync(path).mtimeMs; } catch { /* 지워진 파일 */ }
+      return { path, at };
+    });
+  } catch { return 0; }
+  files.sort((a, b) => b.at - a.at);
+  let removed = 0;
+  for (const f of files.slice(keep)) {
+    if (f.path === justWritten) continue;
+    try { rmSync(f.path, { force: true }); removed++; } catch { /* 다른 프로세스가 쓰는 중 */ }
+  }
+  return removed;
 }
