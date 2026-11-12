@@ -144,21 +144,6 @@
  },
  {
   "variant": "before",
-  "id": 9,
-  "kind": "P",
-  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
-  "expect": {
-   "want": "json-querying"
-  },
-  "read": [],
-  "first": [],
-  "text": "",
-  "error": "400 {\"error\":{\"message\":\"tool call validation failed: parameters for tool read did not match schema: errors: [missing properties: 'path']\",\"type\":\"invalid_request_error\",\"code\":\"tool_use_failed\",\"failed_g",
-  "pass": false,
-  "altOk": null
- },
- {
-  "variant": "before",
   "id": 10,
   "kind": "N",
   "prompt": "package.json 내용 좀 보여줘",
@@ -184,6 +169,65 @@
   },
   "read": [
    "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 9,
+  "kind": "P",
+  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
+  "expect": {
+   "want": "json-querying"
+  },
+  "read": [
+   "json-querying"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 12,
+  "kind": "N",
+  "prompt": "지금 변경사항을 커밋하고 feature/login 브랜치를 만들어줘",
+  "expect": {
+   "not": [
+    "gitlab-workflow",
+    "github-workflow"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null
+ },
+ {
+  "variant": "before",
+  "id": 13,
+  "kind": "P",
+  "prompt": "GitHub의 PR #42에 달린 리뷰 코멘트를 정리해줘",
+  "expect": {
+   "want": "github-workflow"
+  },
+  "read": [
+   "github-workflow"
   ],
   "first": [
    "read"

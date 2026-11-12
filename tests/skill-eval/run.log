@@ -48,3 +48,10 @@ captured after: system 12338자, skills 12개
 23:24:11   429 → 48s 대기
 23:25:01 before #11 P PASS read=[gitlab-workflow] first=[read]
 23:25:02   429 → 2475s 대기
+--- resume 2026-11-10 13:08 (단일 프로세스, before #9 재판정)
+04:08:05 before #9 P PASS read=[json-querying] first=[read,bash]
+04:08:05   429 → 37s 대기
+04:08:45 before #12 N PASS read=[] first=[bash]
+04:08:45   429 → 45s 대기
+04:09:33 before #13 P PASS read=[github-workflow] first=[read]
+04:09:33   429 → 46s 대기
