@@ -826,3 +826,10 @@ test("bash-guard: psmux/tmux 로 실행시키는 명령도 검사 (send-keys · 
   assert.deepEqual(ids(`psmux new-session -d -s web 'npm run dev'`), []);
   assert.deepEqual(ids(`psmux capture-pane -p -t dev -S -200`), []);
 });
+
+test("oxy-monitor: Windows 에서만 pi 와 같은 마우스 켜기 시퀀스를 다시 보낸다", async () => {
+  const { mouseReassertSequence } = await import("../agent/extensions/oxy-monitor/mouse.ts");
+  assert.equal(mouseReassertSequence({}, "linux"), null);
+  assert.equal(mouseReassertSequence({ TMUX: "/tmp/x,1,0" }, "win32"), "\x1b[?1000h\x1b[?1002h\x1b[?1004h\x1b[?1006h");   // 멀티플렉서 안: 버튼 동작만
+  assert.equal(mouseReassertSequence({ TERM: "xterm-256color" }, "win32"), "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1004h\x1b[?1006h");
+});

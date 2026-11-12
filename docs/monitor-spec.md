@@ -60,7 +60,9 @@ pane 관리
   - 모니터 pane 이 열린 항목은 강조색으로 표시한다
 - 클릭: 컴포넌트 위젯을 pi-tui `MouseRegion` 으로 감싸고, 이벤트의 x 좌표로 어느 항목인지 가린다. 누르면 그 종류의 모니터를 켜고 끈다 (§1).
   - pi fullscreen 모드(기본값)에서만 마우스를 받는다. regular 모드에서는 키보드로만 연다.
-  - 실측: mintty 창 클릭 → psmux → pane 안 node 에 SGR `\e[<0;x;yM` 도착. Windows Terminal 은 아직 확인하지 않음.
+  - 실측: mintty 창 클릭 → psmux → pane 안 node 에 SGR `\e[<0;x;yM` 도착. Windows Terminal 도 실제 커서 클릭으로 모니터 열고 닫기 확인 (2026-11-12).
+  - Windows ConPTY 는 stdin 이 raw 모드가 되기 전에 출력한 마우스 추적 요청을 버린다. pi 1.5.0 은 그 순서로 보내서 pane 의 마우스 추적이 꺼진 채로 남는다
+    (psmux `mouse_any_flag` 0 → WT 클릭이 pi 에 오지 않음). `oxy-monitor/mouse.ts` 가 raw 모드 · alt screen 이 켜진 뒤 같은 시퀀스를 한 번 더 보낸다.
 - 키보드 (Claude Code 하단 표시와 같은 방식, 별도 단축키 없음)
 
   | 상태 | 키 | 동작 |

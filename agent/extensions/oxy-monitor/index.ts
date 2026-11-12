@@ -15,6 +15,7 @@ import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { enabled, harnessHome } from "../_lib/common.ts";
 import { type BarKind, type BarRange, type FlowSummary, type JobsSummary, barItems, barLine, itemAt } from "./bar.ts";
 import { PaneManager, monitorCommand, psmuxRunner } from "./pane.ts";
+import { reassertMouseWhenReady } from "./mouse.ts";
 
 export const MONITOR_KINDS = ["jobs", "flow"] as const;
 export type MonitorKind = (typeof MONITOR_KINDS)[number];
@@ -157,6 +158,7 @@ export default function (pi: ExtensionAPI) {
     refreshOpen();
     ctx.ui.setWidget("oxy-bar", barComponent, { placement: "belowEditor" });
     cleanup.push(ctx.ui.onTerminalInput(onInput));
+    cleanup.push(reassertMouseWhenReady(() => tui));   // Windows: pi 의 마우스 켜기가 ConPTY 에서 버려지는 문제 (mouse.ts)
     // 작업 · 기록이 바뀌면 다시 그리고, 모니터 pane 이 열려 있는지는 2초마다 본다 (모니터가 스스로 닫힐 수 있다)
     for (const name of ["oxy.jobs", "oxy.flow"]) {
       const off = shared<{ onChange(fn: () => void): unknown }>(name)?.onChange(() => tui?.requestRender());
