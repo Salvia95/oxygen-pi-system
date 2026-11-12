@@ -2,10 +2,10 @@
 //   <프로젝트>/.oxy/flow/flow.json   작업 하나의 그래프: 커밋 단위 노드 + 각 노드의 결정 사항
 //   <프로젝트>/.oxy/flow/FLOW.md     사람이 읽는 같은 내용 (변경할 때마다 다시 씀)
 //   <프로젝트>/.oxy/flow/lock        쓰기 락 {pid, at} — 다른 살아 있는 pi 가 쥐고 있으면 읽기 전용
-//   <프로젝트>/.oxy/flow/archive/    끝난 작업
+//   <프로젝트>/.oxy/flow/archive/    끝난 작업 · 다른 세션의 작업 (그 세션을 다시 열면 되살린다, bindSession)
 // 엔진 경계(FlowEngine)를 두어 나중에 flowout 으로 바꿀 수 있게 한다. pi 에 의존하지 않아 단위 테스트가 가능하다.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type PlanInput, type PlanItem, addItem, currentItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
 
@@ -39,6 +39,8 @@ export interface Flow {
   updatedAt: number;
   baseCommit: string | null; // 작업을 시작할 때의 HEAD
   continueAt?: number;       // 세션 넘기기 표시 (store.markContinue)
+  continueBy?: string;       // 그 표시를 이어받은 세션 (bindSession). 한 세션만 이어받는다
+  sessions?: string[];       // 이 작업을 한 pi 세션 id (세션 넘기기로 이어진 세션 포함). 예전 파일에는 없다
   plan: PlanItem[];          // 앞으로 할 일: 항목 → 할 일 (plan.ts). 예전 파일에는 없다 (load 가 빈 배열로 채움)
   nodes: FlowNode[];
   buffer: Buffer;
@@ -92,6 +94,7 @@ export class FileFlowEngine implements FlowEngine {
   writable = false;
   lockOwner: number | null = null;
   private flow: Flow | null = null;
+  private session: string | null = null;   // 지금 pi 세션 id (bindSession). 기록을 저장할 때 flow.sessions 에 더한다
 
   constructor(cwd: string, readOnly = false) {
     this.root = projectRoot(cwd);
@@ -136,7 +139,9 @@ export class FileFlowEngine implements FlowEngine {
 
   private fresh(goal: string): Flow {
     const now = Date.now();
-    return { version: 1, id: `flow-${new Date(now).toISOString().slice(0, 19).replace(/[-:T]/g, "")}`, goal, next: "", blocked: "",
+    // id 는 보관 파일 이름이 된다. 같은 초에 두 작업이 생길 수 있으므로(세션 전환 · /flow new) 무작위 꼬리를 붙인다
+    const tail = Math.random().toString(16).slice(2, 6).padEnd(4, "0");
+    return { version: 1, id: `flow-${new Date(now).toISOString().slice(0, 19).replace(/[-:T]/g, "")}-${tail}`, goal, next: "", blocked: "",
       status: "active", startedAt: now, updatedAt: now, baseCommit: git(this.root, ["rev-parse", "HEAD"]), plan: [], nodes: [], buffer: empty() };
   }
 
@@ -155,6 +160,8 @@ export class FileFlowEngine implements FlowEngine {
 
   private save(): void {
     if (!this.writable || !this.flow) return;
+    const ss = this.flow.sessions ?? [];
+    if (this.session && !ss.includes(this.session) && this.hasContent()) this.flow.sessions = [...ss, this.session];
     this.flow.updatedAt = Date.now();
     writeAtomic(join(this.dir, "flow.json"), JSON.stringify(this.flow, null, 1));
     writeAtomic(join(this.dir, "FLOW.md"), renderMarkdown(this.flow));
@@ -202,11 +209,74 @@ export class FileFlowEngine implements FlowEngine {
     this.save();
   }
 
+  /** 이어 가기 표시가 아직 유효한가 (지우지 않는다) */
+  private continuing(): boolean {
+    const f = this.load();
+    return typeof f.continueAt === "number" && Date.now() - f.continueAt < 120000 && !f.continueBy;
+  }
+
+  /**
+   * pi 세션이 열릴 때 기록을 그 세션에 맞춘다 (작업 기록은 세션 단위, 프로젝트 폴더에는 지금 세션의 작업 하나).
+   *   kept     이 세션의 작업 (같은 세션을 다시 열었거나 /resume · -c)
+   *   adopted  세션 넘기기로 새 세션이 됐다 → 같은 작업을 이어 간다
+   *   restored 보관된 작업 중 이 세션의 것이 있다 → 지금 기록을 보관하고 그것을 되살린다
+   *   parked   다른 세션의 작업이 남아 있다 → 보관하고 빈 기록으로 시작 (예전: 새로 시작해도 이전 작업이 그대로 보이고 새 요청이 섞였다)
+   *   empty    기록이 없다 · readonly 다른 pi 가 쓰는 중이라 건드리지 않는다
+   */
+  bindSession(id: string): "kept" | "adopted" | "restored" | "parked" | "empty" | "readonly" {
+    this.session = id || null;
+    if (!this.writable) return "readonly";
+    if (!id) return "empty";
+    const f = this.load();
+    if ((f.sessions ?? []).includes(id)) return "kept";
+    if (this.continuing() && this.hasContent()) { f.continueBy = id; this.save(); return "adopted"; }
+    const arch = this.findArchived(id);
+    if (!arch && !this.hasContent()) return "empty";
+    if (this.hasContent()) this.archiveCurrent();
+    if (arch) {
+      this.flow = arch.flow;
+      this.flow.buffer = { ...empty(), ...this.flow.buffer };
+      if (!Array.isArray(this.flow.plan)) this.flow.plan = [];
+      this.save();
+      rmSync(arch.file, { force: true });
+      return "restored";
+    }
+    this.flow = this.fresh("");
+    this.save();
+    return "parked";
+  }
+
+  /** 보관된 작업 중 이 세션이 한 것 (가장 최근) */
+  private findArchived(id: string): { file: string; flow: Flow } | null {
+    const arch = join(this.dir, "archive");
+    let best: { file: string; flow: Flow } | null = null;
+    let names: string[] = [];
+    try { names = readdirSync(arch).filter((n) => n.endsWith(".json")); } catch { return null; }
+    for (const n of names) {
+      try {
+        const f = JSON.parse(readFileSync(join(arch, n), "utf8")) as Flow;
+        if ((f.sessions ?? []).includes(id) && (!best || f.updatedAt > best.flow.updatedAt)) best = { file: join(arch, n), flow: f };
+      } catch { /* 깨진 파일은 건너뛴다 */ }
+    }
+    return best;
+  }
+
+  /** 지금 기록을 archive/ 에 보관 → 보관 파일 경로. 같은 이름(예전 초 단위 id)이 있으면 덮어쓰지 않고 번호를 붙인다 */
+  private archiveCurrent(): string {
+    const f = this.load();
+    const arch = join(this.dir, "archive");
+    mkdirSync(arch, { recursive: true });
+    let file = join(arch, `${f.id}.json`);
+    for (let i = 2; existsSync(file); i++) file = join(arch, `${f.id}-${i}.json`);
+    writeAtomic(file, JSON.stringify(f, null, 1));
+    return file;
+  }
+
   /** 이어 가기 표시가 있으면 지우고 true */
   takeContinue(): boolean {
     const f = this.load();
     const on = typeof f.continueAt === "number" && Date.now() - f.continueAt < 120000;
-    if (f.continueAt !== undefined) { delete f.continueAt; this.save(); }
+    if (f.continueAt !== undefined || f.continueBy !== undefined) { delete f.continueAt; delete f.continueBy; this.save(); }
     return on;
   }
 
@@ -286,12 +356,7 @@ export class FileFlowEngine implements FlowEngine {
   }
 
   startNew(goal: string): Flow {
-    const f = this.load();
-    if (this.hasContent()) {
-      const arch = join(this.dir, "archive");
-      mkdirSync(arch, { recursive: true });
-      writeAtomic(join(arch, `${f.id}.json`), JSON.stringify(f, null, 1));
-    }
+    if (this.hasContent()) this.archiveCurrent();
     this.flow = this.fresh(goal.trim());
     this.save();
     return this.flow;

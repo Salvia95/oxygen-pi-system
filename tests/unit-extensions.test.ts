@@ -873,3 +873,45 @@ test("LLM 연결: Anthropic 워크스페이스 (워크스페이스가 지정되�
   } finally { mock.kill(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("oxy-flow: 작업 기록은 세션 단위 (새 세션은 빈 기록 · /resume 하면 되살림 · 세션 넘기기는 이어 감)", async () => {
+  const { FileFlowEngine } = await import("../agent/extensions/oxy-flow/store.ts");
+  const { mkdtempSync, rmSync, readdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "oxy-flow-sess-"));
+  const open = (sid: string) => { const e = new FileFlowEngine(dir); const r = e.bindSession(sid); return { e, r }; };
+  try {
+    // 세션 A: 작업 (아래 B · A 전환은 모두 같은 초 안에 일어난다: 예전 초 단위 id 는 보관 파일이 서로를 덮어썼다)
+    let { e, r } = open("A");
+    assert.equal(r, "empty");
+    e.ensureGoal("build the calendar app");
+    e.setPlan([{ text: "screens" }, { text: "tests" }]);
+    assert.deepEqual(e.load().sessions, ["A"]);
+    e.release();
+    // A 를 다시 열면 그대로
+    ({ e, r } = open("A")); assert.equal(r, "kept"); assert.equal(e.load().goal, "build the calendar app"); e.release();
+    // 새 세션 B: 이전 작업은 보관, 빈 기록 (예전: A 의 목표 · 계획이 그대로 보이고 B 의 요청이 섞였다)
+    ({ e, r } = open("B"));
+    assert.equal(r, "parked");
+    assert.equal(e.hasContent(), false);
+    assert.equal(readdirSync(join(dir, ".oxy/flow/archive")).length, 1);
+    e.ensureGoal("fix the login bug");
+    e.release();
+    // A 를 /resume: B 의 작업을 보관하고 A 를 되살린다
+    ({ e, r } = open("A"));
+    assert.equal(r, "restored");
+    assert.equal(e.load().goal, "build the calendar app");
+    assert.equal(e.load().plan.length, 2);
+    assert.equal(readdirSync(join(dir, ".oxy/flow/archive")).length, 1);   // 보관 목록에는 B 만
+    // 세션 넘기기: 이어 가기 표시 → 새 세션 C 가 같은 작업을 이어 간다
+    e.markContinue(); e.release();
+    ({ e, r } = open("C"));
+    assert.equal(r, "adopted");
+    assert.deepEqual(e.load().sessions, ["A", "C"]);
+    e.release();
+    // B 를 다시 열면 B 의 기록
+    ({ e, r } = open("B")); assert.equal(r, "restored"); assert.equal(e.load().goal, "fix the login bug"); e.release();
+    // 읽기 전용(다른 pi 가 쓰는 중)이면 건드리지 않는다
+    const ro = new FileFlowEngine(dir, true);
+    assert.equal(ro.bindSession("Z"), "readonly");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

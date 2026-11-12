@@ -187,29 +187,30 @@ chk "모니터: 이미 끝난 작업 중지 요청은 실패로 기록" '[[ "$rp
 
 # oxy-flow: 별도 git 작업 폴더 (위 시나리오들은 OXY_FLOW=off 로 실행해 서로 영향을 주지 않게 한다)
 FW="$TMP/flowwork"; mkdir -p "$FW"; (cd "$FW" && git init -q)
+# 작업 기록은 세션 단위다: FSID 가 같으면 같은 세션을 다시 연다 (--session-id), 없으면 저장하지 않는 새 세션
 frun() {
   : > "$REQLOG"
-  out=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" --no-session -p "$1" < /dev/null 2>&1) || true
+  local s=(--no-session); [[ -n ${FSID:-} ]] && s=(--session-id "$FSID")
+  out=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" "${s[@]}" -p "$1" < /dev/null 2>&1) || true
   REQ="$REQLOG"
   printf '\n\033[1m[%s]\033[0m %s\n' "${1%% *}" "$(head -c 160 <<< "$out" | tr '\n' ' ')"
 }
-frun "scenario:flow-commit add the f file"
+FSID=flowa frun "scenario:flow-commit add the f file"
 chk "flow: 도구 flow_note · flow_plan · flow_show 등록" '[[ $(first "[.body.tools[].function.name] | map(select(startswith(\"flow_\"))) | sort | join(\",\")") == "flow_note,flow_plan,flow_show" ]]'
 chk "flow: 커밋 → 노드 n1 + 결정 + 커밋 파일"       '[[ $(jq -r ".nodes[0] | \"\(.id) \(.title) \(.decisions[0].text) \(.files|join(\",\"))\"" "$FW/.oxy/flow/flow.json") == "n1 feat: add f Store sessions in SQLite f.txt" ]]'
 chk "flow: 커밋 결과에 기록 안내"                 '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Recorded step n1"* ]]'
 chk "flow: .oxy 는 사용자 git 에 안 잡힘"          '[[ -z "$(cd "$FW" && git status --porcelain)" ]]'
-frun "scenario:env continue"
-chk "flow: 다음 세션 첫 요청에 마지막 작업 기록 주입 (참고용)" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Last task goal: scenario:flow-commit add the f file"*"different task"*"Store sessions in SQLite"* ]]'
-frun "scenario:flow-plan add g with a plan"
+FSID=flowb frun "scenario:env another task"
+chk "flow: 새 세션은 빈 기록으로 시작 (이전 작업은 보관, 첫 요청에 넣지 않음)" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") != *"Store sessions in SQLite"* && $(jq -r ".goal + \" \" + (.nodes|length|tostring)" "$FW/.oxy/flow/flow.json") == "scenario:env another task 0" && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:flow-commit add the f file") -ge 1 ]]'
+FSID=flowa frun "scenario:flow-plan add g with a plan"
+chk "flow: 이전 세션을 다시 열면 그 작업 기록을 되살려 첫 요청에 넣음" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"scenario:flow-commit add the f file"*"Store sessions in SQLite"* && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:env another task") -ge 1 ]]'
 chk "flow 계획: 항목·할 일 저장, 커밋이 진행 중인 할 일에 연결" '[[ $(jq -r "[.plan[0].id, .plan[0].status, .plan[0].children[0].nodes[0], .plan[0].children[1].status, .plan[1].status] | join(\" \")" "$FW/.oxy/flow/flow.json") == "p1 done n2 done todo" ]]'
 chk "flow 계획: 도구 결과에 계획과 다음 할 일"     '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Updated p1 [done]."*"p2 [todo] Report"*"Next: p2 Report"* ]]'
 chk "flow 계획: 커밋 결과에 연결된 할 일과 done 안내" '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Linked to plan item p1.1 "*"write g"*"If this commit finishes it, call flow_plan(action="* ]]'
 chk "flow 계획: FLOW.md 에 계획"                 '[[ $(cat "$FW/.oxy/flow/FLOW.md") == *"## 계획"*"✓ p1 Add g file"*"· p2 Report"* ]]'
-frun "scenario:env plan check"
-chk "flow 계획: 다음 세션 첫 요청에 계획과 다음 할 일" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"Next: p2 Report"*"Plan (update it with flow_plan):"*"- p1 [done] Add g file"*"(2/2 sub-tasks done)"*"- p2 [todo] Report"* ]]'
 cp "$TMP/agent/settings.json" "$TMP/settings.bak"
 jq '.compaction.keepRecentTokens = 50' "$TMP/settings.bak" > "$TMP/agent/settings.json"   # 작은 대화로도 compaction 이 일어나게
-frun "scenario:flow-big refactor the parser"
+FSID=flowa frun "scenario:flow-big refactor the parser"
 chk "flow: 작업 도중 compaction → LLM 요약 요청 없음" '[[ "$out" == *after-compaction* && $(grep -c "context summarization" "$REQ") -eq 0 ]]'
 chk "flow: compaction 요약 = 작업 상태 + 최근 요청"  '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Latest user request: scenario:flow-big"* ]]'
 cp "$TMP/settings.bak" "$TMP/agent/settings.json"

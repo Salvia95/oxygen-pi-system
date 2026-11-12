@@ -7,7 +7,9 @@
  *   - 모델은 결정과 이유만 기록: flow_note / 필요할 때 조회: flow_show
  *   - 앞으로 할 일: flow_plan 으로 항목 → 할 일(2단) 계획을 쓰고 상태를 바꾼다. 커밋은 doing 인 할 일에 붙는다 (plan.ts)
  * 컨텍스트
- *   - 새 세션의 첫 요청에 작업 상태를 넣는다 (기록이 있을 때)
+ *   - 작업 기록은 세션 단위다: 새로 시작한 세션은 빈 기록으로 시작하고(이전 작업은 archive 로 보관),
+ *     그 세션을 다시 열면(/resume · -c) 기록을 되살린다. 세션 넘기기로 이어진 세션은 같은 작업을 이어 간다
+ *   - 기록이 있는 세션의 첫 요청에 작업 상태를 넣는다 (다시 연 세션 · 세션 넘기기)
  *   - 컨텍스트가 OXY_FLOW_ROLLOVER_PCT(기본 50%) 이상일 때 사용자가 새 메시지를 보내면, 그 메시지를 새 세션에서 이어서 처리한다
  *   - 작업 도중 한도에 가까워지면(pi compaction) LLM 요약 대신 작업 상태로 교체한다 (OXY_FLOW_COMPACT=llm 이면 pi 기본 요약)
  * 명령: /flow (보기 · show nN · trace 키워드 · new 목표 · rollback nN) · /oxy-rollover [메시지]
@@ -81,6 +83,10 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_e: any, ctx: any) => {
     engine = new FileFlowEngine(ctx.cwd);
     if (!engine.writable && ctx.hasUI) ctx.ui.notify(`[oxy-flow] 다른 pi(pid ${engine.lockOwner})가 이 프로젝트의 작업 기록을 쓰고 있어 읽기 전용으로 엽니다.`, "warning");
+    // 작업 기록은 세션 단위: 새 세션이면 이전 작업을 보관하고, 보관된 세션을 다시 열면(/resume) 그 기록을 되살린다 (store.bindSession)
+    let sid = "";
+    try { sid = String(ctx.sessionManager?.getSessionId?.() ?? ""); } catch { /* 세션 정보 없음 */ }
+    engine.bindSession(sid);
     status(ctx);
   });
   pi.on("session_shutdown", async () => { engine?.release(); engine = null; });
