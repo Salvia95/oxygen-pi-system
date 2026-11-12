@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# skill description 시험: 현재(before) / 후보(after) 구성으로 pi 첫 요청을 잡고, 실제 모델(agent/oxy.env 의 엔드포인트)로 판정
+# skill description 시험: 현재(before) / 후보(after) 구성으로 pi 첫 요청을 잡고, 실제 모델(agent/llm.json 의 기본 모델)로 판정
 set -euo pipefail
 H="$(cd "$(dirname "$0")/../.." && pwd)"
 E="$(cd "$(dirname "$0")" && pwd)"
-cd "$H"; source env.sh
-real_base="$OXY_VLLM_BASE_URL"; real_key="$OXY_VLLM_API_KEY"; real_model="$OXY_MODEL_CODER"
+cd "$H"; source ./env.sh   # ./ 없이 쓰면 PATH 에 등록된 설치본의 env.sh 를 먼저 찾는다
+# 판정 모델은 eval.mjs 가 agent/llm.json 의 기본 모델 · 연결에서 읽는다 (키는 secrets.json, 셸 변수를 거치지 않는다)
 PORT=18172
 "$OXY_NODE" tests/mock-vllm.mjs $PORT "$(cygpath -m "$E/mock.jsonl")" >/dev/null & M=$!
 trap 'kill $M 2>/dev/null || true' EXIT
@@ -25,5 +25,5 @@ for v in before after; do
   echo "captured $v: system $(jq -r '.messages[0].content' "$E/$v-request.json" | wc -c)자, skills $(jq -r '.messages[0].content' "$E/$v-request.json" | grep -c '<name>')개"
 done
 kill $M
-OXY_VLLM_BASE_URL="$real_base" OXY_VLLM_API_KEY="$real_key" OXY_MODEL_CODER="$real_model" \
+env -u OXY_VLLM_BASE_URL -u OXY_VLLM_API_KEY -u OXY_MODEL_CODER \
   "$OXY_NODE" "$E/eval.mjs" "$(cygpath -m "$E/results.json")" "before=$(cygpath -m "$E/before-request.json")" "after=$(cygpath -m "$E/after-request.json")"

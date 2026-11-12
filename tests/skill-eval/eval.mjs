@@ -2,6 +2,7 @@
 // 첫 응답이 어떤 skills/<name>/SKILL.md 를 read 하는지 판정한다.
 //   node eval.mjs <out.json> <variantName>=<request.json> ...   (env: OXY_VLLM_BASE_URL, OXY_VLLM_API_KEY, OXY_MODEL_CODER)
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const CASES = [
   [1, "P", "src 아래에서 지난 일주일 사이에 바뀐 .java 파일 목록과, 그중 TODO가 몇 개씩 있는지 세어줘", { want: "find-code" }],
@@ -36,7 +37,19 @@ const CASES = [
 
 const [outFile, ...variantArgs] = process.argv.slice(2);
 const variants = variantArgs.map((a) => { const i = a.indexOf("="); return [a.slice(0, i), JSON.parse(readFileSync(a.slice(i + 1), "utf8"))]; });
-const base = process.env.OXY_VLLM_BASE_URL, key = process.env.OXY_VLLM_API_KEY, model = process.env.OXY_MODEL_CODER;
+// 판정 모델: 환경변수가 있으면 그것, 없으면 agent/llm.json 의 기본 모델과 그 연결 (키는 secrets.json 에서 이 프로세스 안에서만 복호화)
+async function judge() {
+  if (process.env.OXY_VLLM_BASE_URL) return { base: process.env.OXY_VLLM_BASE_URL, key: process.env.OXY_VLLM_API_KEY, model: process.env.OXY_MODEL_CODER };
+  const root = new URL("../../", import.meta.url);
+  const L = await import(new URL("scripts/llm-connections.mjs", root).href);
+  const S = await import(new URL("installer/secrets.mjs", root).href);
+  const agent = fileURLToPath(new URL("agent/", root));
+  const llm = L.loadLlm(agent);
+  const conn = L.findConnection(llm, llm?.main?.connection);
+  if (!conn || L.LLM_KINDS[conn.kind]?.api !== "openai-completions") throw new Error("기본 모델이 OpenAI 호환 연결이 아님 (이 판정은 /chat/completions 를 쓴다)");
+  return { base: conn.baseUrl, key: S.getSecrets(agent, [L.secretKey(conn.id)])[L.secretKey(conn.id)] ?? "EMPTY", model: llm.main.model };
+}
+const { base, key, model } = await judge();
 const results = existsSync(outFile) ? JSON.parse(readFileSync(outFile, "utf8")) : [];
 const done = new Set(results.map((r) => `${r.variant}#${r.id}`));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

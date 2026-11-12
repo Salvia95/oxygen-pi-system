@@ -64,7 +64,7 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 
 ```bash
 bash scripts/fetch-bundle.sh      # 선택 화면: 필수 항목은 체크된 채 고정, 나머지는 선택 (이전 선택 기억)
-source env.sh
+source ./env.sh
 just package                      # 필수 구성요소 검사 → dist/oxygen-pi-YYYYMMDD.zip (+ .sha256)
 ```
 

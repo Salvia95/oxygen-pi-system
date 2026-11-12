@@ -1,4 +1,4 @@
-# oxygen-pi-system 작업 목록. Git Bash 에서 `source env.sh` 후 `just <recipe>`.
+# oxygen-pi-system 작업 목록. Git Bash 에서 `source ./env.sh` 후 `just <recipe>`.
 set shell := ["bash", "-uc"]
 set windows-shell := ["bash", "-uc"]
 

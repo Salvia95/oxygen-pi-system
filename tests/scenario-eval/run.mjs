@@ -1,5 +1,9 @@
 // 실제 pi + 실제 모델 시나리오 평가 (run.sh 가 env.sh 를 읽은 뒤 실행한다)
-//   node run.mjs <label> [--only a,b] [--model id] [--rev git-rev] [--tools a,b,c] [--set K=V]... [--max-calls N] [--minutes N] [--rebuild] [--base-url URL]
+//   node run.mjs <label> [--only a,b] [--model [연결/]모델] [--level id] [--thinking 수준] [--rev git-rev] [--tools a,b,c] [--set K=V]...
+//                [--max-calls N] [--minutes N] [--rebuild] [--base-url URL]
+// 모델: agent/llm.json 의 LLM 연결 (docs/tui-spec.md §11). 기본은 기본 모델(main). --level 은 그 작업 수준의 연결 · 모델 · thinking.
+//   --model 이 연결에 없는 모델이면 스냅샷의 llm.json 에만 더한다. --base-url 은 스냅샷에서 그 연결의 주소만 바꾼다.
+//   키는 스냅샷에 복사하지 않는다: 저장소의 secrets.json(DPAPI)에서 한 번 복호화해 pi 에 OXY_LLM_INHERIT_KEYS 로 넘기고 pi 가 받자마자 지운다.
 // label 마다 agent 구성을 임시 폴더에 한 번 만들어 두고(스냅샷) 그 구성으로 시나리오를 돌린다.
 //   기본은 "지금 작업 트리", --rev 를 주면 그 커밋의 agent/ (bin 은 git 에 없으므로 작업 트리 것).
 //   실제 설치와 같은 배치(agent/ 와 vendor/ 가 나란히)가 되도록 pi 패키지의 문서·자원을 <임시>/vendor 아래에 복사하고
@@ -13,6 +17,8 @@ import { fileURLToPath } from "node:url";
 import { makeFixture } from "./fixture.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 import { scrub } from "./scrub.mjs";
+import * as L from "../../scripts/llm-connections.mjs";
+import { getSecrets } from "../../installer/secrets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
@@ -22,11 +28,13 @@ const WORK = path.join(os.tmpdir(), "oxy-scenario-eval");
 const argv = process.argv.slice(2);
 const label = argv.shift();
 if (!label || label.startsWith("--")) { console.error("usage: run.mjs <label> [options]"); process.exit(2); }
-const opt = { only: null, model: process.env.OXY_DEFAULT_MODEL, tools: null, set: {}, minutes: 8, rebuild: false, baseUrl: null, rev: null, maxCalls: 8 };
+const opt = { only: null, model: null, level: null, thinking: null, tools: null, set: {}, minutes: 8, rebuild: false, baseUrl: null, rev: null, maxCalls: 8 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--only") opt.only = argv[++i].split(",");
   else if (a === "--model") opt.model = argv[++i];
+  else if (a === "--level") opt.level = argv[++i];
+  else if (a === "--thinking") opt.thinking = argv[++i];
   else if (a === "--tools") opt.tools = argv[++i].split(",");
   else if (a === "--set") { const [k, ...v] = argv[++i].split("="); opt.set[k] = v.join("="); }
   else if (a === "--minutes") opt.minutes = Number(argv[++i]);
@@ -59,10 +67,12 @@ function build() {
   }
   fs.cpSync(path.join(ROOT, "agent/bin"), path.join(AGENT, "bin"), { recursive: true });
   fs.cpSync(PI_PKG, PI_PKG_COPY, { recursive: true, filter: (src) => path.basename(src) !== "node_modules" });
-  // 키는 복사하지 않는다 (실행 시 환경변수로만 전달)
-  let env = fs.readFileSync(path.join(ROOT, "agent/oxy.env"), "utf8").split(/\r?\n/).filter((l) => !/^OXY_VLLM_API_KEY=/.test(l)).join("\n");
-  if (opt.baseUrl) env = env.split("\n").filter((l) => !/^OXY_VLLM_BASE_URL=/.test(l)).join("\n") + `\nOXY_VLLM_BASE_URL=${opt.baseUrl}\n`;
-  fs.writeFileSync(path.join(AGENT, "oxy.env"), env);
+  // LLM 연결은 llm.json 을 그대로 쓴다 (키는 복사하지 않는다). oxy.env 에 예전 LLM 값이 남아 있으면 스냅샷에서 옮겨지지 않게 뺀다
+  const llm = L.loadLlm(path.join(ROOT, "agent"));
+  if (!llm) throw new Error("agent/llm.json 이 없음 → just configure 또는 tweak.cmd 의 LLM 연결에서 연결을 등록하세요");
+  L.saveLlm(AGENT, llm);
+  const envText = fs.existsSync(path.join(ROOT, "agent/oxy.env")) ? fs.readFileSync(path.join(ROOT, "agent/oxy.env"), "utf8") : "";
+  fs.writeFileSync(path.join(AGENT, "oxy.env"), L.removeEnvKeys(envText, L.LEGACY_ENV_KEYS));
   const tools = configure(opt.tools);
   const git = (...a) => spawnSync("git", ["-C", ROOT, ...a], { encoding: "utf8" }).stdout.trim();
   const meta = { label, builtAt: new Date().toISOString(), head: git("rev-parse", "--short", opt.rev ?? "HEAD"), dirty: opt.rev ? "" : git("status", "--short"), tools, toolsOverride: opt.tools, set: opt.set };
@@ -80,13 +90,46 @@ function configure(toolsOverride) {
   return settings.defaultTools;
 }
 
-// oxy.env 의 두 모델(coder/general) 밖의 모델로 재 보려면 general 자리에 넣고 설정을 다시 만든다
-function ensureModel(meta) {
-  if (fs.readFileSync(path.join(AGENT, "models.json"), "utf8").includes(`"id": "${opt.model}"`)) return;
-  const ep = path.join(AGENT, "oxy.env");
-  const env = fs.readFileSync(ep, "utf8").split("\n").filter((l) => !/^OXY_MODEL_GENERAL(_FAMILY)?=/.test(l)).join("\n");
-  fs.writeFileSync(ep, `${env.trimEnd()}\nOXY_MODEL_GENERAL=${opt.model}\n`);
-  configure(meta.toolsOverride);
+/**
+ * 이번 실행의 대상: --level → 그 수준, --model [연결/]모델 → 그 연결(연결을 안 쓰면 모델이 있는 첫 연결), 없으면 기본 모델.
+ * 연결에 없는 모델이면 스냅샷 llm.json 에만 더하고(길이는 그 연결의 첫 모델과 같게) 설정을 다시 만든다. --base-url 도 스냅샷에만.
+ */
+function resolveTarget(meta) {
+  const llm = L.loadLlm(AGENT);
+  let conn, model, thinking;
+  if (opt.level) {
+    const r = L.resolveLevel(llm, opt.level);
+    if (!r) throw new Error(`작업 수준 ${opt.level} 이 없음 (있는 것: ${(llm.levels ?? []).map((l) => l.id).join(", ")})`);
+    conn = L.findConnection(llm, r.connection); model = r.id; thinking = r.thinking;
+  } else if (opt.model) {
+    const i = opt.model.indexOf("/");
+    const named = i > 0 ? L.findConnection(llm, opt.model.slice(0, i)) : null;
+    model = named ? opt.model.slice(i + 1) : opt.model;
+    conn = named ?? llm.connections.find((c) => L.findModel(c, model)) ?? L.findConnection(llm, llm.main?.connection);
+    thinking = conn && L.findModel(conn, model) && llm.main?.model === model ? llm.main.thinking : "off";
+  } else {
+    conn = L.findConnection(llm, llm.main?.connection); model = llm.main?.model; thinking = llm.main?.thinking;
+  }
+  if (!conn || !model) throw new Error("대상 연결 · 모델을 정하지 못함 (llm.json 의 기본 모델 확인)");
+  if (opt.thinking) thinking = opt.thinking;
+  let changed = false;
+  if (!L.findModel(conn, model)) {
+    const first = conn.models?.[0] ?? { contextWindow: 131072, maxOutput: 16384 };
+    conn.models = [...(conn.models ?? []), { id: model, ...(L.LLM_KINDS[conn.kind].catalog === "families" ? { family: L.detectFamily(model) } : {}),
+      contextWindow: first.contextWindow, maxOutput: first.maxOutput }];
+    changed = true;
+  }
+  if (opt.baseUrl && conn.baseUrl !== opt.baseUrl) { conn.baseUrl = opt.baseUrl; changed = true; }
+  if (changed) { L.saveLlm(AGENT, llm); configure(meta.toolsOverride); }
+  return { connection: conn.id, provider: L.providerId(conn.id), model, thinking: thinking || "off",
+    key: `${conn.id}/${model}${thinking && thinking !== "off" ? `:${thinking}` : ""}` };
+}
+
+/** 키: 저장소 secrets.json 에서 한 번 복호화해 pi 에만 넘긴다 (스냅샷 · 결과 파일 · 화면에는 남기지 않는다) */
+function inheritKeys() {
+  const llm = L.loadLlm(AGENT);
+  const keys = getSecrets(path.join(ROOT, "agent"), llm.connections.map((c) => L.secretKey(c.id)));
+  return Object.keys(keys).length ? Buffer.from(JSON.stringify(keys)).toString("base64") : "";
 }
 
 const textOf = (content) => typeof content === "string" ? content : (content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("");
@@ -94,10 +137,10 @@ const short = (v, n = 160) => { const s = (typeof v === "string" ? v : JSON.stri
 
 function runPi(prompt, cwd, eventsFile) {
   return new Promise((resolve) => {
-    const args = [process.env.OXY_PI_CLI, "--no-session", "--mode", "json", "--model", opt.model, prompt];
+    const args = [process.env.OXY_PI_CLI, "--no-session", "--mode", "json", "--provider", target.provider, "--model", target.model, "--thinking", target.thinking, prompt];
     // 시험 조건: oxy-flow 끔(추가 턴 방지), 도구 출력 상한을 낮춤(Groq 분당 8000 토큰 = 요청 1건 크기 제한 때문). 모든 구성에 동일.
     const env = { ...process.env, PI_CODING_AGENT_DIR: fwd(AGENT), OXY_FLOW: "off", OXY_TOOL_OUTPUT_MAX_CHARS: "4000", OXY_READ_MAX_CHARS: "6000",
-      PI_PACKAGE_DIR: fwd(PI_PKG_COPY), ...meta.set, ...opt.set };
+      PI_PACKAGE_DIR: fwd(PI_PKG_COPY), ...(keysB64 ? { OXY_LLM_INHERIT_KEYS: keysB64 } : {}), ...meta.set, ...opt.set };
     const child = spawn(process.env.OXY_NODE, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out = fs.createWriteStream(eventsFile);
     const m = { requests: 0, inTok: 0, outTok: 0, firstIn: 0, calls: [], retries: [], errors: [], text: "", timedOut: false, capped: false };
@@ -151,10 +194,11 @@ const done = new Set(fs.existsSync(RESULTS)
   : []);
 
 const meta = build();
-ensureModel(meta);
-console.log(`[${label}] tools=${meta.tools.join(",")} model=${opt.model}`);
+const target = resolveTarget(meta);
+const keysB64 = inheritKeys();
+console.log(`[${label}] tools=${meta.tools.join(",")} model=${target.key}`);
 const started = Date.now();
-const todo = SCENARIOS.filter((s) => (!opt.only || opt.only.includes(s.id)) && !done.has(`${label}|${opt.model}|${s.id}`));
+const todo = SCENARIOS.filter((s) => (!opt.only || opt.only.includes(s.id)) && !done.has(`${label}|${target.key}|${s.id}`));
 for (const [i, s] of todo.entries()) {
   if ((Date.now() - started) / 60000 > opt.minutes) { console.log(`시간 한도(${opt.minutes}분) → 남은 ${todo.length - i}건은 다음 실행에서`); break; }
   if (i > 0) await new Promise((r) => setTimeout(r, 15000));
@@ -168,7 +212,7 @@ for (const [i, s] of todo.entries()) {
   // 한도 초과로 끝난 실행은 판정하지 않는다 (다시 돌릴 수 있게 기록하지 않음)
   const quota = m.errors.some((e) => /429|rate limit|Request too large|413/i.test(e)) && !m.text;
   const rec = {
-    label, model: opt.model, scenario: s.id, group: s.group, tools: meta.tools, at: new Date().toISOString(),
+    label, model: target.key, scenario: s.id, group: s.group, tools: meta.tools, at: new Date().toISOString(),
     pass: verdict.pass && !m.capped, note: m.capped ? `도구 호출 ${opt.maxCalls}회 상한에서 중단` : verdict.note, requests: m.requests, firstIn: m.firstIn, inTok: m.inTok, outTok: m.outTok,
     toolOut: m.calls.reduce((a, c) => a + c.out, 0), toolRaw: m.calls.reduce((a, c) => a + c.raw, 0),
     calls: m.calls, retries: m.retries.length, errors: m.errors, timedOut: m.timedOut, capped: m.capped, seconds: Math.round((Date.now() - t0) / 1000),
