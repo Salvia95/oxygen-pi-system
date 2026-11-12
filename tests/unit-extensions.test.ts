@@ -1100,3 +1100,24 @@ test("oxy-monitor 키 처리: exe 판별 · flow 선택 이동과 펼치기 · j
   r = C.jobsKey(r.ui, r.scroll, jobs, "esc"); assert.deepEqual([r.ui.mode, r.scroll], ["list", 0]);
   r = C.jobsKey({ sel: "job-2", mode: "list" }, 0, jobs, "down"); assert.equal(r.ui.sel, "job-1");
 });
+
+test("writeAtomic: 다른 프로세스(모니터)가 파일을 계속 읽는 동안에도 쓰기가 실패하지 않는다 (Windows 이름 바꾸기 EPERM)", { skip: process.platform !== "win32" }, async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { spawn } = await import("node:child_process");
+  const { writeAtomic } = await import("../agent/extensions/_lib/common.ts");
+  const dir = mkdtempSync(join(tmpdir(), "oxy-wa-"));
+  const file = join(dir, "state.json");
+  writeAtomic(file, "0");
+  // 모니터처럼 쉬지 않고 읽는 프로세스 (실측: 고치기 전에는 이름 바꾸기 3번에 1번꼴로 EPERM)
+  const reader = spawn(process.execPath, ["-e", `const fs=require("fs");setTimeout(()=>process.exit(),5000);for(;;){try{fs.readFileSync(${JSON.stringify(file)})}catch{}}`], { stdio: "ignore" });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    for (let i = 1; i <= 300; i++) writeAtomic(file, String(i));
+    assert.equal(readFileSync(file, "utf8"), "300");
+  } finally {
+    reader.kill();
+    await new Promise((r) => setTimeout(r, 200));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

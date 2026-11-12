@@ -13,7 +13,7 @@
 | `llm-conn` | `docs/tui-spec.md` §11 LLM 연결 · 작업 수준 | 구현 | – | `llm-conn/3` 회귀 테스트 먼저 (부모) | 기록 없음 | a78dcae b2b1033 | 2026-11-12 (연결 편집으로 `dropParams` 보정) |
 | `anthropic-ws` | `docs/tui-spec.md` §11 "Anthropic 워크스페이스" | 검증 | 사용자: 실제 조직 키 · 설치본 반영 승인 | 키가 생기면 `anthropic-ws/1` `anthropic-ws/2` 실측 (부모) | 2026-11-12 | c424194 | 안 됨 |
 | `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 검증 | 사용자: 설치본 반영 승인 (`flow-session/2`) · 유효한 Claude 키 (`flow-session/3`) | 설치본 반영 요청이 오면 `/2` (부모) | 2026-11-12 | acd4aac | 안 됨 |
-| `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 구현 | 사용자: 3 · 4단계 캡처 확인, 5단계 진행 요청 | `monitor-tui/5` 실제 LLM 실측 (부모) | 2026-11-12 | 96de47e d5e23e7 2de77ce | 안 됨 |
+| `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 구현 | 사용자: 3 · 4 · 5단계 캡처 확인 | `monitor-tui/6` 릴리스 · 번들 · 설치본 (승인 필요) | 2026-11-12 | 96de47e d5e23e7 2de77ce d096c67 | 안 됨 |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -42,7 +42,7 @@
 | `monitor-tui/2` | 보기 모델 (§3) | 완료 | 단위 `# tests 64` `# pass 64` `# fail 0` (23 · 35칸 × 11 · 24줄), 기준 `HEAD 96de47e + 미커밋` (2026-11-13 부모) | 자동 검증으로 대신 (명세 §6 2) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/3` | `oxy-tui` 모니터 모드 (§3 §4, tui-implementer) | 완료 | `just tui-test` `33 passed; 0 failed` · 단위 `# pass 66` `# fail 0` (부모가 다시 실행, 기준 `HEAD d5e23e7 + 미커밋`, 2026-11-13) | mintty 80×24 · 120×30 · WT 캡처, 설치 화면 경로 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/4` | `monitor.ts` 연결 · 예전 화면 대체 (§4) | 완료 | 단위 `# tests 67` `# pass 67` `# fail 0` · E2E `E2E 통과` (새 검사 `liveHeartbeat`: 고치기 전 FAIL · 고친 뒤 PASS), 기준 `HEAD 2de77ce + 미커밋` (2026-11-13 부모) | 대화형 pi + mock, mintty 120×30 · 80×24 실시간 갱신, pi-tui 대체 화면 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
-| `monitor-tui/5` | 실제 LLM 실측 (Groq) | 예정 | – | – | – |
+| `monitor-tui/5` | 실제 LLM 실측 (하이쿠, 사용자 요청) | 완료 | 단위 `# pass 68` `# fail 0` (새 시험 `writeAtomic` 동시 읽기: 고치기 전 FAIL · 고친 뒤 PASS) · E2E `E2E 통과`, 기준 `HEAD d096c67 + 미커밋` (2026-11-13 부모) | 대화형 pi + claude-haiku-5-5, mintty 120×30 · 80×24: 계획 · 편집 · background · 커밋을 모니터가 따라감, 고친 뒤 실패 도구 0 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/6` | `oxy-tui` 릴리스 · 번들 · 설치본 (승인 필요) | 예정 | – | – | – |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
@@ -91,3 +91,4 @@
 - 2026-11-12 `dev-process/1`: 인자 없는 `cat > 파일` 을 실수로 남겨 명령이 입력을 기다리며 멈췄다 (한 번). → 만들지 않음: 한 번뿐이고 피해가 없었다.
 - 2026-11-13 `monitor-tui/3`: 설치 점검 화면의 `번들 구성요소  C:\…\oxygen-pi-sys… (필수 5개 확인)` 줄은 경로 뒤에 괄호 설명이 붙어 `fit` 의 경로 줄임이 적용되지 않고 끝이 잘린다. 후속: `install.mjs` 문구에서 괄호 설명을 경로 앞으로 (tui-spec 범위, 아직 진행판 단계 없음).
 - 2026-11-13 `monitor-tui/4`: 실측에서 `live.json` 의 `updatedAt` 이 이벤트 없는 동안 갱신되지 않아 긴 도구에서 "pi 상태를 알 수 없습니다". 1단계 E2E 는 3초 도구라 놓쳤다. → E2E 를 8초 도구로 바꾸고 갱신 검사를 더했다 (회고: 시간 경계가 있는 동작은 그 경계를 넘는 시험을 둔다).
+- 2026-11-13 `monitor-tui/5`: 실제 LLM 실측에서 모니터가 `flow.json` 을 읽는 순간 oxy-flow 의 쓰기(이름 바꾸기)가 Windows EPERM 으로 실패. mock E2E 는 모니터 pane 을 띄우지 않아 놓쳤다. → 공용 `writeAtomic` 으로 다시 시도, 동시 읽기 단위 시험 추가 (회고: 다른 프로세스가 읽는 파일을 쓰는 코드는 동시 읽기 시험을 둔다).

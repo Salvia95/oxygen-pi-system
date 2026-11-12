@@ -1,4 +1,5 @@
 // oxy extension 공통 유틸. `_lib/` 에는 index.ts 가 없으므로 pi 가 extension 으로 로드하지 않는다.
+import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve, win32 } from "node:path";
 
@@ -59,4 +60,21 @@ export function textOf(content: unknown): string {
     .filter((c: any) => c?.type === "text" && typeof c.text === "string")
     .map((c: any) => c.text as string)
     .join("\n");
+}
+
+const pause = new Int32Array(new SharedArrayBuffer(4));
+/**
+ * 임시 파일에 쓰고 이름을 바꿔 파일을 한 번에 교체한다 (읽는 쪽이 반쯤 쓴 내용을 보지 않게).
+ * Windows 에서는 다른 프로세스(모니터 pane)가 그 파일을 읽는 순간 이름 바꾸기가 EPERM · EACCES · EBUSY 로 실패한다
+ * (모니터가 1초마다 읽는 동안 실측 3번에 1번꼴). 잠깐 쉬며 다시 시도한다: 최대 tries 번, 모두 합쳐 약 1초.
+ */
+export function writeAtomic(file: string, text: string, tries = 20): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, text);
+  for (let i = 1; ; i++) {
+    try { renameSync(tmp, file); return; } catch (e: any) {
+      if (i >= tries || !["EPERM", "EACCES", "EBUSY"].includes(e?.code)) { rmSync(tmp, { force: true }); throw e; }
+      Atomics.wait(pause, 0, 0, Math.min(5 * i, 100));
+    }
+  }
 }

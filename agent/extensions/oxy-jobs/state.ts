@@ -3,8 +3,11 @@
 //   agent/jobs/run-<pid>-<시작 시각>/logs/        작업 로그
 //   agent/jobs/run-<pid>-<시작 시각>/control/     모니터 → pi 요청 ({seq, op:"stop", id})
 // pi 에 의존하지 않는다: pi 쪽(writer · inbox)과 모니터 쪽(find · read · send)이 같은 형식을 이 파일에서 가져다 쓴다.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
+import { writeAtomic } from "../_lib/common.ts";
+
+export { writeAtomic };
 
 export const STATE_VERSION = 1;
 const RESULT_MAX = 2000;
@@ -59,15 +62,6 @@ export function parseRunDirName(name: string): { pid: number; startedAt: number 
 export function pidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
-}
-
-export function writeAtomic(file: string, text: string): void {
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  try { renameSync(tmp, file); } catch (e) {
-    // Windows: 읽는 쪽이 잠깐 파일을 열고 있으면 이름 바꾸기가 실패할 수 있다 → 한 번 더
-    try { renameSync(tmp, file); } catch { rmSync(tmp, { force: true }); throw e; }
-  }
 }
 
 /** 마지막 출력 한 줄 (빈 줄 제외, 공백 정리) */

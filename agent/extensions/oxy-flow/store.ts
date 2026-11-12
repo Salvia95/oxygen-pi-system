@@ -5,8 +5,9 @@
 //   <프로젝트>/.oxy/flow/archive/    끝난 작업 · 다른 세션의 작업 (그 세션을 다시 열면 되살린다, bindSession)
 // 엔진 경계(FlowEngine)를 두어 나중에 flowout 으로 바꿀 수 있게 한다. pi 에 의존하지 않아 단위 테스트가 가능하다.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeAtomic } from "../_lib/common.ts";
 import { type PlanInput, type PlanItem, addItem, currentItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
 
 export type NoteKind = "decision" | "goal" | "next" | "blocked" | "done";
@@ -82,12 +83,6 @@ export function projectRoot(cwd: string): string {
 function pidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
-}
-
-function writeAtomic(file: string, text: string): void {
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
 }
 
 export class FileFlowEngine implements FlowEngine {
