@@ -35,6 +35,8 @@ const SCENARIOS = {
   // oxy-jobs: 백그라운드 작업 → 대화 종료 전 결과 알림 → 이어서 응답
   "bg-start": [{ tool: "background", args: { action: "start", command: "sleep 2; echo bg-finished-ok" } }, { text: "Waiting for the background job." }],
   "bg-guard": [{ tool: "background", args: { action: "start", command: "npm install lodash" } }],
+  // 모니터 중지 요청 확인용: 오래 걸리는 작업 (모니터 쪽에서 control/ 로 중지한다)
+  "bg-long": [{ tool: "background", args: { action: "start", command: "echo bg-long-started; sleep 60; echo bg-long-never" } }, { text: "Long job started." }],
   // oxy-jobs: subagent (자식 pi 의 첫 메시지 "Task: scenario:env ..." 도 env 시나리오로 응답)
   "sub-sync": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env check the environment" } }],
   "sub-par": [{ tool: "subagent", args: { tasks: [

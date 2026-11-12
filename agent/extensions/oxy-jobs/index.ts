@@ -5,6 +5,7 @@
  *   background  긴 명령을 백그라운드로 실행 → 끝나면 모델을 깨워 결과를 알린다 (polling 불필요)
  *   subagent    독립된 컨텍스트의 도우미 agent 에게 작업을 맡긴다 (병렬 가능, wait:false 면 백그라운드)
  * 화면: 입력창 위 작업 패널 · 상태줄 · /jobs (로그 보기 · Windows Terminal 옆 창에 로그 · 중지)
+ * 모니터: 대화형 모드에서는 agent/jobs/run-<pid>-<시작 시각>/state.json 에 상태를 쓰고 control/ 의 중지 요청을 받는다 (state.ts, docs/monitor-spec.md §3)
  * 비대화형(-p, json) 모드: 대화가 끝나기 전에 남은 작업을 기다렸다가 결과를 모아 이어서 진행한다.
  *
  * 환경변수: OXY_LLM_MAX_CONCURRENT (subagent 동시 실행, 기본 2), OXY_JOBS_MAX_CONCURRENT (bash 작업, 기본 4),
@@ -19,7 +20,8 @@ import { Type } from "typebox";
 import { blocked, enabled, envInt } from "../_lib/common.ts";
 import { inspect } from "../oxy-bash-guard.ts";
 import { clip } from "../oxy-context-budget.ts";
-import { type Job, JobManager, fmtDuration } from "./manager.ts";
+import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration } from "./manager.ts";
+import { type ControlResult, ControlInbox, StateWriter, pruneRuns } from "./state.ts";
 import { type AgentDef, loadAgents, runSubagent } from "./subagent.ts";
 
 const ICON: Record<string, string> = { queued: "·", running: "⏳", done: "✓", failed: "✗", stopped: "■" };
@@ -76,6 +78,25 @@ export default function (pi: ExtensionAPI) {
   mgr.onChange(render);
   const remember = (ctx: any) => { if (ctx?.hasUI) { uiCtx = ctx; interactive = true; } };
 
+  // ---------------------------------------------------------------- 모니터용 상태 파일 · 중지 요청 (대화형만)
+  let writer: StateWriter | null = null;
+  let inbox: ControlInbox | null = null;
+  let lastControl: ControlResult | null = null;
+  let stateCwd = process.cwd();
+  mgr.onChange(() => writer?.changed());
+  const startMonitorState = (ctx: any) => {
+    if (writer || !ctx?.hasUI) return;
+    stateCwd = ctx.cwd ?? stateCwd;
+    writer = new StateWriter(mgr.runDir, () => mgr.snapshot(stateCwd, lastControl));
+    inbox = new ControlInbox(mgr.runDir, (req) => {
+      const job = mgr.get(req.id);
+      if (!job) return { ok: false, message: `unknown job id: ${req.id}` };
+      if (!mgr.stop(job.id)) return { ok: false, message: `${job.id} is not running (${job.state}).` };
+      uiCtx?.ui?.notify?.(`${job.id} 중지 (모니터)`, "warning");
+      return { ok: true, message: `Stopped ${job.id}.` };
+    }, (r) => { lastControl = r; writer?.changed(); });
+  };
+
   // ---------------------------------------------------------------- 완료 알림
   const summary = (j: Job, max = 4000) => {
     const dur = fmtDuration((j.endedAt ?? Date.now()) - (j.startedAt ?? j.createdAt));
@@ -101,8 +122,11 @@ export default function (pi: ExtensionAPI) {
       job.startedAt = Date.now();
       w.line(`$ ${command}`);
       mgr.changed();
-      const proc = spawn(shellPath(agentDir), ["-c", command], { cwd, env: process.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const sh = shellPath(agentDir);
+      const pidFile = job.logFile.replace(/\.log$/, ".pid");
+      const proc = spawn(sh, ["-c", bashJobScript(command, pidFile)], { cwd, env: process.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       job.proc = proc;
+      job.kill = bashKiller(sh, proc, pidFile);
       proc.stdout.on("data", (d) => w.chunk(d.toString()));
       proc.stderr.on("data", (d) => w.chunk(d.toString()));
       const code: number = await new Promise((r) => { proc.on("close", (c) => r(c ?? 1)); proc.on("error", () => r(1)); });
@@ -148,7 +172,7 @@ export default function (pi: ExtensionAPI) {
         if (!command) throw new Error("command is required for action=start");
         const deny = await guard(command, ctx);
         if (deny) throw new Error(deny);
-        const job = mgr.create("bash", command, true);
+        const job = mgr.create("bash", command, true, { task: command });
         void runBash(job, command, ctx.cwd).then(() => report(job));
         return ok(`Started ${job.id}: ${command}\nYou will get a message when it finishes. Do not poll; continue with other work or end your turn.`, { id: job.id });
       }
@@ -201,7 +225,8 @@ export default function (pi: ExtensionAPI) {
           if (items.length > 8) throw new Error("at most 8 tasks at once");
           const defs = items.map((t) => find(t.agent));
           const wait = params.wait !== false;
-          const jobs = items.map((t, i) => mgr.create("agent", `${defs[i].name}: ${t.task.replace(/\s+/g, " ").slice(0, 60)}`, !wait));
+          const jobs = items.map((t, i) => mgr.create("agent", `${defs[i].name}: ${t.task.replace(/\s+/g, " ").slice(0, 60)}`, !wait,
+            { agent: defs[i].name, task: t.task }));
           const runs = jobs.map((j, i) => runSubagent(mgr, j, defs[i], items[i].task, ctx.cwd, {
             signal: wait ? signal : undefined,
             onProgress: wait ? () => onUpdate?.(ok(jobs.map((x) => `${ICON[x.state]} ${x.id} ${x.label} ${x.tail.at(-1) ?? ""}`).join("\n"))) : undefined,
@@ -266,7 +291,17 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_start", async (_e: any, ctx: any) => { remember(ctx); mgr.pruneLogs(); render(); });
-  pi.on("turn_start", async (_e: any, ctx: any) => { remember(ctx); });
-  pi.on("session_shutdown", async () => { mgr.stopAll(); if (timer) clearInterval(timer); });
+  pi.on("session_start", async (_e: any, ctx: any) => {
+    remember(ctx);
+    try { pruneRuns(mgr.jobsDir, 20, [mgr.runDir]); mgr.pruneLogs(); } catch { /* 정리 실패는 무시 */ }
+    startMonitorState(ctx);
+    render();
+  });
+  pi.on("turn_start", async (_e: any, ctx: any) => { remember(ctx); startMonitorState(ctx); });
+  pi.on("session_shutdown", async () => {
+    mgr.stopAll();
+    if (timer) clearInterval(timer);
+    inbox?.close(); inbox = null;
+    writer?.close(); writer = null;
+  });
 }

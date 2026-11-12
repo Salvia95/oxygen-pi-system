@@ -1,7 +1,9 @@
 // oxy-jobs 작업 관리자: 백그라운드 bash 작업과 subagent 를 같은 목록·대기열·로그로 관리한다.
+//   로그는 실행 폴더(agent/jobs/run-<pid>-<시작 시각>/logs/)에 둔다. 상태 파일 형식은 state.ts
 import { type ChildProcess, spawnSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync, type WriteStream } from "node:fs";
-import { join } from "node:path";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, type WriteStream } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { type JobsState, type JobSnapshot, STATE_VERSION, clipResult, lastLine, runDirName } from "./state.ts";
 
 export type JobKind = "bash" | "agent";
 export type JobState = "queued" | "running" | "done" | "failed" | "stopped";
@@ -10,6 +12,8 @@ export interface Job {
   id: string;
   kind: JobKind;
   label: string;          // 화면 표시용 (명령 또는 "scout: 작업 요약")
+  agent?: string;         // kind=agent: agent 이름
+  task?: string;          // 맡긴 작업 전문 (bash: 명령 전문)
   state: JobState;
   createdAt: number;
   startedAt?: number;
@@ -22,6 +26,7 @@ export interface Job {
   reported: boolean;      // 완료를 모델에게 알렸는지
   notify: boolean;        // 완료 시 모델에게 알릴지 (wait:false 로 시작한 작업)
   proc?: ChildProcess;
+  kill?: () => void;      // 작업을 끝내는 방법 (bash 작업: MSYS 프로세스 그룹까지). 없으면 killTree(proc)
 }
 
 const TAIL_MAX = 200;
@@ -73,6 +78,30 @@ export function killTree(proc: ChildProcess | undefined) {
   else proc.kill("SIGTERM");
 }
 
+const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * bash 작업 명령: 먼저 bash 의 MSYS pid 를 pidFile 에 적고 나서 명령을 실행한다.
+ * Git Bash(MSYS)는 fork/exec 를 흉내 내느라 손자 프로세스의 Windows 부모가 사라져 있어 taskkill /T 로는 끝나지 않는다
+ * (서버 · sleep 이 남고 출력 파이프가 닫히지 않는다). 대신 Windows 프로세스가 띄운 MSYS bash 는 자기 프로세스 그룹의 리더이므로
+ * 그 그룹 전체를 MSYS kill 로 끝낸다 (bashKiller).
+ */
+export function bashJobScript(command: string, pidFile: string): string {
+  return `printf %s "$$" > ${shQuote(pidFile.replace(/\\/g, "/"))}\n${command}`;
+}
+
+/** bashJobScript 로 시작한 작업을 끝낸다: MSYS 프로세스 그룹 → 실패하면 그 bash 하나 → 마지막으로 Windows 트리 */
+export function bashKiller(shell: string, proc: ChildProcess, pidFile: string): () => void {
+  return () => {
+    let pid = "";
+    try { pid = readFileSync(pidFile, "utf8").trim(); } catch { /* 아직 시작 전 */ }
+    if (/^\d+$/.test(pid) && proc.exitCode === null) {
+      spawnSync(shell, ["-c", `kill -9 -- -${pid} 2>/dev/null || kill -9 ${pid} 2>/dev/null`], { windowsHide: true, timeout: 5000 });
+    }
+    killTree(proc);
+  };
+}
+
 export function fmtDuration(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
@@ -86,8 +115,12 @@ export class JobManager {
   readonly agentSlots: Semaphore;
 
   readonly jobsDir: string;
+  readonly runDir: string;    // 이 실행(세션)의 폴더. 첫 작업의 로그를 쓸 때 만든다
+  readonly startedAt: number;
   constructor(jobsDir: string, opts: { maxBash: number; maxAgents: number }) {
     this.jobsDir = jobsDir;
+    this.startedAt = Date.now();
+    this.runDir = join(jobsDir, runDirName(process.pid, this.startedAt));
     this.bashSlots = new Semaphore(opts.maxBash);
     this.agentSlots = new Semaphore(opts.maxAgents);
     mkdirSync(jobsDir, { recursive: true });
@@ -96,10 +129,10 @@ export class JobManager {
   onChange(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   changed() { for (const fn of this.listeners) { try { fn(); } catch { /* UI 오류는 무시 */ } } }
 
-  create(kind: JobKind, label: string, notify: boolean): Job {
+  create(kind: JobKind, label: string, notify: boolean, extra: { agent?: string; task?: string } = {}): Job {
     const id = `job-${++this.seq}`;
     const job: Job = {
-      id, kind, label, state: "queued", createdAt: Date.now(), logFile: join(this.jobsDir, `${Date.now()}-${id}.log`),
+      id, kind, label, ...extra, state: "queued", createdAt: Date.now(), logFile: join(this.runDir, "logs", `${id}.log`),
       tail: [], reported: !notify, notify,
     };
     this.jobs.set(id, job);
@@ -109,6 +142,7 @@ export class JobManager {
 
   /** 로그 파일과 tail 에 한 줄 기록 */
   writer(job: Job): { line: (s: string) => void; chunk: (s: string) => void; close: () => void } {
+    mkdirSync(dirname(job.logFile), { recursive: true });
     const stream: WriteStream = createWriteStream(job.logFile, { flags: "a" });
     let partial = "";
     const push = (l: string) => { job.tail.push(l); if (job.tail.length > TAIL_MAX) job.tail.shift(); };
@@ -135,7 +169,7 @@ export class JobManager {
     if (!job || (job.state !== "running" && job.state !== "queued")) return false;
     job.state = "stopped";
     job.endedAt = Date.now();
-    killTree(job.proc);
+    if (job.kill) job.kill(); else killTree(job.proc);
     this.changed();
     return true;
   }
@@ -152,7 +186,24 @@ export class JobManager {
     });
   }
 
-  /** 오래된 로그 정리 (최근 keep 개만 남김) */
+  /** 모니터용 상태 (state.ts 의 JobsState) */
+  snapshot(cwd: string, control: JobsState["control"] = null): JobsState {
+    const slot = (s: Semaphore) => ({ running: s.running, limit: s.limit, waiting: s.waiting });
+    const jobs: JobSnapshot[] = this.list().map((j) => ({
+      id: j.id, kind: j.kind, state: j.state, label: j.label,
+      ...(j.agent ? { agent: j.agent } : {}), ...(j.task ? { task: j.task } : {}),
+      createdAt: j.createdAt, startedAt: j.startedAt ?? null, endedAt: j.endedAt ?? null, exitCode: j.exitCode ?? null,
+      usage: j.usage ? { ...j.usage } : null,
+      log: relative(this.runDir, j.logFile).replace(/\\/g, "/"),
+      last: lastLine(j.tail), result: clipResult(j.result),
+    }));
+    return {
+      version: STATE_VERSION, pid: process.pid, startedAt: this.startedAt, updatedAt: Date.now(), closed: false,
+      cwd: cwd.replace(/\\/g, "/"), slots: { agents: slot(this.agentSlots), bash: slot(this.bashSlots) }, jobs, control,
+    };
+  }
+
+  /** 이전 버전이 jobs 폴더 바로 아래에 남긴 로그 정리 (최근 keep 개만 남김) */
   pruneLogs(keep = 50) {
     if (!existsSync(this.jobsDir)) return;
     const files = readdirSync(this.jobsDir).filter((f) => f.endsWith(".log"))

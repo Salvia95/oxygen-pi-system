@@ -6,6 +6,7 @@ import { inspect, muxPayloads, splitSegments } from "../agent/extensions/oxy-bas
 import { clip } from "../agent/extensions/oxy-context-budget.ts";
 import { docsPointer } from "../agent/extensions/oxy-prompt-trim.ts";
 import { pathKey } from "../agent/extensions/_lib/common.ts";
+import { existsSync as existsSyncTop } from "node:fs";
 
 const ids = (cmd: string) => inspect(cmd, process.cwd()).map((f) => `${f.rule.level}:${f.rule.id}`);
 
@@ -167,6 +168,130 @@ test("oxy-jobs: Semaphore 동시 실행 제한 · vLLM metrics 해석", async ()
   assert.deepEqual(m, { waiting: 3, running: 4, kvCache: 0.93 });
   assert.deepEqual(parseVllmMetrics("other_metric 1\n"), { waiting: 0, running: 0, kvCache: null });
   assert.equal(fmtDuration(72000), "1m12s");
+});
+
+test("oxy-jobs 상태 파일: 실행 폴더 · 스냅샷 · 묶어 쓰기 · 종료 표시 (monitor-spec §3)", async () => {
+  const { JobManager } = await import("../agent/extensions/oxy-jobs/manager.ts");
+  const { StateWriter, readState, findRun, parseRunDirName } = await import("../agent/extensions/oxy-jobs/state.ts");
+  const { mkdtempSync, existsSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, basename } = await import("node:path");
+  const jobsDir = mkdtempSync(join(tmpdir(), "oxy-jobs-"));
+  try {
+    const mgr = new JobManager(jobsDir, { maxBash: 4, maxAgents: 2 });
+    assert.deepEqual(parseRunDirName(basename(mgr.runDir)), { pid: process.pid, startedAt: mgr.startedAt });
+    const job = mgr.create("bash", "npm test", true, { task: "npm test --all" });
+    const w = mgr.writer(job);
+    w.line("$ npm test");
+    w.chunk("ok 1\nok 2\n\n");
+    w.close();
+    assert.equal(job.logFile, join(mgr.runDir, "logs", "job-1.log"));
+    const agent = mgr.create("agent", "scout: look", false, { agent: "scout", task: "look at x" });
+    agent.result = "y".repeat(2500);
+
+    let writes = 0;
+    const sw = new StateWriter(mgr.runDir, () => { writes++; return mgr.snapshot("C:\\work\\p", null); }, { minGapMs: 80, heartbeatMs: 0 });
+    assert.equal(writes, 1);                                       // 만들 때 바로 한 번
+    const s = readState(mgr.runDir)!;
+    assert.equal(s.version, 1);
+    assert.equal(s.pid, process.pid);
+    assert.equal(s.closed, false);
+    assert.equal(s.cwd, "C:/work/p");
+    assert.deepEqual(s.slots.agents, { running: 0, limit: 2, waiting: 0 });
+    const [j1, j2] = s.jobs;
+    assert.equal(j1.log, "logs/job-1.log");
+    assert.equal(j1.last, "ok 2");                                  // 빈 줄은 건너뛴다
+    assert.equal(j1.task, "npm test --all");
+    assert.equal(j1.agent, undefined);
+    assert.equal(j2.agent, "scout");
+    assert.ok(j2.result!.length < 2100 && j2.result!.endsWith(" …")); // 답변 앞부분만
+    const logText = async () => {                                  // 로그는 스트림으로 비동기 기록된다
+      const t0 = Date.now();
+      while (Date.now() - t0 < 3000) {
+        try { const t = readFileSync(join(mgr.runDir, j1.log), "utf8"); if (t.includes("ok 2")) return t; } catch { /* 아직 */ }
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return "";
+    };
+    assert.ok((await logText()).includes("$ npm test"));
+
+    for (let i = 0; i < 10; i++) sw.changed();                     // 여러 번 바뀌어도 한 번으로 묶는다
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(writes, 2);
+    sw.close();
+    assert.equal(readState(mgr.runDir)!.closed, true);
+    sw.changed(); sw.flush();                                      // 닫은 뒤에는 쓰지 않는다
+    assert.equal(readState(mgr.runDir)!.closed, true);
+    assert.equal(findRun(jobsDir, process.pid), mgr.runDir);
+    assert.equal(findRun(jobsDir, process.pid + 1), null);
+    assert.ok(!existsSync(join(mgr.runDir, "state.json.tmp")));
+  } finally { rmSync(jobsDir, { recursive: true, force: true }); }
+});
+
+test("oxy-jobs 중지: Git Bash 작업의 손자 프로세스까지 끝나고 출력이 닫힌다", { skip: process.platform !== "win32" || !existsSyncTop("C:/Program Files/Git/bin/bash.exe") }, async () => {
+  const { bashJobScript, bashKiller } = await import("../agent/extensions/oxy-jobs/manager.ts");
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "oxy-kill-"));
+  const sh = "C:/Program Files/Git/bin/bash.exe";
+  const pidFile = join(dir, "job.pid");
+  try {
+    // taskkill /T 만으로는 sleep 이 남아 30초 뒤에야 close 가 왔다 (MSYS fork/exec 로 Windows 부모가 끊김)
+    const proc = spawn(sh, ["-c", bashJobScript("echo started; sleep 30 & sleep 31; echo never", pidFile)], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    proc.stdout.on("data", (d) => { out += d; });
+    const closed = new Promise<number>((ok) => proc.on("close", () => ok(Date.now())));
+    const t0 = Date.now();
+    while (!out.includes("started") && Date.now() - t0 < 10000) await new Promise((r) => setTimeout(r, 50));
+    const killedAt = Date.now();
+    bashKiller(sh, proc, pidFile)();
+    const at = await Promise.race([closed, new Promise<number>((ok) => setTimeout(() => ok(-1), 10000))]);
+    assert.ok(at > 0 && at - killedAt < 5000, `close 가 늦음: ${at < 0 ? "10초 넘게 안 옴" : `${at - killedAt}ms`}`);
+    assert.ok(!out.includes("never"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결과 · 정리 규칙", async () => {
+  const { ControlInbox, sendControl, findRun, pruneRuns, runDirName } = await import("../agent/extensions/oxy-jobs/state.ts");
+  const { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const jobsDir = mkdtempSync(join(tmpdir(), "oxy-ctl-"));
+  try {
+    const runDir = join(jobsDir, runDirName(process.pid, 1000));
+    const handled: string[] = [];
+    const results: any[] = [];
+    const inbox = new ControlInbox(runDir,
+      (req) => { handled.push(req.id); return req.id === "job-1" ? { ok: true, message: "Stopped job-1." } : { ok: false, message: "unknown" }; },
+      (r) => results.push(r), { pollMs: 50 });
+    const seq = sendControl(runDir, "stop", "job-1");
+    writeFileSync(join(runDir, "control", "zz-bad-op.json"), JSON.stringify({ op: "rm", id: "job-1" }));
+    sendControl(runDir, "stop", "job-9");
+    const t0 = Date.now();
+    while (results.length < 3 && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 30));
+    inbox.close();
+    assert.deepEqual(handled, ["job-1", "job-9"]);                  // 알 수 없는 op 는 handle 까지 가지 않는다
+    const first = results.find((r) => r.seq === seq);
+    assert.equal(first.ok, true);
+    assert.equal(first.message, "Stopped job-1.");
+    assert.equal(results.find((r) => r.seq === "zz-bad-op").ok, false);
+    assert.equal(readdirSync(join(runDir, "control")).length, 0);   // 처리한 요청 파일은 지운다
+
+    // 정리: 끝난 실행은 최근 20개만, 살아 있는 pi(부모 프로세스)의 폴더와 except 는 남긴다
+    const dead = 999999;
+    for (let i = 0; i < 25; i++) mkdirSync(join(jobsDir, runDirName(dead, 2000 + i)));
+    const live = join(jobsDir, runDirName(process.ppid, 1));
+    mkdirSync(live);
+    mkdirSync(join(jobsDir, "not-a-run"));
+    pruneRuns(jobsDir, 20, [runDir]);
+    const left = readdirSync(jobsDir);
+    assert.equal(left.filter((n) => n.startsWith(`run-${dead}-`)).length, 20);
+    assert.ok(!left.includes(runDirName(dead, 2000)) && left.includes(runDirName(dead, 2024)));   // 오래된 것부터 지운다
+    assert.ok(existsSync(live) && existsSync(runDir) && left.includes("not-a-run"));
+    assert.equal(findRun(jobsDir, dead), join(jobsDir, runDirName(dead, 2024)));
+  } finally { rmSync(jobsDir, { recursive: true, force: true }); }
 });
 
 test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 · 렌더 상한", async () => {

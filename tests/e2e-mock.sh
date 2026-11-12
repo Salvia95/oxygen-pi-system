@@ -105,7 +105,8 @@ fi
 # ---- oxy-jobs: 백그라운드 작업 · subagent ----
 run bg-start
 chk "background: 끝나면 결과를 알리고 이어서 응답"  '[[ "$out" == *"[oxy-jobs] job-1 done (exit 0)"* && "$out" == *"bg-finished-ok"* ]]'
-chk "background: 작업 로그 파일"               '[[ -n "$(ls "$TMP/agent/jobs/"*-job-1.log 2>/dev/null)" ]]'
+chk "background: 작업 로그 파일 (실행 폴더)"     '[[ -n "$(ls "$TMP/agent/jobs/"run-*/logs/job-1.log 2>/dev/null)" ]]'
+chk "background: 비대화형은 상태 파일을 쓰지 않음" '[[ -z "$(ls "$TMP/agent/jobs/"run-*/state.json 2>/dev/null)" ]]'
 
 run bg-guard
 chk "background 도 bash-guard 검사 (npm install 차단)" '[[ "$out" == *"oxy-guard/offline-install"* ]]'
@@ -125,11 +126,14 @@ export OXY_LLM_MAX_CONCURRENT=3; run sub-par; o3=$(order); unset OXY_LLM_MAX_CON
 chk "동시 실행 제한 3: 자식 3개가 함께 시작 ($o3)"      '[[ ${#o3} -eq 6 && $(printf %s "${o3:0:3}" | fold -w1 | sort -u | wc -l) -eq 3 ]]'
 
 # 대화형 경로 (RPC 모드: 작업 패널·상태줄, 완료 시 새 턴, /jobs 로그 보기)
-rpc=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-jobs.mjs")" "$OXY_PI_CLI" "$(winpath "$TMP/work")" 2>&1 | tail -1)
+rpc=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-jobs.mjs")" "$OXY_PI_CLI" "$(winpath "$TMP/work")" 2>&1 | tail -1) || true
 printf '\n\033[1m[rpc-jobs]\033[0m %s\n' "$rpc"
 chk "대화형: 작업 패널·상태줄 표시"            '[[ "$rpc" == *"\"widgetRunning\":true"* && "$rpc" == *"\"statusRunning\":true"* && "$rpc" == *"\"widgetDone\":true"* ]]'
 chk "대화형: 작업이 끝나면 새 턴으로 결과 전달"   '[[ "$rpc" == *"\"followUpTurn\":true"* ]]'
 chk "대화형: /jobs → 로그 보기"               '[[ "$rpc" == *"\"jobsLogView\":true"* ]]'
+chk "모니터: 상태 파일에 작업 목록·로그 경로"    '[[ "$rpc" == *"\"stateFile\":true"* && "$rpc" == *"\"stateRunning\":true"* ]]'
+chk "모니터: 중지 요청 → 작업 중지·알림·모델에 전달" '[[ "$rpc" == *"\"monitorStop\":true"* && "$rpc" == *"\"monitorStopNotice\":true"* && "$rpc" == *"\"stopReported\":true"* ]]'
+chk "모니터: 이미 끝난 작업 중지 요청은 실패로 기록" '[[ "$rpc" == *"\"monitorStopRejected\":true"* ]]'
 
 # oxy-flow: 별도 git 작업 폴더 (위 시나리오들은 OXY_FLOW=off 로 실행해 서로 영향을 주지 않게 한다)
 FW="$TMP/flowwork"; mkdir -p "$FW"; (cd "$FW" && git init -q)
