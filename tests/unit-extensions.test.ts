@@ -994,3 +994,80 @@ test("oxy-monitor 실시간 활동: 작업 · 할 일 · 커밋 변화 → 이�
   f = L.flowEvents(f.seen, [{ id: "p1", status: "done", text: "API" }, { id: "p2", status: "todo", text: "문서" }], { id: "n2", title: "feat: api" });
   assert.deepEqual(f.events.map((e) => `${e.kind}:${e.text}`), ["plan:p1 → done API", "commit:커밋 n2 feat: api"]);
 });
+
+test("oxy-monitor 보기 모델: flow (지금 · 계획 · 최근, 23 · 35칸 × 11 · 24줄, 진행 중 항목이 보임)", async () => {
+  const M = await import("../agent/extensions/oxy-monitor/model.ts");
+  const L = await import("../agent/extensions/oxy-monitor/live.ts");
+  const { displayWidth: w } = await import("../installer/tui.mjs");
+  const now = 100000;
+  const item = (id: string, status: string, kids: any[] = [], nodes: string[] = []) => ({ id, text: `할 일 ${id}`, status, at: 0, nodes, children: kids });
+  // 항목 12개, 진행 중은 아래쪽 p10 의 할 일 p10.2
+  const plan = Array.from({ length: 12 }, (_, i) => {
+    const id = `p${i + 1}`;
+    if (i < 9) return item(id, "done", [], [`n${i + 1}`]);
+    if (i === 9) return item(id, "doing", [item(`${id}.1`, "done", [], ["n10"]), item(`${id}.2`, "doing"), item(`${id}.3`, "todo")]);
+    return item(id, "todo");
+  });
+  const flow = { goal: "앱 만들기", plan, nodes: Array.from({ length: 10 }, (_, i) => ({ id: `n${i + 1}`, commit: "abc", title: `c${i + 1}`, decisions: [], files: [] })),
+    buffer: { decisions: [], files: [], failures: [] } };
+  let live = L.emptyLive(1, now - 5000);
+  live = L.reduceLive(live, { type: "agent_start" }, now - 4000);
+  live = L.reduceLive(live, { type: "tool_start", id: "a", name: "bash", input: { command: "npm test" } }, now - 3000);
+  live = L.reduceLive(live, { type: "event", kind: "commit", ok: true, text: "커밋 n10 c10" }, now - 2000);
+  const ui = { sel: null, open: new Set<string>(), manualAt: 0 };
+  for (const [width, height] of [[23, 11], [23, 24], [35, 11], [35, 24]]) {
+    const m = M.flowModel(flow as any, live, ui, width, height, now, w);
+    assert.ok(M.modelHeight(m) <= height, `${width}x${height}: ${M.modelHeight(m)} 줄`);
+    assert.ok(m.sections[0].rows.some((r) => r.key === "p:p10.2" && r.marker === "spinner" && r.emphasis), `${width}x${height}: 진행 중 할 일이 보여야 함`);
+    assert.deepEqual(m.now.map((r) => r.text), ["도구 실행 중", "bash npm test", "p10.2 할 일 p10.2"]);
+    assert.equal(m.now[0].since, now - 3000);
+    assert.equal(m.right, "할 일 10/14");
+    assert.equal(m.sections.length, height >= 16 ? 2 : 1);                      // 최근 구역은 16줄 이상에서만
+    for (const k of m.keys) assert.ok(w(k) <= width, `${width}: 키 안내 ${k}`);
+    const child = m.sections[0].rows.find((r) => r.key === "p:p10.1")!;
+    assert.equal(child.right, width < M.NARROW ? undefined : "n10");             // 좁으면 커밋 번호를 뺀다
+  }
+  assert.equal(M.flowModel(flow as any, live, ui, 23, 24, now, w).keys.length, 2);
+  // 사용자가 위로 움직인 뒤 10초 동안은 그 위치를 둔다, 그 뒤에는 다시 진행 중 항목으로
+  const held = { sel: "p:p1", open: new Set<string>(), manualAt: now - 2000 };
+  assert.ok(M.flowModel(flow as any, live, held, 23, 11, now, w).sections[0].rows.some((r) => r.key === "p:p1"));
+  assert.ok(M.flowModel(flow as any, live, { ...held, manualAt: now - 20000 }, 23, 11, now, w).sections[0].rows.some((r) => r.key === "p:p10.2"));
+  // live.json 이 오래되면 상태를 모른다고 보이고 도구 줄은 두지 않는다
+  const stale = M.flowModel(flow as any, live, ui, 35, 24, now + M.LIVE_STALE_MS + 1, w);
+  assert.deepEqual(stale.now.map((r) => r.text), ["pi 상태를 알 수 없습니다", "p10.2 할 일 p10.2"]);
+  // 도구가 많으면 마지막 줄을 "외 N개" 로 (지금은 4줄 이하)
+  let many = live;
+  for (const id of ["b", "c", "d"]) many = L.reduceLive(many, { type: "tool_start", id, name: "read", input: { path: id } }, now);
+  assert.deepEqual(M.nowRows(many, plan as any, now).map((r) => r.text), ["도구 실행 중", "bash npm test", "외 3개", "p10.2 할 일 p10.2"]);
+  // 기록이 없으면
+  const empty = M.flowModel(null, null, ui, 23, 11, now, w);
+  assert.deepEqual([empty.now[0].text, empty.sections[0].rows[0].text, empty.right], ["pi 상태를 알 수 없습니다", "작업 기록이 없습니다.", ""]);
+});
+
+test("oxy-monitor 보기 모델: jobs (경과는 exe 가, 좁으면 종류 열을 뺌, 맨 아래 지금)", async () => {
+  const M = await import("../agent/extensions/oxy-monitor/model.ts");
+  const L = await import("../agent/extensions/oxy-monitor/live.ts");
+  const { displayWidth: w } = await import("../installer/tui.mjs");
+  const now = 100000;
+  const job = (id: string, state: string, kind: string, extra: any = {}) => ({ id, kind, state, label: `${id} 일`, createdAt: 1000, startedAt: 2000, ...extra });
+  const state: any = { version: 1, pid: 1, cwd: ".", updatedAt: now, closed: false, slots: {}, control: null,
+    jobs: [job("job-1", "done", "bash", { endedAt: 65000 }), job("job-2", "running", "agent"), job("job-3", "failed", "bash", { endedAt: 9000 })] };
+  const live = L.reduceLive(L.emptyLive(1, now), { type: "agent_start" }, now - 5000);
+  for (const [width, height] of [[23, 11], [35, 24]]) {
+    const m = M.jobsModel(state, live, { sel: null, mode: "list" }, width, height, now, w);
+    assert.ok(M.modelHeight(m) <= height, `${width}x${height}: ${M.modelHeight(m)} 줄`);
+    const rows = m.sections[0].rows;
+    assert.deepEqual(rows.map((r) => r.key), ["job-2", "job-1", "job-3"]);   // 실행 중이 먼저
+    assert.equal(rows[0].marker, "spinner"); assert.equal(rows[0].since, 2000); assert.equal(rows[0].right, undefined);
+    assert.equal(rows[1].right, "1:03"); assert.equal(rows[2].error, true);
+    assert.equal(rows[0].text, width < M.NARROW ? "job-2 일" : "sub  job-2 일");
+    assert.equal(m.right, "실행 중 1 · 완료 2");
+    assert.deepEqual([m.nowAt, m.now[0].text], ["bottom", "응답 생성 중"]);
+    assert.ok(m.keys.join(" ").includes("s 중지"));                           // 선택한(첫) 작업이 실행 중
+  }
+  const confirm = M.jobsModel(state, live, { sel: "job-2", mode: "confirm" }, 35, 24, now, w);
+  assert.ok(confirm.keys.join(" ").includes("job-2 작업을 중지할까요?"));
+  const log = M.jobsModel(state, live, { sel: "job-1", mode: "log" }, 23, 11, now, w, Array.from({ length: 30 }, (_, i) => `line ${i}`));
+  assert.equal(log.title, "job-1 로그"); assert.ok(M.modelHeight(log) <= 11); assert.equal(log.sections[0].rows.at(-1)?.text, "line 29");
+  assert.equal(M.clock(3723000), "1:02:03");
+});

@@ -90,13 +90,14 @@ flow           할 일 2/5        ← 제목 · 진행 (오른쪽 정렬)
   - 상태 문구: `대기 중`(입력을 기다림) · `응답 생성 중` · `도구 실행 중` · `compaction 중`. 대기가 아니면 스피너와 경과(`m:ss`, 오른쪽 정렬).
   - 실행 중인 도구: 한 줄에 하나, `도구 이름 + 요약`. 넘치면 마지막 줄을 `외 2개` 로.
   - 진행 중인 할 일: 첫 번째 `doing` 할 일(없으면 항목). 계획이 없으면 이 줄을 두지 않는다.
-  - `live.json` 이 없거나 5초 넘게 갱신되지 않으면 `pi 상태를 알 수 없습니다` 한 줄.
+  - `live.json` 이 없거나 10초 넘게 갱신되지 않으면 `pi 상태를 알 수 없습니다` 한 줄 (5초마다 갱신되므로 두 번 놓친 경우. 5초로 하면 갱신 직전에 깜박인다).
 - **계획** (남는 높이를 차지, 스크롤)
   - 진행 중인 항목 · 할 일은 강조색과 스피너. 화면에 늘 보이도록 스크롤을 맞춘다 (사용자가 `↑↓` 로 움직인 뒤 10초 동안은 사용자 위치를 둔다).
   - 연결된 커밋은 오른쪽 정렬(`n2 n3`), 폭이 모자라면 뺀다.
   - 계획이 없고 목표만 있으면 목표 한두 줄, 기록이 없으면 `작업 기록이 없습니다.`
+  - 계획 아래에 지금 화면과 같이 `계획 밖 커밋` · `커밋 전 작업`(결정 · 변경 파일 수 · 실패)을 둔다 (`docs/monitor-spec.md` §5 의 기존 정보를 잃지 않는다).
 - **최근** (높이 16줄 이상일 때만, 3~5줄)
-  - `live.json` 의 `events` 를 새 것이 아래로. 실패는 `×` 와 오류색.
+  - `live.json` 의 `events` 를 새 것이 아래로. 실패는 `×` 와 오류색. 사용자 요청은 기호 없이 `요청 <앞 60자>`.
 - 펼치기(`Enter`): 할 일 · 커밋을 고르면 그 아래에 결정 · 변경 파일을 들여 쓴다 (지금과 같다).
 
 ### jobs 화면
@@ -131,10 +132,16 @@ jobs        실행 중 2 · 완료 1
 - `monitor.ts` (Node, 지금 파일): 상태 파일(`state.json` · `flow.json` · `live.json`)을 읽고 보기 모델을 만든다. 형식 해석은 TS 한 곳에만 있다.
 - `oxy-tui.exe --pipe <이름> --mode monitor`: 보기 모델을 받아 그리고, 키를 이벤트로 돌려준다. 스피너 · 경과 시간은 exe 가 시계로 갱신한다 (Node 가 1초마다 보내지 않는다).
 - 통신 규약 (`protocol.rs` 머리말에 더한다)
-  - `{"op":"monitor", kind, title, right, now:[행], sections:[{title, rows:[{key, marker, text, right, indent, emphasis, error, since}]}], keys, selected}` — 보기 전체. 답 없음. 상태가 바뀔 때마다 다시 보낸다.
+  - `{"op":"monitor", kind, title, right, now:[행], nowAt:"top"|"bottom", sections:[{title, rows:[{key, marker, text, right, indent, emphasis, error, since}]}], keys:[줄], selected}` — 보기 전체. 답 없음. 상태가 바뀔 때마다 다시 보낸다.
+  - 줄 수는 Node 가 맞춰 보낸다 (높이 안에서 어느 줄을 보일지 · 좁은 폭에서 뺄 열 · 키 안내 줄 나누기). exe 는 받은 줄을 그대로 그리고, 글 폭에 맞춰 자르기만 한다.
+    줄 배치: 제목 1줄 → (`nowAt: top` 이면) 지금 → 가로줄 → 구역들 (구역 사이 가로줄, 구역 제목은 가로줄 안에) → (`bottom` 이면) 가로줄 → 지금 → 키 안내. 이 규칙의 줄 수는 `model.ts` 의 `modelHeight` 와 같아야 한다.
+  - 화면 크기가 바뀌면 exe 가 `{"event":"resize","width","height"}` 를 보내고 Node 가 새 크기로 다시 보낸다.
   - `marker` 는 `spinner` · `todo` · `done` · `failed` · `blocked` · `stopped` · `dropped` (기호는 exe 가 정한다). `since` 가 있으면 exe 가 경과를 그린다.
   - 이벤트 `{"event":"key","key":"up|down|enter|esc|s|q"}`, `{"event":"select","key":"<행 key>"}` (선택이 바뀔 때).
 - 예전 화면(pi-tui)은 남긴다: `oxy-tui.exe` 가 없거나 모니터 모드를 모르면(`--mode monitor` 에 오류) 지금의 pi-tui 화면으로 그린다 (§7 M5).
+
+- 구현 (2단계, 2026-11-13): `agent/extensions/oxy-monitor/model.ts` (`flowModel` · `jobsModel` · `nowRows` · `planRows` · `recentRows` · `modelHeight`). 색 코드 없이 상태 기호 이름(`marker`)만 담는다.
+  지금의 pi-tui 화면(`view.ts`)은 M5 대로 대체 화면으로 남기고 아직 바꾸지 않았다 (`⏳` · `✗` 는 4단계에서 대체 화면에도 고친다).
 
 ## 5. 확인된 사실
 
