@@ -14,7 +14,7 @@ const WT_GUID = "{6f1d3c2a-8b4e-4c7d-9a2f-0e5b7c3d1a90}";
 /** 설치 대상으로 복사하지 않는 경로 (번들 루트 기준, 소문자, / 구분). PC별 설정·생성물은 기존 것을 유지 */
 const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "agent/oxy.env", "agent/settings.json",
   "agent/models.json", "agent/auth.json", "agent/models-store.json", "agent/sessions", "agent/skills",
-  "agent/usql.yaml", "agent/dbhub.toml", "agent/connections.json", "agent/secrets.json", "agent/mcp.json",
+  "agent/usql.yaml", "agent/dbhub.toml", "agent/connections.json", "agent/secrets.json", "agent/llm.json", "agent/mcp.json",
   "agent/mcp.log", "agent/mcp.log.1", "agent/mcp-auth.json", "agent/jobs", "agent/psmux.conf",
   // 화면 프로그램(oxy-tui)의 빌드 산출물과 캡처 도구의 상태 파일 (개발 PC 에만 있다)
   "installer/oxy-tui/target", "tests/tui-capture/.state"];

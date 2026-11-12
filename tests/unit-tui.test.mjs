@@ -348,3 +348,49 @@ test("터미널 셸: 프로필과 바로가기가 선택한 셸을 하네스 환
     assert.deepEqual(lnk, { target: p.exe, args: p.args });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------- LLM 연결 화면의 공용 로직 (installer/llm-edit.mjs, docs/tui-spec.md §11)
+test("LLM 연결 편집: 주소 정리 · thinking 맞추기 · 연결 합치기(이름 바꾸기, 없는 모델을 가리키던 수준) · 사용량 제한 프리셋", async () => {
+  const E = await import("../installer/llm-edit.mjs");
+  const root = join(import.meta.dirname, "..");
+  assert.equal(E.normalizeBaseUrl("vllm", "http://h:8000/"), "http://h:8000/v1");
+  assert.equal(E.normalizeBaseUrl("openai", "https://api.groq.com/openai/v1/"), "https://api.groq.com/openai/v1");
+  assert.equal(E.normalizeBaseUrl("anthropic", "https://api.anthropic.com/"), "https://api.anthropic.com");   // Anthropic 형식은 /v1 을 붙이지 않는다
+  assert.equal(E.closestThinking(["off", "high"], "medium"), "off");
+  assert.equal(E.closestThinking(["low", "medium", "high"], "off"), "low");
+  assert.equal(E.closestThinking(["off", "low", "high"], "xhigh"), "high");
+  const draft = { id: "site", kind: "vllm", baseUrl: "http://h/v1", maxConcurrent: 2, request: { retries: 0, dropParams: ["top_k"], bogus: 1 },
+    models: [{ id: "qwen3.6-coder-30b", family: "qwen-coder", contextWindow: 131072, maxOutput: 16384 }, { id: "qwen3.8-27b", family: "qwen-thinking", contextWindow: 131072, maxOutput: 16384 }] };
+  // 새 설치: 기본 모델 + 기본 세 수준 모두 기본 모델 (thinking 은 지원하는 수준으로)
+  const a = E.mergeConnection(root, null, draft, { main: { model: "qwen3.8-27b", thinking: "medium" } });
+  assert.deepEqual(a.main, { connection: "site", model: "qwen3.8-27b", thinking: "off" });
+  assert.deepEqual(a.levels.map((l) => `${l.id}=${l.connection}/${l.model}/${l.thinking}`), ["light=site/qwen3.8-27b/off", "normal=site/qwen3.8-27b/off", "deep=site/qwen3.8-27b/off"]);
+  assert.deepEqual(a.connections[0].request, { retries: 0, dropParams: ["top_k"] }, "종류에 있는 요청 설정 항목만 남긴다");
+  assert.equal(a.connections[0].name, "사내 vLLM");
+  // 다시 설정: 이름을 바꾸고 모델 하나를 빼면 기본 모델 · 수준이 새 이름을 따라가고, 빠진 모델을 가리키던 수준은 기본 모델로
+  const b0 = structuredClone(a);
+  b0.main = { connection: "site", model: "qwen3.6-coder-30b", thinking: "off" };
+  b0.levels[2] = { ...b0.levels[2], model: "qwen3.8-27b", thinking: "high" };
+  b0.connections.push({ id: "claude", kind: "anthropic", models: [{ id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384 }] });
+  b0.levels.push({ id: "review", label: "r", use: "u", connection: "claude", model: "claude-haiku-5-5", thinking: "high" });
+  const b = E.mergeConnection(root, b0, { ...draft, id: "vllm2", models: [draft.models[0]] }, { origId: "site", main: { model: "qwen3.6-coder-30b", thinking: "off" } });
+  assert.deepEqual(b.connections.map((c) => c.id), ["vllm2", "claude"]);
+  assert.deepEqual(b.levels.map((l) => `${l.id}=${l.connection}/${l.model}/${l.thinking}`),
+    ["light=vllm2/qwen3.6-coder-30b/off", "normal=vllm2/qwen3.6-coder-30b/off", "deep=vllm2/qwen3.6-coder-30b/off", "review=claude/claude-haiku-5-5/high"]);
+  // Tweak 의 새 연결 추가(main 없음): 기존 기본 모델 · 수준은 그대로
+  const c = E.mergeConnection(root, b, { id: "openai", kind: "openai", baseUrl: "http://g/v1", request: { retries: 4, dropParams: ["x"] }, models: [{ id: "m", family: "generic", contextWindow: 9000, maxOutput: 1000 }] });
+  assert.deepEqual([c.main.connection, c.levels.length, c.connections[2].request], ["vllm2", 4, { retries: 4 }]);
+  // 연결을 지우고 맞추면 그 연결을 가리키던 수준은 기본 모델로
+  const d = E.fixPointers(root, { ...c, connections: c.connections.filter((x) => x.id !== "claude") });
+  assert.equal(d.levels.at(-1).connection, "vllm2");
+  assert.deepEqual(E.endpointPreset(8000), { retries: 4, maxOut: 1000, concurrency: 1 });
+});
+
+test("LLM 연결 종류 표: 화면 문구(label · hint · detail · urlExample · contextNote)가 한 줄(74칸) 안 · 기본 주소가 없으면 주소 예시가 있다", async () => {
+  const { LLM_KINDS } = await import("../scripts/llm-connections.mjs");
+  for (const [id, k] of Object.entries(LLM_KINDS)) {
+    for (const s of [k.label, k.hint, ...k.detail, k.urlExample ?? "", k.contextNote]) assert.ok(displayWidth(s) <= 74, `${id}: ${s}`);
+    assert.ok(k.baseUrl || k.urlExample, `${id}: 기본 주소도 주소 예시도 없음`);
+    assert.ok(k.contextNote, `${id}: contextNote 없음`);
+  }
+});

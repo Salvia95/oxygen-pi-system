@@ -35,6 +35,33 @@ export function unprotect(blob) {
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }`, blob);
 }
 
+/**
+ * 여러 키를 PowerShell 한 번으로 복호화한다 (pi 가 시작할 때 LLM 연결 키를 한꺼번에). → { key: 평문 } (없거나 실패한 키는 빠진다)
+ * 평문은 stdout(파이프)으로만 받는다. 줄마다 base64(UTF-8) 이고, 복호화하지 못한 줄은 빈 줄이다.
+ * ConvertTo-SecureString 은 보안 모듈을 불러오느라 1~2초 걸려서, 같은 암호문(ConvertFrom-SecureString 의 16진수 = DPAPI 결과)을
+ * .NET ProtectedData 로 바로 푼다 (약 0.5초, 2026-11-12 실측).
+ */
+export function getSecrets(agentDir, keys) {
+  const d = load(agentDir);
+  const want = keys.filter((k) => d[k]);
+  if (!want.length) return {};
+  const out = powershell(`${UTF8} $ProgressPreference = 'SilentlyContinue'
+    Add-Type -AssemblyName System.Security
+    foreach ($line in ([Console]::In.ReadToEnd() -split "\`n")) {
+      $t = $line.Trim(); if (-not $t) { continue }
+      try {
+        $bytes = [byte[]]::new($t.Length / 2)
+        for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($t.Substring($i * 2, 2), 16) }
+        $plain = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, 'CurrentUser')
+        [Console]::Out.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([Text.Encoding]::Unicode.GetString($plain))))
+      } catch { [Console]::Out.WriteLine("") }
+    }`, want.map((k) => d[k]).join("\n"));
+  const lines = out.split(/\r?\n/);
+  const res = {};
+  want.forEach((k, i) => { if (lines[i]) res[k] = Buffer.from(lines[i], "base64").toString("utf8"); });
+  return res;
+}
+
 export const hasSecret = (agentDir, key) => Boolean(load(agentDir)[key]);
 export function setSecret(agentDir, key, value) { const d = load(agentDir); d[key] = protect(value); save(agentDir, d); }
 export function getSecret(agentDir, key) { const b = load(agentDir)[key]; return b ? unprotect(b) : undefined; }

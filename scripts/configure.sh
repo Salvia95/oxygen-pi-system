@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 AGENT="${OXY_AGENT_DIR:-$OXY_HOME/agent}"   # 테스트용으로 다른 디렉터리 지정 가능
 if [[ ! -f "$AGENT/oxy.env" ]]; then
   cp "$AGENT/oxy.env.example" "$AGENT/oxy.env"
-  warn "agent/oxy.env 를 예시값으로 생성함 → vLLM 주소/모델명을 수정한 뒤 다시 실행하세요"
+  warn "agent/oxy.env 를 예시값으로 생성함"
 fi
 set -a
 # shellcheck disable=SC1091
@@ -24,6 +24,7 @@ export OXY_SHELL_PATH
 "$OXY_HOME/runtime/node/node.exe" "$(winpath "$OXY_HOME/scripts/render-config.mjs")" "$(winpath "$AGENT")" \
   | while IFS= read -r f; do log "생성: $f"; done
 [[ ${PIPESTATUS[0]} == 0 ]] || die "설정 생성 실패"
+[[ -f "$AGENT/llm.json" ]] || warn "LLM 연결이 없음 → install.cmd 의 LLM 단계나 tweak.cmd 의 LLM 연결에서 등록하세요"
 
 # 설치된 구성요소에 해당하는 skill 만 agent/skills 에 켠다 (원본: agent/skill-library). 사용자가 끈 OXY_SKILLS_OFF 는 뺀다
 skills=$("$OXY_HOME/runtime/node/node.exe" "$(winpath "$OXY_HOME/installer/components.mjs")" sync-skills \

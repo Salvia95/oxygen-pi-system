@@ -24,6 +24,7 @@
 /agent/dbhub.toml
 /agent/connections.json
 /agent/secrets.json
+/agent/llm.json
 /agent/mcp.json
 /agent/mcp.log*
 /agent/mcp-auth.json

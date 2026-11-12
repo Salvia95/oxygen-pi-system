@@ -1,6 +1,7 @@
 ---
 name: scout
 description: read-only search; finds files, symbols, configs and facts and returns a short report
+level: light
 tools: read, grep, find, ls, bash
 ---
 

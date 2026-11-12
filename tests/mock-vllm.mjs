@@ -58,6 +58,13 @@ const SCENARIOS = {
   ],
   "flow-big": [bash("echo step-one"), { ...bash("echo step-two"), usage: 120000 }, { text: "after-compaction" }],
   "flow-half": [{ text: "half-full", usage: 75000 }],
+  // 작업 수준: 본 모델이 level 을 정해 맡긴다 (e2e 에서 deep = 범용 모델 + thinking)
+  "sub-level": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env deep check", level: "deep" } }],
+  // 자식 pi 의 bash 에 부모가 넘긴 LLM 키(OXY_LLM_INHERIT_KEYS)가 남지 않는지
+  "env-keys": [bash("echo inherit=${OXY_LLM_INHERIT_KEYS:-none}"), { text: "checked" }],
+  "sub-keys": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env-keys look", level: "light" } }],
+  // 여러 연결: deep 은 Claude 연결로 (E2E 가 llm.json 에 연결 claude 를 더한 뒤)
+  "sub-claude": [{ tool: "subagent", args: { tasks: [{ agent: "scout", task: "claude-task review", level: "deep" }, { agent: "scout", task: "scenario:env vllm-task", level: "light" }] } }],
   "sub-async": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env async check", wait: false } }, { text: "Delegated; waiting." }],
 };
 
@@ -78,7 +85,8 @@ http.createServer((req, res) => {
         `vllm:num_requests_running{model_name="m"} 1\nvllm:kv_cache_usage_perc{model_name="m"} 0.3\n`);
     }
     if (req.method === "GET" && req.url.endsWith("/models")) {
-      res.writeHead(200, { "content-type": "application/json" });
+      // MOCK_TPM: 분당 토큰 한도 헤더 (OpenAI 호환 서비스 흉내. 설치 TUI · Tweak 의 사용량 제한 맞춤 설정)
+      res.writeHead(200, { "content-type": "application/json", ...(process.env.MOCK_TPM ? { "x-ratelimit-limit-tokens": process.env.MOCK_TPM } : {}) });
       return res.end(JSON.stringify({ object: "list", data: MODELS.map((id) => ({ id, object: "model", max_model_len: 131072 })) }));
     }
     if (req.method !== "POST" || !req.url.endsWith("/chat/completions")) { res.writeHead(404); return res.end(); }

@@ -8,6 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { BACK, UI, c, errorBlock, padDisplay, rail } from "./tui.mjs";
 import { SHELL_NAMES, WT_PROFILE_NAME, createSystem, normShell } from "./system.mjs";
 import { loadConnections } from "./connections.mjs";
+import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
+import { RATE_LIMITED_TPM, closestThinking, endpointPreset, mergeConnection, normalizeBaseUrl } from "./llm-edit.mjs";
+import {
+  ID_RE, LLM_KINDS, MODEL_FAMILIES, VLLM_EXTRA_PARAMS, catalogModels, detectFamily, findConnection, listModels, loadLlm, migrateAgentDir,
+  saveLlm, secretKey, thinkingChoices,
+} from "../scripts/llm-connections.mjs";
 import {
   CATALOG, GROUPS, MULTIPLEXERS, OPTIONAL, browserChoices, checkArchive, findArchives, hasComponent, installOptional, isInstalled, readLock, syncSkills,
 } from "./components.mjs";
@@ -19,7 +25,7 @@ const VERSION = sys.version();
 const ui = new UI();
 ui.version = VERSION;
 ui.setFrame({ right: sys.sandbox ? "[sandbox]" : "" });
-const { parseEnv, mergeEnv, renderConfig, MODEL_FAMILIES, detectFamily } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
+const { parseEnv, mergeEnv, renderConfig } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
 
 const ok = (s) => `${c.green("✓")} ${s}`;
 const warnMark = (s) => `${c.yellow("!")} ${s}`;
@@ -378,191 +384,508 @@ async function applyOptional(state) {
   }
 }
 
-// ------------------------------------------------------------------ 단계: LLM 연결
-function normalizeBaseUrl(u) {
-  let s = u.trim().replace(/\/+$/, "");
-  try { const url = new URL(s); if (url.pathname === "" || url.pathname === "/") s += "/v1"; } catch { /* validate 에서 처리 */ }
-  return s;
-}
-
-async function fetchModels(baseUrl, apiKey) {
-  const r = await fetch(`${baseUrl}/models`, {
-    headers: { Authorization: `Bearer ${apiKey || "EMPTY"}` }, signal: AbortSignal.timeout(6000),
-  });
-  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-  const j = await r.json();
-  const models = (j.data ?? []).map((m) => ({ id: m.id, maxLen: Number(m.max_model_len) || null }));
-  if (models.length === 0) {
-    throw Object.assign(new Error("모델 목록이 비어 있음"), {
-      why: "서버에 등록된 모델이 없습니다", fix: "vLLM의 --served-model-name을 확인하세요. 연결 확인 없이 계속하면 모델 이름을 직접 입력합니다",
-    });
-  }
-  return models;
-}
-
-/** 확장 파라미터마다 확인에 쓸 값 */
-const PROBE_VALUES = { top_k: 20, repetition_penalty: 1.05, min_p: 0, chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "low" };
-
-/** 사용량 제한(분당 토큰)이 이 값 이하인 엔드포인트에는 맞춤 설정을 제안한다 (사내 vLLM 은 보통 헤더가 없다) */
-const RATE_LIMITED_TPM = 30000;
-/** 분당 토큰 한도에 맞춘 설정: 서버가 알려 준 대기 후 재시도 · 응답 상한 · subagent 동시 실행 1 */
-export function endpointPreset(tpm) {
-  return { retries: 4, maxOut: Math.max(512, Math.min(4096, Math.floor(tpm / 8))), concurrency: 1 };
-}
+// ------------------------------------------------------------------ 단계: LLM 연결 (docs/tui-spec.md §11)
+// 상태: state.conn (편집 중인 연결 초안) · state.origId (편집 전 id) · state.key (undefined = 저장된 키 그대로, "" = 삭제, 문자열 = 새 키)
+//       state.keyStored (저장된 키가 있음) · state.fetched ({models, rateLimit} | 직접 입력이면 manual) · state.preset · state.main
+// 화면 플래그: connFixed (종류 · 이름을 묻지 않음, Tweak 편집) · noMain (기본 모델 · thinking 을 묻지 않음, Tweak)
+//              editRequest (요청 설정을 묻는다, Tweak 편집) · saveLast (마지막 화면의 Enter 가 `저장`, Tweak)
+const THINKING_HINT = { off: "추론하지 않음", minimal: "아주 짧게 추론", low: "짧게 추론", medium: "보통으로 추론", high: "깊게 추론", xhigh: "더 깊게 추론", max: "가장 깊게 추론" };
+const kOf = (n) => (n ? `${Math.round(n / 1024)}K` : "");
+const agentOf = (state) => join(state.installDir ?? ROOT, "agent");
+const saveEnter = (state, last) => (state.saveLast && last ? "저장" : undefined);
+/** compaction 여유분 (응답 최대 길이는 이보다 작아야 상태 점검이 통과한다) */
+const RESERVE_TOKENS = (() => {
+  try { return JSON.parse(readFileSync(join(ROOT, "agent", "templates", "settings.json"), "utf8")).compaction?.reserveTokens ?? 16384; } catch { return 16384; }
+})();
+const DEFAULT_MAX_OUTPUT = 16384;
 
 /**
- * 서버(또는 앞단 게이트웨이)가 vLLM 확장 파라미터를 받는지 1토큰 요청으로 하나씩 확인한다.
+ * 화면을 차례로 실행한다. build() 가 지금 상태로 화면 목록을 만든다 (앞 화면의 답에 따라 뒤 화면이 바뀐다).
+ * 화면이 BACK 이면 이전 화면으로 (auto = 진행 화면은 건너뛴다), {goto} 면 그 화면으로. 첫 화면에서 BACK 이면 BACK
+ */
+async function runScreens(build) {
+  let i = 0;
+  for (;;) {
+    const list = build().filter(Boolean);
+    if (i >= list.length) return "next";
+    const r = await list[i].run({ last: i === list.length - 1 });
+    if (r === BACK) {
+      do i--; while (i >= 0 && list[i].auto);
+      if (i < 0) return BACK;
+    } else if (r?.goto) i = Math.max(0, list.findIndex((x) => x.name === r.goto));
+    else i++;
+  }
+}
+
+/** 기존 연결을 편집할 준비 (다시 설정 · Tweak 편집) */
+function editTarget(state, id) {
+  const conn = findConnection(state.llm, id);
+  state.conn = structuredClone(conn);
+  state.origId = conn.id;
+  state.key = undefined;
+  state.keyStored = hasSecret(agentOf(state), secretKey(conn.id));
+  state.fetched = null;
+  state.preset = null;
+  if (state.llm.main?.connection === conn.id) state.main = { ...state.llm.main };
+}
+
+/** 서버 요청에 쓸 키 (새로 입력한 키, 없으면 저장된 키. 화면 · 로그에는 쓰지 않는다) */
+function keyFor(state) {
+  if (state.key !== undefined) return state.key;
+  if (!state.keyStored) return "";
+  if (state.storedKey === undefined) {
+    try { state.storedKey = getSecret(agentOf(state), secretKey(state.origId ?? state.conn.id)) ?? ""; } catch { state.storedKey = ""; }
+  }
+  return state.storedKey;
+}
+
+/** LLM 단계 = 연결 종류 → 연결 이름 → 서버 주소 → API 키 → 모델 목록 → 확장 파라미터 테스트 → 사용량 제한 맞춤 설정 */
+async function stepLlm(state) {
+  return runScreens(() => {
+    const kind = state.conn ? LLM_KINDS[state.conn.kind] : null;
+    const models = state.fetched?.models ?? [];
+    return [
+      !state.connFixed && { name: "kind", run: () => screenKind(state) },
+      !state.connFixed && { name: "id", run: () => screenConnId(state) },
+      { name: "url", run: () => screenUrl(state) },
+      { name: "key", run: () => screenKey(state) },
+      { name: "fetch", auto: true, run: () => screenFetch(state) },
+      kind?.probe.length && models.length ? { name: "probe", run: () => screenProbe(state) } : null,
+      kind?.rateLimitHeader && state.fetched?.rateLimit && state.fetched.rateLimit <= RATE_LIMITED_TPM ? { name: "rate", run: () => screenRate(state) } : null,
+    ];
+  });
+}
+
+async function screenKind(state) {
+  const cur = state.conn?.kind;
+  const rows = Object.entries(LLM_KINDS).map(([id, k], i) => ({
+    label: k.label, value: id, hint: k.hint, detail: k.detail, recommended: i === 0, current: Boolean(cur && hasCurrent(state) && id === cur),
+  }));
+  const k = rows.findIndex((r) => r.value === cur);
+  const v = await ui.select("연결 종류를 선택하세요", rows, {
+    ...(k >= 0 ? { initial: k } : {}),
+    note: state.tweak ? "연결마다 주소, API 키, 모델을 따로 정합니다."
+      : ["설치에서는 연결 하나를 등록합니다.", "다른 연결은 나중에 tweak.cmd의 LLM 연결에서 추가합니다."],
+  });
+  if (v === BACK) return BACK;
+  if (v === cur) return "next";
+  const kind = LLM_KINDS[v];
+  // 종류가 바뀌면 주소 · 모델 · 요청 설정은 새 종류의 기본값으로. 이름은 직접 바꾸지 않았을 때만 새 종류 id 로
+  const id = !state.conn?.id || state.conn.id === cur ? v : state.conn.id;
+  state.conn = { id, kind: v, name: kind.label, baseUrl: kind.baseUrl ?? "", maxConcurrent: kind.maxConcurrent, request: {}, models: [] };
+  state.fetched = null;
+  state.preset = null;
+  return "next";
+}
+
+async function screenConnId(state) {
+  const others = (state.llm?.connections ?? []).filter((x) => x.id !== state.origId);
+  const v = await ui.input("연결 이름", {
+    initial: state.conn.id,
+    note: ["영문 소문자로 시작하고 소문자, 숫자, -, _ 만 사용할 수 있습니다 (31자 이내).", "pi의 /model 목록에는 oxy-<이름>으로 표시됩니다."],
+    validate: (s) => (!ID_RE.test(s) ? "소문자로 시작하고 소문자, 숫자, -, _ 만 사용할 수 있습니다 (31자 이내)"
+      : others.some((x) => x.id === s) ? "이미 사용 중인 이름입니다. 다른 이름을 입력하세요" : null),
+  });
+  if (v === BACK) return BACK;
+  state.conn.id = v;
+  return "next";
+}
+
+async function screenUrl(state) {
+  const kind = LLM_KINDS[state.conn.kind];
+  const v = await ui.input("LLM 서버 주소", {
+    initial: state.conn.baseUrl || kind.baseUrl || "http://",
+    note: kind.baseUrl ? `기본 주소는 ${kind.baseUrl}입니다. 프록시를 거칠 때만 바꾸세요.`
+      : ["OpenAI 호환 API의 주소입니다. /v1이 없으면 자동으로 붙입니다.", `예: ${kind.urlExample}`],
+    validate: (s) => {
+      const msg = "http:// 또는 https://로 시작하는 주소를 입력하세요.";
+      try { const u = new URL(s.trim()); return /^https?:$/.test(u.protocol) && u.hostname ? null : msg; } catch { return msg; }
+    },
+  });
+  if (v === BACK) return BACK;
+  const url = normalizeBaseUrl(state.conn.kind, v);
+  if (url !== state.conn.baseUrl) state.fetched = null;
+  state.conn.baseUrl = url;
+  return "next";
+}
+
+/** API 키: 저장된 키가 있으면 유지 · 새 키 · 삭제 (DB 연결의 비밀번호와 같은 구성), 없으면 바로 입력 */
+async function screenKey(state) {
+  const kind = LLM_KINDS[state.conn.kind];
+  for (;;) {
+    if (state.keyStored) {
+      const action = await ui.select("저장된 API 키를 유지할까요?", [
+        { label: "저장된 키 유지", value: "keep", current: true },
+        { label: "새 키 입력…", value: "set" },
+        { label: "저장된 키 삭제", value: "delete", detail: "이 연결의 저장된 API 키를 삭제합니다. 다음 화면에서 한 번 더 확인합니다." },
+      ], { initial: 0, enter: "선택" });
+      if (action === BACK) return BACK;
+      if (action === "keep") { state.key = undefined; return "next"; }
+      if (action === "delete") {
+        const yes = await ui.confirm("저장된 API 키를 삭제할까요?", {
+          title: "API 키 삭제", yes: "API 키 삭제", no: "삭제 취소", level: "medium",
+          warning: kind.keyRequired ? `${state.conn.id} 연결은 새 키를 입력할 때까지 사용할 수 없습니다.` : `${state.conn.id} 연결은 키 없이 요청합니다.`,
+        });
+        if (!yes) continue;
+        state.key = "";
+        return "next";
+      }
+    }
+    const v = await ui.input("API 키", {
+      mask: true, initial: state.key || "",
+      note: [kind.keyRequired ? "이 서비스에서 발급한 API 키를 입력하세요." : "키 없이 실행한 서버라면 비워 두세요.",
+        "키는 DPAPI로 암호화해 저장하고 화면과 로그에 다시 표시하지 않습니다."],
+      validate: (s) => (kind.keyRequired && !s ? "API 키를 입력하세요. 이 서비스는 키가 있어야 연결됩니다" : null),
+    });
+    if (v === BACK) { if (state.keyStored) continue; return BACK; }
+    state.key = v;
+    return "next";
+  }
+}
+
+async function screenFetch(state) {
+  const conn = state.conn;
+  const kind = LLM_KINDS[conn.kind];
+  ui.screen(`  ${c.bold("LLM 서버에 연결하는 중입니다")}\n  ${c.gray(conn.baseUrl || kind.baseUrl)}\n`);
+  try {
+    let res;
+    await ui.task("모델 목록 가져오기", async () => {
+      res = await listModels(conn, keyFor(state));
+      if (!res.models.length) throw Object.assign(new Error("모델 목록이 비어 있음"), { why: "서버에 등록된 모델이 없습니다", fix: kind.hints.models });
+      return `${res.models.length}개`;
+    });
+    state.fetched = res;
+    state.afterFetch = true;
+    return "next";
+  } catch (e) {
+    const choice = await ui.select("LLM 서버에 연결하지 못했습니다. 어떻게 할까요?", [
+      { label: "주소와 키 다시 입력", value: "retry" },
+      { label: "연결 확인 없이 계속 (모델 이름 직접 입력)", value: "skip", detail: "모델 목록 없이 다음 화면에서 모델 이름을 직접 입력합니다." },
+    ], { back: false, initial: 0, result: true, enter: "선택",
+      note: [c.gray(conn.baseUrl || kind.baseUrl), ...errorBlock("모델 목록을 가져오지 못했습니다", e).map((l) => l.slice(2))] });
+    if (choice === "skip") { state.fetched = { models: [], rateLimit: null, manual: true }; return "next"; }
+    return { goto: "url" };
+  }
+}
+
+/** 확장 파라미터마다 테스트에 쓸 값 */
+const PROBE_VALUES = { top_k: 20, repetition_penalty: 1.05, min_p: 0, chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "low" };
+
+/**
+ * 서버(또는 앞단 게이트웨이)가 확장 파라미터(params)를 받는지 1토큰 요청으로 하나씩 테스트한다.
  * → { results: {param: true|false}, drop: [거부된 것], detail } · 기본 요청부터 실패하면 results 가 null (판단 못 함)
  */
-async function probeParams(baseUrl, apiKey, model) {
+async function probeParams(baseUrl, apiKey, model, params) {
   const call = async (extra) => {
     const r = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST", signal: AbortSignal.timeout(30000),
       headers: { Authorization: `Bearer ${apiKey || "EMPTY"}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], max_tokens: 1, ...extra }),
     });
-    const tpm = Number(r.headers.get("x-ratelimit-limit-tokens")) || null;
-    return { status: r.status, text: r.ok ? "" : (await r.text()).slice(0, 200), tpm };
+    return { status: r.status, text: r.ok ? "" : (await r.text()).slice(0, 200) };
   };
   try {
     const base = await call({});
-    if (base.status >= 300) return { results: null, drop: [], detail: `기본 요청 HTTP ${base.status} ${base.text}`, tpm: base.tpm };
+    if (base.status >= 300) return { results: null, drop: [], detail: `기본 요청 HTTP ${base.status} ${base.text}` };
     const results = {};
     const errors = [];
-    for (const [k, v] of Object.entries(PROBE_VALUES)) {
-      const r = await call({ [k]: v });
+    for (const k of params) {
+      const r = await call({ [k]: PROBE_VALUES[k] });
       results[k] = r.status < 300;
       if (!results[k]) errors.push(r.text);
     }
-    return { results, drop: Object.keys(results).filter((k) => !results[k]), detail: errors[0] ?? "", tpm: base.tpm };
+    return { results, drop: params.filter((k) => !results[k]), detail: errors[0] ?? "" };
   } catch (e) {
     return { results: null, drop: [], detail: e.cause?.code ?? e.message };
   }
 }
 
-async function stepVllm(state) {
+async function screenProbe(state) {
+  const conn = state.conn;
+  const kind = LLM_KINDS[conn.kind];
+  const ids = state.fetched.models.map((m) => m.id);
+  if (!state.afterFetch) ui.screen(`  ${c.bold("확장 파라미터를 테스트하는 중입니다")}\n  ${c.gray(conn.baseUrl)}\n`);
+  state.afterFetch = false;
+  const model = conn.models.find((m) => ids.includes(m.id))?.id ?? ids[0];
+  const p = await ui.task(`확장 파라미터 테스트 (${model})`, async () => probeParams(conn.baseUrl, keyFor(state), model, kind.probe));
+  const lines = [ok(`모델 ${ids.length}개  ${ids.join(", ")}`)];
+  if (p.results) {
+    const yes = Object.keys(p.results).filter((k) => p.results[k]);
+    // 이름을 늘어놓으면 80칸에서 잘린다. 지원하지 않는 것만 이름을 보인다
+    if (yes.length) lines.push(ok(p.drop.length ? `확장 파라미터 ${yes.length}개 지원` : `확장 파라미터 ${yes.length}개 모두 지원`));
+    for (const k of p.drop) lines.push(warnMark(`${k}: 서버에서 지원하지 않아 요청에서 제외합니다`));
+    if (p.detail) lines.push(c.gray(`    ${p.detail}`));
+  } else lines.push(warnMark(`확장 파라미터를 테스트하지 못했습니다 (기존 설정 유지) ${c.gray(p.detail)}`));
+  const later = state.tweak ? "LLM 연결의 편집에서 변경할 수 있습니다." : "나중에 tweak.cmd의 LLM 연결에서 변경할 수 있습니다.";
+  const go = await ui.select("이 결과대로 계속할까요?", [
+    { label: "모델 선택으로 계속", value: "next",
+      detail: p.results && p.drop.length ? [`서버가 지원하지 않는 파라미터 ${p.drop.length}개를 요청에서 제외합니다.`, later]
+        : p.results ? "확장 파라미터를 모두 보냅니다." : "확장 파라미터 설정은 그대로 유지합니다." },
+    { label: "주소와 키 다시 입력", value: "retry" },
+  ], { initial: 0, note: lines.map((l) => "  " + l), result: true, enter: "선택" });
+  if (go === BACK) return BACK;
+  if (go !== "next") return { goto: "url" };
+  // 판단할 수 없으면 이전 값 유지. 테스트하지 않은 파라미터의 기존 설정은 그대로 둔다
+  if (p.results) conn.request = { ...conn.request, dropParams: [...(conn.request?.dropParams ?? []).filter((k) => !kind.probe.includes(k)), ...p.drop] };
+  return "next";
+}
+
+/** 분당 토큰 한도를 알려 주는 연결 → 재시도 · 응답 최대 길이 · 동시 요청 수를 한도에 맞춘다 */
+async function screenRate(state) {
+  const conn = state.conn;
+  const tpm = state.fetched.rateLimit;
+  const preset = endpointPreset(tpm);
+  const v = await ui.select("사용량 제한에 맞춰 설정을 변경할까요?", [
+    { label: "제한에 맞춘 설정 적용", value: "apply", recommended: true,
+      detail: [`재시도 ${preset.retries}회, 응답 최대 ${num(preset.maxOut)} 토큰, 동시 요청 ${preset.concurrency}개로 설정합니다.`,
+        state.tweak ? "LLM 연결의 편집에서 값을 변경할 수 있습니다." : "나중에 tweak.cmd의 LLM 연결에서 값을 변경할 수 있습니다."] },
+    { label: "현재 설정 유지", value: "keep", detail: "변경되는 내용이 없습니다. 제한을 넘으면 요청이 거부됩니다." },
+  ], { initial: state.preset === null && state.rateAnswered ? 1 : 0, enter: "선택",
+    note: `이 연결은 분당 ${num(tpm)} 토큰으로 제한됩니다. 넘으면 요청이 거부됩니다.` });
+  if (v === BACK) return BACK;
+  state.rateAnswered = true;
+  if (v === "apply") {
+    state.preset = preset;
+    conn.request = { ...conn.request, retries: preset.retries };
+    conn.maxConcurrent = preset.concurrency;
+    for (const m of conn.models) m.maxOutput = Math.min(m.maxOutput ?? preset.maxOut, preset.maxOut);
+  } else state.preset = null;
+  return "next";
+}
+
+// ------------------------------------------------------------------ 단계: 모델
+/** 모델 단계 = 사용할 모델(여러 개) → 모델마다 컨텍스트 길이 · 응답 최대 길이 → 모델 계열 → 기본 모델 → thinking (→ 요청 설정, Tweak 편집) */
+async function stepModel(state) {
+  const r = await runScreens(() => {
+    const conn = state.conn;
+    const kind = LLM_KINDS[conn.kind];
+    const picked = conn.models ?? [];
+    syncMain(state);
+    return [
+      { name: "models", run: (o) => screenModels(state, o) },
+      ...picked.flatMap((m) => [
+        { name: `ctx:${m.id}`, run: (o) => screenContext(state, m, o) },
+        { name: `out:${m.id}`, run: (o) => screenMaxOut(state, m, o) },
+      ]),
+      ...(kind.families.length ? picked.map((m) => ({ name: `family:${m.id}`, run: (o) => screenFamily(state, m, o) })) : []),
+      !state.noMain && picked.length > 1 && { name: "main", run: () => screenMain(state) },
+      !state.noMain && picked.length && thinkingChoices(ROOT, conn, state.main.model).length > 1 && { name: "thinking", run: () => screenMainThinking(state) },
+      state.editRequest && kind.request.includes("retries") && { name: "retries", run: (o) => screenRetries(state, o) },
+      state.editRequest && kind.request.includes("dropParams") && { name: "drop", run: (o) => screenDrop(state, o) },
+      state.editRequest && { name: "concurrency", run: (o) => screenConcurrency(state, o) },
+    ];
+  });
+  if (r !== BACK) syncMain(state);
+  return r;
+}
+
+/** 기본 모델이 이 연결의 모델과 그 모델이 지원하는 thinking 을 가리키게 맞춘다 */
+function syncMain(state) {
+  if (state.noMain || !state.conn?.models?.length) return;
+  const conn = state.conn;
+  state.main ??= {};
+  if (!conn.models.some((m) => m.id === state.main.model)) state.main.model = conn.models[0].id;
+  state.main.thinking = closestThinking(thinkingChoices(ROOT, conn, state.main.model), state.main.thinking ?? LLM_KINDS[conn.kind].thinkingDefault);
+}
+
+const serverInfo = (state, id) => state.fetched?.models?.find((m) => m.id === id);
+
+async function screenModels(state, { last }) {
+  const conn = state.conn;
+  const kind = LLM_KINDS[conn.kind];
+  if (!state.fetched || state.fetched.manual || !state.fetched.models.length) return manualModels(state, { last });
+  // pi 내장 카탈로그를 쓰는 종류는 카탈로그에 있는 모델만 선택할 수 있다 (없는 모델도 목록에는 남긴다)
+  const cat = kind.catalog === "families" ? null : new Set(catalogModels(ROOT, kind.catalog).map((m) => m.id));
+  const have = new Set(conn.models.map((m) => m.id));
+  const rows = state.fetched.models.map((m) => {
+    const row = { label: m.id, value: m.id, hint: m.maxInput ? `컨텍스트 ${kOf(m.maxInput)}` : "", checked: have.has(m.id) };
+    if (cat && !cat.has(m.id)) {
+      Object.assign(row, { checked: false, disabled: "사용 불가", why: "pi 내장 모델 목록에 없어 사용할 수 없습니다.",
+        fix: "이 모델을 지원하는 pi가 들어 있는 번들로 업데이트하세요." });
+    }
+    return row;
+  });
+  if (!rows.some((r) => !r.disabled)) {
+    await ui.notice("warn", "이 연결에서 사용할 수 있는 모델이 없습니다", { fix: kind.hints.models });
+    return BACK;
+  }
+  // 처음에는 첫 모델만 선택해 둔다 (다시 설정 · 편집은 등록된 모델)
+  if (!rows.some((r) => r.checked && !r.disabled)) rows.find((r) => !r.disabled).checked = true;
   for (;;) {
-    const url = await ui.input("LLM 서버 주소", {
-      initial: state.baseUrl ?? "http://",
-      note: ["vLLM 같은 OpenAI 호환 서버의 주소입니다. /v1이 없으면 자동으로 붙입니다.", "예: http://vllm.example.internal:8000/v1"],
-      validate: (v) => {
-        const msg = "http:// 또는 https://로 시작하는 주소를 입력하세요.";
-        try { const u = new URL(v.trim()); return /^https?:$/.test(u.protocol) && u.hostname ? null : msg; } catch { return msg; }
-      },
+    const v = await ui.multiselect("이 연결에서 사용할 모델을 선택하세요", rows, {
+      initial: Math.max(0, rows.findIndex((r) => !r.disabled)), enter: saveEnter(state, last),
+      note: [cat ? "pi 내장 모델 목록에 있는 모델만 선택할 수 있습니다." : null, "선택한 모델은 pi의 /model 명령으로 전환해 사용할 수 있습니다."].filter(Boolean),
     });
-    if (url === BACK) return BACK;
-    state.baseUrl = normalizeBaseUrl(url);
-
-    const key = await ui.input("API 키", {
-      initial: state.apiKey && state.apiKey !== "EMPTY" ? state.apiKey : "", mask: true,
-      note: "vLLM을 --api-key 없이 실행했다면 비워 두세요. 키는 agent/oxy.env에만 저장되고 화면과 로그에 다시 표시되지 않습니다.",
-    });
-    if (key === BACK) continue;
-    state.apiKey = key || "EMPTY";
-
-    ui.screen(`  ${c.bold("LLM 서버에 연결하는 중입니다")}\n  ${c.gray(state.baseUrl)}\n`);
-    let models;
-    try {
-      models = await ui.task("모델 목록 가져오기 (/v1/models)", async () => fetchModels(state.baseUrl, state.apiKey));
-    } catch (e) {
-      const choice = await ui.select("LLM 서버에 연결하지 못했습니다. 어떻게 할까요?", [
-        { label: "주소와 키 다시 입력", value: "retry" },
-        { label: "연결 확인 없이 계속 (모델 이름 직접 입력)", value: "skip", detail: "모델 목록 없이 다음 화면에서 모델 이름을 직접 입력합니다." },
-      ], { back: false, initial: 0, result: true, enter: "선택", note: [c.gray(state.baseUrl), ...errorBlock("모델 목록을 가져오지 못했습니다", e).map((l) => l.slice(2))] });
-      if (choice === "skip") { state.models = []; return "next"; }
-      continue;
-    }
-    state.models = models;
-    const probeModel = models.some((m) => m.id === state.coder) ? state.coder : models[0].id;
-    const p = await ui.task(`확장 파라미터 확인 (${probeModel})`, async () => probeParams(state.baseUrl, state.apiKey, probeModel));
-    const lines = [ok(`모델 ${models.length}개  ${models.map((m) => m.id).join(", ")}`)];
-    if (p.results) {
-      const yes = Object.keys(p.results).filter((k) => p.results[k]);
-      // 이름을 늘어놓으면 80칸에서 잘린다. 지원하지 않는 것만 이름을 보인다
-      if (yes.length) lines.push(ok(p.drop.length ? `확장 파라미터 ${yes.length}개 지원` : `확장 파라미터 ${yes.length}개 모두 지원`));
-      for (const k of p.drop) lines.push(warnMark(`${k}: 서버에서 지원하지 않아 요청에서 제외합니다`));
-      if (p.detail) lines.push(c.gray(`    ${p.detail}`));
-    } else lines.push(warnMark(`확장 파라미터를 확인하지 못했습니다 (기존 설정 유지) ${c.gray(p.detail)}`));
-    const go = await ui.select("이 결과대로 계속할까요?", [
-      { label: state.tweak ? "이 결과로 저장" : "모델 선택으로 계속", value: "next",
-        detail: p.results && p.drop.length
-          ? [`서버가 지원하지 않는 파라미터 ${p.drop.length}개를 요청에서 제외합니다.`,
-            state.tweak ? "LLM 연결의 요청 설정에서 변경할 수 있습니다." : "나중에 tweak.cmd의 LLM 연결에서 변경할 수 있습니다."]
-          : p.results ? "확장 파라미터를 모두 보냅니다." : "확장 파라미터 설정은 그대로 유지합니다." },
-      { label: "주소와 키 다시 입력", value: "retry" },
-    ], { initial: 0, note: lines.map((l) => "  " + l), result: true, enter: "선택" });
-    if (go !== "next") continue;
-    // 판단할 수 없으면 이전 값 유지
-    if (p.results) state.dropParams = p.drop;
-    // 사용량 제한이 있는 엔드포인트 (응답 헤더 x-ratelimit-limit-tokens) → 맞춤 설정 제안
-    if (p.tpm && p.tpm <= RATE_LIMITED_TPM) {
-      const preset = endpointPreset(p.tpm);
-      const v = await ui.select("사용량 제한에 맞춰 설정을 변경할까요?", [
-        { label: "제한에 맞춘 설정 적용", value: "apply", recommended: true,
-          detail: [`재시도 ${preset.retries}회, 응답 최대 ${preset.maxOut} 토큰, subagent 동시 실행 ${preset.concurrency}개로 설정합니다.`,
-            state.tweak ? "LLM 연결의 요청 설정에서 값을 변경할 수 있습니다." : "나중에 tweak.cmd의 LLM 연결에서 값을 변경할 수 있습니다."] },
-        { label: "현재 설정 유지", value: "keep", detail: "변경되는 내용이 없습니다. 제한을 넘으면 요청이 거부됩니다." },
-      ], { back: false, initial: 0, enter: "선택", note: `이 엔드포인트는 분당 ${p.tpm.toLocaleString()} 토큰으로 제한됩니다. 넘으면 요청이 거부됩니다.` });
-      if (v === "apply") state.endpoint = preset;
-    }
+    if (v === BACK) return BACK;
+    if (!v.length) { await ui.notice("warn", "모델을 하나 이상 선택하세요"); continue; }
+    rows.forEach((r) => { r.checked = v.includes(r.value); });
+    conn.models = v.map((id) => conn.models.find((m) => m.id === id) ?? { id });
     return "next";
   }
 }
 
-// ------------------------------------------------------------------ 단계: 모델
-async function stepModel(state) {
-  const list = state.models ?? [];
-  if (list.length > 0) {
-    const opts = list.map((m) => ({ label: m.id, value: m.id, hint: m.maxLen ? `${Math.round(m.maxLen / 1024)}K` : "", current: Boolean(state.tweak && m.id === state.coder) }));
-    const k = opts.findIndex((o) => o.value === state.coder);
-    const coder = await ui.select("코딩용 기본 모델을 선택하세요", opts, { initial: Math.max(0, k), note: "pi가 기본으로 사용하는 모델입니다." });
-    if (coder === BACK) return BACK;
-    state.coder = coder;
-    const rest = [...opts.filter((o) => o.value !== coder).map((o) => ({ ...o, current: Boolean(state.tweak && o.value === state.general) })),
-      { label: "사용 안 함", value: "", current: Boolean(state.tweak && !state.general) }];
-    const general = await ui.select("범용 모델을 선택하세요", rest,
-      { initial: Math.max(0, rest.findIndex((o) => o.value === (state.general ?? ""))), note: "선택 사항입니다. /model 명령으로 전환해서 사용하는 보조(thinking) 모델입니다." });
-    if (general === BACK) return stepModel(state);
-    state.general = general;
-  } else {
-    const coder = await ui.input("코딩용 모델 이름", { initial: state.coder ?? "", note: "vLLM --served-model-name 값과 같아야 합니다.", validate: (v) => (v ? null : "값을 입력하세요") });
-    if (coder === BACK) return BACK;
-    state.coder = coder;
-    const general = await ui.input("범용 모델 이름", { initial: state.general ?? "", note: "선택 사항입니다. 없으면 비워 두세요." });
-    if (general === BACK) return stepModel(state);
-    state.general = general === state.coder ? "" : general;
-  }
-  state.defaultModel = state.coder;
-
-  const lens = list.filter((m) => [state.coder, state.general].includes(m.id) && m.maxLen).map((m) => m.maxLen);
-  const detected = lens.length ? Math.min(...lens) : null;
-  const ctx = await ui.input("컨텍스트 길이 (토큰)", {
-    initial: String(detected ?? state.contextWindow ?? 131072),
-    note: detected ? `vLLM이 알려 준 max_model_len은 ${detected}입니다.` : "vLLM --max-model-len 값과 맞추세요.",
-    validate: (v) => (/^\d+$/.test(v) && Number(v) >= 8192 ? null : "8192 이상의 숫자를 입력하세요. vLLM --max-model-len 값과 맞춥니다"),
+/** 모델 목록을 가져오지 못했을 때: 모델 이름을 직접 입력 (쉼표로 여러 개) */
+async function manualModels(state, { last }) {
+  const conn = state.conn;
+  const kind = LLM_KINDS[conn.kind];
+  const cat = kind.catalog === "families" ? null : new Set(catalogModels(ROOT, kind.catalog).map((m) => m.id));
+  const v = await ui.input("모델 이름", {
+    initial: conn.models.map((m) => m.id).join(", "), enter: saveEnter(state, last),
+    note: [`${kind.hints.models}.`, "여러 개면 쉼표로 구분해 입력하세요.", cat ? "pi 내장 모델 목록에 있는 모델만 사용할 수 있습니다." : null].filter(Boolean),
+    validate: (s) => {
+      const ids = s.split(/[\s,]+/).filter(Boolean);
+      if (!ids.length) return "모델 이름을 입력하세요";
+      const bad = cat && ids.find((id) => !cat.has(id));
+      return bad ? `pi 내장 모델 목록에 없는 모델입니다: ${bad}` : null;
+    },
   });
-  if (ctx === BACK) return stepModel(state);
-  state.contextWindow = Number(ctx);
-
-  // 모델 계열: thinking 제어 방식과 권장 샘플링 값이 정해진다 (id 로 추정한 값이 (추천))
-  const roles = [["coder", state.coder], ["general", state.general]].filter(([, id]) => id);
-  for (const [role, id] of roles) {
-    const key = role === "coder" ? "coderFamily" : "generalFamily";
-    const guess = detectFamily(id);
-    const opts = Object.entries(MODEL_FAMILIES).map(([k, f]) => ({
-      label: f.label, value: k, recommended: k === guess, current: Boolean(state.tweak && state[key] === k),
-      detail: k === guess ? `모델 이름(${id})으로 추정한 값입니다.` : "",
-    }));
-    const fam = await ui.select(`${id}의 모델 계열을 선택하세요`, opts, {
-      initial: Math.max(0, opts.findIndex((o) => o.value === (state[key] ?? guess))),
-      // 설정(Tweak)에서는 마지막 화면의 Enter 가 곧 저장이다
-      enter: state.tweak && role === roles.at(-1)[0] ? "저장" : undefined,
-      note: "thinking(추론)을 켜고 끄는 방식과 권장 샘플링 값이 계열마다 다릅니다.",
-    });
-    if (fam === BACK) return stepModel(state);
-    state[key] = fam;
-  }
+  if (v === BACK) return BACK;
+  const ids = [...new Set(v.split(/[\s,]+/).filter(Boolean))];
+  conn.models = ids.map((id) => conn.models.find((m) => m.id === id) ?? { id });
   return "next";
+}
+
+async function screenContext(state, m, { last }) {
+  const kind = LLM_KINDS[state.conn.kind];
+  const s = serverInfo(state, m.id);
+  const v = await ui.input(`${m.id} 컨텍스트 길이`, {
+    initial: String(m.contextWindow ?? s?.maxInput ?? 131072), enter: saveEnter(state, last),
+    note: [s?.maxInput ? `서버가 알려 준 최대 입력 길이는 ${num(s.maxInput)} 토큰입니다.` : null, kind.contextNote].filter(Boolean),
+    validate: (x) => (/^\d+$/.test(x) && Number(x) >= 8192 ? null : "8192 이상의 숫자를 입력하세요 (토큰)"),
+  });
+  if (v === BACK) return BACK;
+  m.contextWindow = Number(v);
+  return "next";
+}
+
+async function screenMaxOut(state, m, { last }) {
+  const s = serverInfo(state, m.id);
+  const initial = m.maxOutput ?? state.preset?.maxOut ?? Math.min(s?.maxOutput ?? DEFAULT_MAX_OUTPUT, DEFAULT_MAX_OUTPUT);
+  const v = await ui.input(`${m.id} 응답 최대 길이`, {
+    initial: String(initial), enter: saveEnter(state, last),
+    note: [s?.maxOutput ? `서버가 알려 준 최대 응답 길이는 ${num(s.maxOutput)} 토큰입니다.` : null,
+      `compaction 여유분(${num(RESERVE_TOKENS)} 토큰)보다 작게 설정하세요.`].filter(Boolean),
+    validate: (x) => {
+      const n = Number(x);
+      if (!/^\d+$/.test(x) || n < 256 || n >= m.contextWindow) return "256 이상이고 컨텍스트 길이보다 작은 숫자를 입력하세요";
+      return s?.maxOutput && n > s.maxOutput ? `서버의 최대 응답 길이(${num(s.maxOutput)})보다 작게 입력하세요` : null;
+    },
+  });
+  if (v === BACK) return BACK;
+  m.maxOutput = Number(v);
+  return "next";
+}
+
+/** 모델 계열: thinking 제어 방식과 권장 샘플링 값이 정해진다 (id 로 추정한 값이 (추천)) */
+async function screenFamily(state, m, { last }) {
+  const kind = LLM_KINDS[state.conn.kind];
+  const detected = detectFamily(m.id);
+  const guess = kind.families.includes(detected) ? detected : kind.families[0];
+  const opts = kind.families.map((k) => ({
+    label: MODEL_FAMILIES[k].label, value: k, recommended: k === guess, current: Boolean(hasCurrent(state) && m.family === k),
+    detail: k === guess ? `모델 이름(${m.id})으로 추정한 값입니다.` : "",
+  }));
+  const fam = await ui.select(`${m.id}의 모델 계열을 선택하세요`, opts, {
+    initial: Math.max(0, opts.findIndex((o) => o.value === (m.family ?? guess))), enter: saveEnter(state, last),
+    note: "thinking(추론)을 켜고 끄는 방식과 권장 샘플링 값이 계열마다 다릅니다.",
+  });
+  if (fam === BACK) return BACK;
+  m.family = fam;
+  return "next";
+}
+
+async function screenMain(state) {
+  const opts = state.conn.models.map((m) => ({ label: m.id, value: m.id, hint: kOf(m.contextWindow),
+    current: Boolean(hasCurrent(state) && state.orig?.mainModel === m.id) }));
+  const v = await ui.select("기본 모델을 선택하세요", opts, {
+    initial: Math.max(0, opts.findIndex((o) => o.value === state.main.model)),
+    note: ["pi가 대화에 사용하는 모델입니다. 작업 수준 세 개도 이 모델로 만듭니다.", "작업 수준은 나중에 tweak.cmd의 LLM 연결에서 바꿀 수 있습니다."],
+  });
+  if (v === BACK) return BACK;
+  state.main.model = v;
+  return "next";
+}
+
+/** thinking 수준 선택 (그 모델이 지원하는 수준만). current: (현재) 표시 · focus: 처음 포커스 (없으면 지금 값, 그것도 없으면 표의 thinkingDefault) */
+async function pickThinking(header, conn, modelId, { current, focus, enter, note } = {}) {
+  const kind = LLM_KINDS[conn.kind];
+  const choices = thinkingChoices(ROOT, conn, modelId);
+  const rows = choices.map((lv) => ({ label: lv, value: lv, hint: THINKING_HINT[lv] ?? "",
+    recommended: lv === kind.thinkingDefault, current: lv === current }));
+  const k = rows.findIndex((r) => r.value === (focus ?? current ?? kind.thinkingDefault));
+  return ui.select(header, rows, { ...(k >= 0 ? { initial: k } : {}), enter,
+    note: note ?? "thinking 수준이 높을수록 응답이 느려지고 토큰을 더 사용합니다." });
+}
+
+async function screenMainThinking(state) {
+  const v = await pickThinking("기본 모델의 thinking 수준을 선택하세요", state.conn, state.main.model,
+    { current: hasCurrent(state) && state.orig?.mainModel === state.main.model ? state.orig.mainThinking : undefined, focus: state.main.thinking });
+  if (v === BACK) return BACK;
+  state.main.thinking = v;
+  return "next";
+}
+
+// 요청 설정 (Tweak 의 연결 편집)
+async function screenRetries(state, { last }) {
+  const v = await ui.input("재시도 횟수", {
+    initial: String(state.conn.request?.retries ?? 0), enter: saveEnter(state, last),
+    note: "HTTP 429 등에서 서버가 알려 준 시간만큼 기다렸다가 다시 보냅니다. 사내 vLLM은 보통 0입니다.",
+    validate: (s) => (/^\d{1,2}$/.test(s) ? null : "0~99 사이의 숫자를 입력하세요"),
+  });
+  if (v === BACK) return BACK;
+  state.conn.request = { ...state.conn.request, retries: Number(v) };
+  return "next";
+}
+
+async function screenDrop(state, { last }) {
+  const drop = state.conn.request?.dropParams ?? [];
+  const v = await ui.multiselect("요청에서 제외할 파라미터를 선택하세요", VLLM_EXTRA_PARAMS.map((p) => ({ label: p, value: p, checked: drop.includes(p),
+    hint: p === "chat_template_kwargs" ? "Qwen thinking 켜고 끄기" : p === "reasoning_effort" ? "gpt-oss 추론 강도" : "vLLM 샘플링 확장" })),
+  { enter: saveEnter(state, last), note: ["서버가 거부하는 파라미터만 선택하세요.", "처음 값은 연결할 때 테스트한 결과입니다."] });
+  if (v === BACK) return BACK;
+  state.conn.request = { ...state.conn.request, dropParams: v };
+  return "next";
+}
+
+async function screenConcurrency(state, { last }) {
+  const kind = LLM_KINDS[state.conn.kind];
+  const v = await ui.input("동시 요청 수", {
+    initial: String(state.conn.maxConcurrent ?? kind.maxConcurrent), enter: saveEnter(state, last),
+    note: ["이 연결에 동시에 보내는 subagent 요청 수입니다.", "vLLM의 KV 캐시나 서비스의 사용량 한도를 고려해 정합니다."],
+    validate: (s) => (/^\d{1,2}$/.test(s) && Number(s) >= 1 ? null : "1~99 사이의 숫자를 입력하세요"),
+  });
+  if (v === BACK) return BACK;
+  state.conn.maxConcurrent = Number(v);
+  return "next";
+}
+
+/** 지금 입력한 연결을 합친 llm.json (확인 단계 요약 · 저장) */
+function draftLlm(state, base = loadLlm(agentOf(state)) ?? state.llm) {
+  return mergeConnection(ROOT, base, state.conn, { origId: state.origId ?? state.conn.id, main: state.noMain ? null : state.main });
+}
+
+/**
+ * 연결 하나를 agent 폴더에 저장한다: 키(secrets.json) → llm.json. 이름을 바꿨으면 저장된 키도 새 이름으로 옮긴다.
+ * 키는 화면 · 로그 · llm.json 에 쓰지 않는다
+ */
+function saveConnection(agent, state) {
+  const conn = state.conn;
+  const old = state.origId ?? conn.id;
+  const oldKey = secretKey(old);
+  const newKey = secretKey(conn.id);
+  if (state.key) setSecret(agent, newKey, state.key);
+  else if (state.key === "") { if (hasSecret(agent, newKey)) deleteSecret(agent, newKey); }
+  else if (old !== conn.id && hasSecret(agent, oldKey)) setSecret(agent, newKey, getSecret(agent, oldKey));
+  if (old !== conn.id && hasSecret(agent, oldKey)) deleteSecret(agent, oldKey);
+  const llm = draftLlm(state, loadLlm(agent) ?? state.llm);
+  saveLlm(agent, llm);
+  Object.assign(state, { llm, origId: conn.id, key: undefined, keyStored: hasSecret(agent, newKey), storedKey: undefined });
+}
+
+/** 예전 설치의 oxy.env 에 남은 vLLM 값을 llm.json · secrets.json 으로 옮긴다 (configure 와 같은 일. 처음 한 번만) */
+function migrateInstalled(agent) {
+  const f = join(agent, "oxy.env");
+  if (existsSync(f)) migrateAgentDir(agent, parseEnv(readFileSync(f, "utf8")), { setSecret, deleteSecret });
 }
 
 // ------------------------------------------------------------------ 단계: GitLab 연결
@@ -681,10 +1004,29 @@ const muxName = (id) => (!id || id === "none" ? "사용 안 함" : MULTIPLEXERS.
 const terminalText = (state) => `${SHELL_NAMES[normShell(state.terminalShell)]} · 멀티플렉서 ${muxName(state.mux)}`;
 
 // ------------------------------------------------------------------ 단계: 확인
+/** 확인 단계 요약의 LLM 행: LLM 연결 · 모델 · 작업 수준 (+ 사용량 제한에 맞춘 요청 설정) → { llm, model, levels, request } */
+function llmSummary(state) {
+  if (!state.conn?.models?.length) return null;
+  const conn = state.conn;
+  const kind = LLM_KINDS[conn.kind];
+  const llm = draftLlm(state);
+  const key = state.key ? true : state.key === "" ? false : Boolean(state.keyStored);
+  const main = conn.models.find((m) => m.id === llm.main?.model) ?? conn.models[0];
+  const more = conn.models.length > 1 ? ` 외 ${conn.models.length - 1}개` : "";
+  const onMain = llm.levels.filter((l) => l.connection === llm.main.connection && l.model === llm.main.model).length;
+  const n = llm.levels.length;
+  return {
+    llm: `${kind.label} · ${conn.id} · ${key ? "API 키 저장됨" : "API 키 없음"}`,
+    model: `${main.id}${more} · ${kOf(main.contextWindow)} · thinking ${llm.main.thinking ?? "off"}`,
+    levels: onMain === n ? (n === 3 ? "세 수준 모두 기본 모델" : `작업 수준 ${n}개 모두 기본 모델`) : `작업 수준 ${n}개 중 ${onMain}개 기본 모델`,
+    request: state.preset ? `재시도 ${conn.request?.retries ?? 0}회 · 동시 요청 ${conn.maxConcurrent}개` : null,
+  };
+}
+
 function summary(state) {
   const o = state.orig;
   const changed = (k, v) => (o && o[k] !== undefined && JSON.stringify(o[k]) !== JSON.stringify(v) ? " " + c.gray("(변경됨)") : "");
-  const family = (id, f) => `${id} · ${f ?? detectFamily(id)}`;
+  const llm = llmSummary(state);
   const required = new Set(readLock(ROOT).filter((e) => e.required).map((e) => e.name));
   const comps = state.components ? `기본 도구 ${required.size}개 + 선택 ${state.components.filter((n) => !required.has(n)).length}개` : "";
   const sqlcl = state.sqlcl ? { keep: "SQLcl 유지", bundle: "SQLcl 번들에서 설치", skip: c.gray("SQLcl 설치 안 함"), install: `SQLcl 설치 (${state.sqlcl.archive ?? ""})` }[state.sqlcl.action] : "";
@@ -693,11 +1035,10 @@ function summary(state) {
   // 이름–값 쌍으로 돌려준다 (값의 줄바꿈은 화면 폭을 아는 쪽이 한다)
   return [
     ["설치 폴더", `${state.installDir}${where}`],
-    ["LLM 서버", `${state.baseUrl} · API 키 ${state.apiKey === "EMPTY" ? "없음" : "입력됨"}${changed("baseUrl", state.baseUrl)}`],
-    ["코딩 모델", family(state.coder, state.coderFamily) + changed("coder", state.coder)],
-    ["범용 모델", (state.general ? family(state.general, state.generalFamily) : c.gray("사용 안 함")) + changed("general", state.general ?? "")],
-    state.endpoint ? ["요청 설정", `재시도 ${state.endpoint.retries}회 · 응답 최대 ${state.endpoint.maxOut ?? "모델 기본"} 토큰`] : null,
-    ["컨텍스트 길이", `${num(state.contextWindow)} 토큰${changed("contextWindow", state.contextWindow)}`],
+    llm ? ["LLM 연결", llm.llm + changed("llm", llm.llm)] : null,
+    llm ? ["모델", llm.model + changed("model", llm.model)] : null,
+    llm?.request ? ["요청 설정", llm.request] : null,
+    llm ? ["작업 수준", llm.levels + changed("levels", llm.levels)] : null,
     ["GitLab", (state.gitlabHost || c.gray("사용 안 함")) + changed("gitlabHost", state.gitlabHost ?? "")],
     comps || sqlcl ? ["구성요소", [comps, sqlcl].filter(Boolean).join(" · ")] : null,
     state.browser ? ["브라우저", `${state.browser.label ?? state.browser.id}${state.browser.archive ? c.gray(" " + state.browser.archive) : ""}${changed("browserId", state.browser.id)}`] : null,
@@ -717,22 +1058,17 @@ async function stepReview(state) {
 }
 
 // ------------------------------------------------------------------ 실행
+/**
+ * 설정 파일 쓰기: (예전 vLLM 값 옮기기) → LLM 연결(state.conn 이 있을 때만, llm.json · secrets.json) → oxy.env → agent/*.json 생성
+ * LLM 연결 값은 oxy.env 에 쓰지 않는다 (docs/tui-spec.md §11 저장 위치)
+ */
 function writeSiteConfig(installDir, state) {
   const agent = join(installDir, "agent");
   const envFile = join(agent, "oxy.env");
+  migrateInstalled(agent);
+  if (state.conn) saveConnection(agent, state);
   const base = existsSync(envFile) ? readFileSync(envFile, "utf8") : readFileSync(join(agent, "oxy.env.example"), "utf8");
   const updates = {
-    OXY_VLLM_BASE_URL: state.baseUrl, OXY_VLLM_API_KEY: state.apiKey,
-    OXY_MODEL_CODER: state.coder, OXY_MODEL_GENERAL: state.general ?? "", OXY_DEFAULT_MODEL: state.defaultModel,
-    OXY_CONTEXT_WINDOW: String(state.contextWindow),
-    ...(state.dropParams ? { OXY_VLLM_DROP_PARAMS: state.dropParams.join(",") } : {}),
-    ...(state.coderFamily ? { OXY_MODEL_CODER_FAMILY: state.coderFamily } : {}),
-    ...(state.generalFamily && state.general ? { OXY_MODEL_GENERAL_FAMILY: state.generalFamily } : {}),
-    ...(state.endpoint ? {
-      OXY_PROVIDER_RETRIES: String(state.endpoint.retries ?? 0),
-      OXY_MAX_OUTPUT_TOKENS: state.endpoint.maxOut ? String(state.endpoint.maxOut) : "",
-      ...(state.endpoint.concurrency ? { OXY_LLM_MAX_CONCURRENT: String(state.endpoint.concurrency) } : {}),
-    } : {}),
     ...(state.gitlabHost ? { GITLAB_HOST: state.gitlabHost } : {}),
     // 번들 안의 브라우저(chrome-for-testing, chromium)는 env.sh 가 OXY_HOME 기준으로 경로를 계산한다
     ...(state.browser ? { OXY_BROWSER: state.browser.id, OXY_BROWSER_PATH: (state.browser.path ?? "").replace(/\\/g, "/") } : {}),
@@ -799,7 +1135,7 @@ async function finishWithVerify(state, lead = "설치를 마쳤습니다.") {
 }
 
 async function install(state) {
-  if (!(await runSteps([stepCheck, stepLocation, stepComponents, stepVllm, stepModel, stepGitlab, stepIntegrate, stepReview], state, [STEP_SHORT, STEP_LONG]))) {
+  if (!(await runSteps([stepCheck, stepLocation, stepComponents, stepLlm, stepModel, stepGitlab, stepIntegrate, stepReview], state, [STEP_SHORT, STEP_LONG]))) {
     ui.print("\n  설치를 취소했습니다. 변경된 내용은 없습니다.");
     return 1;
   }
@@ -851,20 +1187,15 @@ async function done(state, passed) {
 }
 
 // ------------------------------------------------------------------ 설치 후 관리 메뉴
+/** 설치된 폴더의 설정 → 상태. LLM 연결은 agent/llm.json (예전 설치는 oxy.env 의 vLLM 값을 먼저 옮긴다) */
 function stateFromInstall(reg) {
-  const envFile = join(reg.installDir, "agent", "oxy.env");
+  const agent = join(reg.installDir, "agent");
+  migrateInstalled(agent);
+  const envFile = join(agent, "oxy.env");
   const env = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
   return {
     installDir: reg.installDir, copy: reg.copied, gitBash: reg.gitBash && existsSync(reg.gitBash) ? reg.gitBash : sys.findGitBash(),
-    baseUrl: env.OXY_VLLM_BASE_URL, apiKey: env.OXY_VLLM_API_KEY, coder: env.OXY_MODEL_CODER,
-    general: env.OXY_MODEL_GENERAL ?? "", defaultModel: env.OXY_DEFAULT_MODEL,
-    contextWindow: Number(env.OXY_CONTEXT_WINDOW) || 131072, gitlabHost: env.GITLAB_HOST,
-    ...(env.OXY_VLLM_DROP_PARAMS != null ? { dropParams: env.OXY_VLLM_DROP_PARAMS.split(/[\s,]+/).filter(Boolean) } : {}),
-    ...(env.OXY_MODEL_CODER_FAMILY ? { coderFamily: env.OXY_MODEL_CODER_FAMILY } : {}),
-    ...(env.OXY_MODEL_GENERAL_FAMILY ? { generalFamily: env.OXY_MODEL_GENERAL_FAMILY } : {}),
-    ...(env.OXY_PROVIDER_RETRIES || env.OXY_MAX_OUTPUT_TOKENS ? { endpoint: {
-      retries: Number(env.OXY_PROVIDER_RETRIES) || 0, maxOut: Number(env.OXY_MAX_OUTPUT_TOKENS) || null,
-      concurrency: Number(env.OXY_LLM_MAX_CONCURRENT) || null } } : {}),
+    gitlabHost: env.GITLAB_HOST, llm: loadLlm(agent),
     integrations: reg.integrations ?? [],
     ...(env.OXY_BROWSER ? { browser: { id: env.OXY_BROWSER, path: env.OXY_BROWSER_PATH ?? "" } } : {}),
     // 키가 없는 예전 설치는 지금 동작(Git Bash, 멀티플렉서 사용 안 함)과 같다
@@ -874,9 +1205,13 @@ function stateFromInstall(reg) {
 
 async function reconfigure(reg, { saveRegistry = true } = {}) {
   const state = { ...stateFromInstall(reg), doneTitle: "설정을 적용했습니다" };
-  state.orig = { baseUrl: state.baseUrl, coder: state.coder, general: state.general ?? "", contextWindow: state.contextWindow,
+  // 설치에서 등록하는 연결은 하나다. 다시 설정은 기본 모델의 연결을 편집한다 (다른 연결은 그대로 둔다)
+  const target = state.llm?.main?.connection ?? state.llm?.connections[0]?.id;
+  if (target && findConnection(state.llm, target)) editTarget(state, target);
+  const llm = llmSummary(state);
+  state.orig = { llm: llm?.llm, model: llm?.model, levels: llm?.levels, mainModel: state.main?.model, mainThinking: state.main?.thinking,
     gitlabHost: state.gitlabHost ?? "", browserId: state.browser?.id, integrations: [...(state.integrations ?? [])], terminal: terminalText(state) };
-  const ok2 = await runSteps([stepOptional, stepVllm, stepModel, stepGitlab, stepIntegrate, stepReview], state,
+  const ok2 = await runSteps([stepOptional, stepLlm, stepModel, stepGitlab, stepIntegrate, stepReview], state,
     [RECONF_SHORT, RECONF_LONG, "다시 설정"], { backExits: true });
   if (!ok2) return 1;
   state.stage = (finished) => setStage(RECONF_SHORT, RECONF_LONG, "다시 설정", finished ? "설정 적용 완료" : "설정 적용 중", finished);
@@ -909,6 +1244,7 @@ async function uninstall(reg) {
     stats = sys.dirStats(reg.installDir);
   }
   const conns = loadConnections(agent).length;
+  const llmConns = loadLlm(agent)?.connections.length ?? 0;
   const secrets = existsSync(join(agent, "secrets.json"));
   const registered = [reg.path && "PATH", reg.terminalProfile && "Windows Terminal 프로필", reg.shortcut && "바탕화면 바로가기"].filter(Boolean);
   // 위험 확인 (원격 모드에서는 팝업). 1 = 제거 · 2 = 취소, 처음 포커스는 취소
@@ -918,7 +1254,8 @@ async function uninstall(reg) {
     summary: [
       reg.copied ? ["삭제", reg.installDir] : ["유지", `${reg.installDir} (번들 폴더를 그대로 사용 중이라 삭제하지 않습니다)`],
       reg.copied ? ["", `${num(stats.files)}개 파일 · ${bytesText(stats.bytes)}`] : null,
-      reg.copied && (conns || secrets) ? ["함께 삭제", `DB 연결 ${conns}개${secrets ? "와 저장된 비밀번호" : ""} (백업하지 않음)`] : null,
+      reg.copied && (conns || llmConns || secrets) ? ["함께 삭제", `${[conns && `DB 연결 ${conns}개`, llmConns && `LLM 연결 ${llmConns}개`].filter(Boolean).join(", ")}${
+        secrets ? `${conns || llmConns ? "와 " : ""}저장된 비밀번호, API 키` : ""} (백업하지 않음)`] : null,
       ["등록 해제", registered.join(", ") || "없음"],
       ["설정 백업", backup],
     ].filter(Boolean),
@@ -1019,7 +1356,7 @@ async function manage(reg) {
       // 중간 위험(덮어쓰기). 방금 메뉴에서 선택했고 설정이 유지되며 이전 번들로 되돌릴 수 있어 초기 포커스는 '업데이트 시작' (§7.8)
       const go = await ui.confirm(`이 번들(v${VERSION})로 설치 폴더를 업데이트할까요?`, {
         yes: "업데이트 시작", no: "업데이트 취소", level: "medium", danger: false, initial: true,
-        summary: [["설치 폴더", state.installDir], ["교체", "프로그램 파일"], ["유지", "oxy.env, 모델 설정, DB 연결, 비밀번호, 스킬 설정, 세션"],
+        summary: [["설치 폴더", state.installDir], ["교체", "프로그램 파일"], ["유지", "oxy.env, LLM 연결, DB 연결, 비밀번호와 API 키, 스킬 설정, 세션"],
           ["버전", `v${reg.version ?? "?"}에서 v${VERSION}으로`]],
         detail: { yes: "이전 버전으로 돌아가려면 이전 번들의 install.cmd로 업데이트하세요.",
           no: "변경 없이 설치 관리 메뉴로 돌아갑니다." },
@@ -1069,8 +1406,8 @@ async function main() {
 // Tweak TUI(installer/tweak.mjs) 가 import 해서 쓸 수 있도록, 직접 실행할 때만 main 을 돈다
 export {
   ui, sys, ROOT, VERSION, setFrame, finishWithVerify, reconfigure, stateFromInstall, writeSiteConfig, INTEGRATIONS, INTEGRATION_NAMES,
-  stepSqlcl, stepBrowser, stepVllm, stepModel, stepGitlab, stepIntegrate, stepRegister, stepShell, stepMux, muxName,
-  applyOptional, applyIntegrations, fetchModels,
+  stepSqlcl, stepBrowser, stepLlm, stepModel, stepGitlab, stepIntegrate, stepRegister, stepShell, stepMux, muxName,
+  applyOptional, applyIntegrations, editTarget, migrateInstalled, pickThinking, kOf, THINKING_HINT,
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

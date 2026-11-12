@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # [폐쇄망 PC 자가진단] 네트워크 없이 하네스 구성요소를 모두 점검한다. FAIL 이 있으면 종료코드 1.
 #   bash scripts/verify.sh            # 전체 점검
-#   bash scripts/verify.sh --no-llm   # vLLM 연결 점검 생략
+#   bash scripts/verify.sh --no-llm   # LLM 서버 연결 점검 생략
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck disable=SC1091
 source "$OXY_HOME/env.sh"
@@ -137,61 +137,34 @@ for f in settings.json models.json; do
     pass "agent/$f"
   else fail "agent/$f 없음 또는 JSON 오류 → just configure"; fi
 done
-# compaction 여유분 ≥ 모델 응답 최대치 (작으면 compaction 전에 한도를 넘어 실패 후 복구 경로로 감)
-if [[ -f "$OXY_HOME/agent/settings.json" && -f "$OXY_HOME/agent/models.json" ]]; then
-  ctxchk=$("$OXY_NODE" -e '
-    const fs = require("fs"); const [s, m] = process.argv.slice(1).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
-    const reserve = s.compaction?.reserveTokens ?? 16384;
-    const maxOut = Math.max(0, ...Object.values(m.providers ?? {}).flatMap((p) => (p.models ?? []).map((x) => x.maxTokens ?? 0)));
-    console.log(`${reserve} ${maxOut} ${s.compaction?.enabled === false ? "off" : "on"}`);' \
-    "$(winpath "$OXY_HOME/agent/settings.json")" "$(winpath "$OXY_HOME/agent/models.json")" 2>/dev/null)
-  read -r reserve maxout cmp <<< "$ctxchk"
-  if [[ "$cmp" == off ]]; then wrn "compaction 꺼짐 — 작업 도중 컨텍스트가 차면 요청이 실패합니다"
-  elif [[ -n "$reserve" ]] && (( reserve > maxout )); then pass "compaction 여유분 ${reserve} > 응답 최대 ${maxout} 토큰"
-  else wrn "compaction 여유분 ${reserve:-?} ≤ 응답 최대 ${maxout:-?} 토큰 → settings.json compaction.reserveTokens 를 늘리세요"; fi
-  [[ -f "$OXY_HOME/agent/extensions/oxy-flow/index.ts" ]] && enabled_flow=${OXY_FLOW:-on} && \
-    pass "작업 기록 oxy-flow: ${enabled_flow} (compaction ${OXY_FLOW_COMPACT:-file} · 세션 넘기기 ${OXY_FLOW_ROLLOVER:-on} ${OXY_FLOW_ROLLOVER_PCT:-50}%)"
-fi
+# LLM 연결 (agent/llm.json · 키는 secrets.json DPAPI): 설정 · 작업 수준 · compaction 여유분 · 키. 출력은 "<결과>\t<메시지>"
+llm_lines() { "$OXY_NODE" "$(winpath "$OXY_HOME/scripts/llm-check.mjs")" "$(winpath "$OXY_HOME")" "$(winpath "$OXY_HOME/agent")" "$1" 2>&1 | tr -d '\r'; }
+llm_show() { # 한 줄 표시. MAIN 줄은 기본 모델을 기억한다
+  case "$1" in
+    PASS) pass "$2" ;; WARN) wrn "$2" ;; FAIL) fail "$2" ;; SECTION) section "$2" ;;
+    MAIN) main_provider="$2"; main_model="$3" ;;
+    *) [[ -n "$1" ]] && wrn "llm-check: $1 $2" ;;
+  esac
+}
+main_provider="" main_model=""
+while IFS=$'\t' read -r lv a b; do llm_show "$lv" "$a" "$b"; done < <(llm_lines --local)
+[[ -f "$OXY_HOME/agent/extensions/oxy-flow/index.ts" ]] && enabled_flow=${OXY_FLOW:-on} && \
+  pass "작업 기록 oxy-flow: ${enabled_flow} (compaction ${OXY_FLOW_COMPACT:-file} · 세션 넘기기 ${OXY_FLOW_ROLLOVER:-on} ${OXY_FLOW_ROLLOVER_PCT:-50}%)"
 [[ "${PI_OFFLINE:-}" == 1 && "${PI_SKIP_VERSION_CHECK:-}" == 1 && "${PI_TELEMETRY:-}" == 0 ]] \
   && pass "PI_OFFLINE / PI_SKIP_VERSION_CHECK / PI_TELEMETRY=0" || fail "pi 오프라인 환경변수 미설정"
-if [[ -f "$OXY_HOME/agent/models.json" && -f "$OXY_PI_CLI" ]]; then
-  if out=$("$OXY_NODE" "$OXY_PI_CLI" --offline --list-models oxy-vllm 2>&1) && grep -q "${OXY_DEFAULT_MODEL:-@@}" <<< "$out"; then
-    pass "pi 가 모델을 인식: ${OXY_DEFAULT_MODEL}"
-  else fail "pi --list-models 에서 ${OXY_DEFAULT_MODEL:-?} 미확인: $(head -n3 <<< "$out" | tr '\n' ' ')"; fi
+# pi 가 기본 모델을 인식하는지 (oxy-llm extension 이 llm.json 의 연결을 provider oxy-<연결 id> 로 등록한다)
+if [[ -n "$main_provider" && -f "$OXY_PI_CLI" ]]; then
+  if out=$("$OXY_NODE" "$OXY_PI_CLI" --offline --list-models "$main_model" 2>&1) \
+     && awk -v p="$main_provider" -v m="$main_model" '$1 == p && $2 == m { f = 1 } END { exit !f }' <<< "$out"; then
+    pass "pi가 기본 모델을 인식: ${main_provider}/${main_model}"
+  else fail "pi --list-models 에서 ${main_provider}/${main_model} 미확인: $(head -n3 <<< "$out" | tr '\n' ' ')"; fi
 fi
 
+# 연결마다 서버 점검 (모델 목록 · tool call · vLLM 샘플링 파라미터)
 if [[ $CHECK_LLM == 1 ]]; then
-  section "7. 사내 vLLM (${OXY_VLLM_BASE_URL:-미설정})"
-  if [[ -z "${OXY_VLLM_BASE_URL:-}" ]]; then fail "OXY_VLLM_BASE_URL 미설정 (agent/oxy.env)"
-  elif resp=$(curl -fsS -m 5 -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" "$OXY_VLLM_BASE_URL/models" 2>&1); then
-    # jq.exe 는 CRLF 로 출력하므로 \r 제거 (안 하면 모델명 비교가 항상 실패)
-    ids=$(jq -r '.data[].id' <<< "$resp" 2>/dev/null | tr -d '\r' | tr '\n' ' ')
-    pass "/models 응답: $ids"
-    for m in "${OXY_MODEL_CODER:-}" "${OXY_MODEL_GENERAL:-}"; do
-      [[ -z "$m" ]] && continue
-      [[ " $ids " == *" $m "* ]] && pass "served-model-name 일치: $m" || wrn "vLLM 에 $m 없음 (oxy.env 모델명 확인)"
-    done
-    if [[ " $ids " == *" ${OXY_DEFAULT_MODEL:-} "* ]]; then
-      body=$(jq -nc --arg m "$OXY_DEFAULT_MODEL" '{model:$m,max_tokens:64,tool_choice:"auto",
-        messages:[{role:"user",content:"Call the ping tool."}],
-        tools:[{type:"function",function:{name:"ping",description:"health check",parameters:{type:"object",properties:{}}}}]}')
-      if r=$(curl -fsS -m 60 -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" -H 'Content-Type: application/json' \
-            -d "$body" "$OXY_VLLM_BASE_URL/chat/completions" 2>&1) \
-         && [[ "$(jq -r '.choices[0].message.tool_calls[0].function.name // empty' <<< "$r")" == ping ]]; then
-        pass "tool calling 정상 (vLLM --enable-auto-tool-choice / --tool-call-parser 설정 확인됨)"
-      else wrn "tool call 이 구조화되어 오지 않음 → vLLM 의 --enable-auto-tool-choice, --tool-call-parser 확인"; fi
-      # pi 가 실제로 붙여 보내는 samplingParams (models.json) 를 서버가 받는지 — 게이트웨이가 확장 파라미터를 거부하면 첫 요청부터 400
-      sp=$(jq -c --arg m "$OXY_DEFAULT_MODEL" '[.providers[].models[] | select(.id==$m) | .samplingParams // {}][0] // {}' "$OXY_HOME/agent/models.json" 2>/dev/null | tr -d '\r')
-      body=$(jq -nc --arg m "$OXY_DEFAULT_MODEL" --argjson sp "${sp:-{\}}" '{model:$m,max_tokens:1,messages:[{role:"user",content:"hi"}]} + $sp')
-      out_f=$(mktemp)  # 설치 폴더에는 .cache 가 없다
-      code=$(curl -sS -m 60 -o "$out_f" -w '%{http_code}' -H "Authorization: Bearer ${OXY_VLLM_API_KEY:-EMPTY}" \
-        -H 'Content-Type: application/json' -d "$body" "$OXY_VLLM_BASE_URL/chat/completions" 2>/dev/null || true)
-      if [[ "$code" == 2* ]]; then pass "샘플링 파라미터 수락: ${sp}"
-      else fail "서버가 샘플링 파라미터를 거부 (HTTP $code): $(head -c 200 "$out_f" 2>/dev/null) → tweak.cmd 의 'vLLM 주소 · API 키' 를 다시 저장하면 자동으로 판정해 뺍니다 (또는 agent/oxy.env 의 OXY_VLLM_DROP_PARAMS 에 거부된 이름을 적고 just configure)"; fi
-      rm -f "$out_f"
-    fi
-  else wrn "vLLM 접속 불가: $resp"; fi
+  while IFS=$'\t' read -r lv a b; do llm_show "$lv" "$a" "$b"; done < <(llm_lines --net)
 fi
+
 
 printf '\n\033[1m결과: PASS %d / WARN %d / FAIL %d\033[0m\n' "$P" "$W" "$F"
 (( F == 0 ))

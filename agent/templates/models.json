@@ -1,35 +1,4 @@
 {
   "$schema": "https://pi.dev/schemas/models.schema.json",
-  "providers": {
-    "oxy-vllm": {
-      "name": "사내 vLLM",
-      "baseUrl": "@@OXY_VLLM_BASE_URL@@",
-      "api": "openai-completions",
-      "apiKey": "$OXY_VLLM_API_KEY",
-      "authHeader": true,
-      "compat": {
-        "supportsStore": false,
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false,
-        "supportsUsageInStreaming": true,
-        "maxTokensField": "max_tokens"
-      },
-      "models": [
-        {
-          "id": "@@OXY_MODEL_CODER@@",
-          "input": ["text"],
-          "contextWindow": @@OXY_CONTEXT_WINDOW@@,
-          "maxTokens": 16384,
-          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
-        },
-        {
-          "id": "@@OXY_MODEL_GENERAL@@",
-          "input": ["text"],
-          "contextWindow": @@OXY_CONTEXT_WINDOW@@,
-          "maxTokens": 32768,
-          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
-        }
-      ]
-    }
-  }
+  "providers": {}
 }

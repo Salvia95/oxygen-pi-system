@@ -22,6 +22,8 @@ OXY_DEFAULT_MODEL=qwen3.6-coder-30b
 OXY_CONTEXT_WINDOW=131072
 ENV
 OXY_AGENT_DIR="$TMP/agent" bash "$OXY_HOME/scripts/configure.sh" >/dev/null
+# configure 가 oxy.env 의 vLLM 값을 llm.json(연결 vllm) · secrets.json(DPAPI)으로 옮겼다. 작업 수준 deep 만 범용 모델 + thinking 으로 바꿔 둔다
+jq '(.levels[] | select(.id=="deep")) |= (.model="qwen3.8-27b" | .thinking="high")' "$TMP/agent/llm.json" > "$TMP/llm.json" && mv "$TMP/llm.json" "$TMP/agent/llm.json"
 export PI_CODING_AGENT_DIR="$(winpath "$TMP/agent")" OXY_VLLM_API_KEY=mock-key
 export OXY_FLOW=off   # oxy-flow 는 아래 전용 구역에서만 켠다
 
@@ -113,6 +115,16 @@ chk "background 도 bash-guard 검사 (npm install 차단)" '[[ "$out" == *"oxy-
 
 run sub-sync
 chk "subagent: 별도 컨텍스트 실행 후 결과 반환"     '[[ "$out" == *"(scout: scenario:env check the environment) done"* && "$out" == *"hello-from-Msys"* ]]'
+: > "$REQLOG"
+out=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$OXY_PI_CLI" --no-session -p --model qwen3.8-27b --thinking low "scenario:sub-sync" < /dev/null 2>&1) || true
+child() { jq -r 'select((.body.messages | map(select(.role=="user"))[0].content | tostring) | test("Task:")) | "\(.body.model) \(.body.chat_template_kwargs.enable_thinking)"' "$REQLOG" | sort -u | tr '\n' ' '; }
+cm=$(child)
+chk "subagent: 수준을 정하지 않으면 agent 의 기본 수준(scout=light) 모델 ($cm)" '[[ "$cm" == "qwen3.6-coder-30b null " ]]'
+: > "$REQLOG"
+out=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$OXY_PI_CLI" --no-session -p "scenario:sub-level" < /dev/null 2>&1) || true
+cl=$(child)
+chk "subagent: level=deep → 그 수준의 모델 · thinking ($cl)" '[[ "$cl" == "qwen3.8-27b true " && "$out" == *"(scout: scenario:env deep check) done"* ]]'
+chk "LLM 연결: 키는 DPAPI 로 저장되고 oxy.env 에는 남지 않음" '[[ -f "$TMP/agent/secrets.json" && $(jq -r "has(\"llm/vllm\")" "$TMP/agent/secrets.json") == true && -z "$(grep -E "^OXY_VLLM_API_KEY=" "$TMP/agent/oxy.env")" ]]'
 chk "subagent: 자식에는 지정한 도구만 (재귀 방지)"   '[[ $(jq -r "select(.body.messages | map(select(.role==\"user\"))[0].content | tostring | contains(\"Task:\")) | [.body.tools[].function.name] | sort | join(\",\")" "$REQ" | sort -u) == "bash,find,grep,ls,read" ]]'
 
 run sub-async
@@ -120,10 +132,33 @@ chk "subagent wait=false: 완료 후 결과 알림"        '[[ "$out" == *"(scou
 
 # 동시 실행 제한: 자식 요청을 300ms 씩 늦춘 상태에서 요청이 들어온 순서로 판별
 order() { jq -r '.body.messages | map(select(.role=="user"))[0].content | if type=="string" then . else map(.text // "") | join("") end | select(startswith("Task:")) | capture("env (?<x>[ABC])").x' "$REQ" | tr -d '\n'; }
-export OXY_LLM_MAX_CONCURRENT=1; run sub-par; o1=$(order)
+# 동시 실행 수는 연결마다 (llm.json 의 maxConcurrent)
+conc() { jq --argjson n "$1" '(.connections[] | select(.id=="vllm")).maxConcurrent = $n' "$TMP/agent/llm.json" > "$TMP/llm.json" && mv "$TMP/llm.json" "$TMP/agent/llm.json"; }
+conc 1; run sub-par; o1=$(order)
 chk "동시 실행 제한 1: 자식이 하나씩 순서대로 ($o1)"    '[[ "$o1" =~ ^(AA|BB|CC)(AA|BB|CC)(AA|BB|CC)$ ]]'
-export OXY_LLM_MAX_CONCURRENT=3; run sub-par; o3=$(order); unset OXY_LLM_MAX_CONCURRENT
+conc 3; run sub-par; o3=$(order); conc 2
 chk "동시 실행 제한 3: 자식 3개가 함께 시작 ($o3)"      '[[ ${#o3} -eq 6 && $(printf %s "${o3:0:3}" | fold -w1 | sort -u | wc -l) -eq 3 ]]'
+
+# ---- LLM 연결 여러 개 · 작업 수준 (docs/tui-spec.md §11) ----
+# 자식 pi 의 bash 에 부모가 넘긴 키가 남지 않는다 (oxy-llm 이 받자마자 process.env 에서 지운다)
+run sub-keys
+kt=$(jq -r '[.body.messages[] | select(.role=="tool") | .content | tostring] | join(" ")' "$REQ" | grep -o 'inherit=[^ "\\]*' | sort -u | tr '\n' ' ')
+chk "LLM 키: 자식 pi 의 bash 환경에 남지 않음 ($kt)" '[[ "$out" == *"(scout: scenario:env-keys look) done"* && "$kt" == "inherit=none " ]]'
+# 두 번째 연결 claude (Anthropic 형식 mock) 를 더하고 deep 수준을 그쪽으로. 키는 DPAPI 로 저장
+APORT=$((PORT + 1)); ALOG="$TMP/anthropic.jsonl"; : > "$ALOG"
+MOCK_ANTHROPIC_KEY='sk-ant-$e2e!' "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-anthropic.mjs")" "$APORT" "$(winpath "$ALOG")" >/dev/null & AMOCK_PID=$!
+trap 'kill "${MOCK_PID:-}" "${AMOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
+"$OXY_NODE" --input-type=module -e "const s = await import(process.argv[1]); s.setSecret(process.argv[2], 'llm/claude', 'sk-ant-\$e2e!');" \
+  "$(winpath "$OXY_HOME/installer/secrets.mjs" | sed 's#^#file:///#')" "$(winpath "$TMP/agent")"
+jq --arg u "http://127.0.0.1:$APORT" '.connections += [{id: "claude", kind: "anthropic", name: "Claude", baseUrl: $u, maxConcurrent: 2,
+  request: {retries: 0}, models: [{id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384}]}]
+  | (.levels[] | select(.id=="deep")) |= (.connection="claude" | .model="claude-haiku-5-5" | .thinking="high")' "$TMP/agent/llm.json" > "$TMP/llm.json" && mv "$TMP/llm.json" "$TMP/agent/llm.json"
+run sub-claude
+ar=$(jq -c '{keyMatches, model, thinking, effort, max_tokens, firstUser}' "$ALOG" | head -1)
+chk "여러 연결: 본 대화는 vLLM 기본 모델 그대로"      '[[ $(first .body.model) == qwen3.6-coder-30b ]]'
+chk "여러 연결: deep 수준만 Claude 연결로 ($ar)"     '[[ $(wc -l < "$ALOG") -eq 1 && "$ar" == *"\"model\":\"claude-haiku-5-5\""* && "$ar" == *"claude-task review"* ]]'
+chk "여러 연결: 부모가 넘긴 DPAPI 키로 인증 · effort high · 128K/16K 덮어쓰기" '[[ "$ar" == *"\"keyMatches\":true"* && "$ar" == *"\"thinking\":\"adaptive\",\"effort\":\"high\",\"max_tokens\":16384"* ]]'
+chk "여러 연결: light 수준은 vLLM 에서 실행"          '[[ "$out" == *"MOCK-ANTHROPIC Task: claude-task review"* && "$out" == *"(scout: scenario:env vllm-task) done"* && "$out" == *"hello-from-Msys"* ]]'
 
 # 대화형 경로 (RPC 모드: 작업 패널·상태줄, 완료 시 새 턴, /jobs 로그 보기)
 rpc=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-jobs.mjs")" "$OXY_PI_CLI" "$(winpath "$TMP/work")" 2>&1 | tail -1) || true

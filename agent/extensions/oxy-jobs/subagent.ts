@@ -4,10 +4,41 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Job, JobManager } from "./manager.ts";
+import type { Job, JobManager, Semaphore } from "./manager.ts";
 import { parseVllmMetrics } from "./manager.ts";
 
-export interface AgentDef { name: string; description: string; tools: string[]; prompt: string }
+/**
+ * agent/agents/*.md 하나. provider · model · thinking 은 선택: frontmatter 에 적으면 그 값, 없으면 부모 pi 의 현재 값을 물려받는다
+ *   (model 만 적으면 부모와 같은 provider 의 그 모델)
+ */
+export interface AgentDef {
+  name: string; description: string; tools: string[]; prompt: string;
+  level?: string;                                   // 기본 작업 수준 (agent/llm.json 의 levels id)
+  provider?: string; model?: string; thinking?: string;
+}
+
+/** 작업 수준에서 정해진 대상 (scripts/llm-connections.mjs 의 resolveLevel) */
+export interface LevelTarget { level: string; connection: string; provider: string; id: string; thinking: string }
+
+/** 부모 pi 가 지금 쓰는 모델 · thinking 수준 (자식이 그대로 따른다) */
+export interface ParentModel { provider?: string; id?: string; thinking?: string }
+
+/**
+ * 자식 pi 의 인자. 모델은 --provider · --model 로 나눠 넘긴다 (id 에 / 가 들어간 모델: qwen/qwen3.8-27b).
+ * 모델을 넘기지 않으면 자식은 settings.json 의 기본 모델을 써서, 사용자가 대화 중에 바꾼 모델과 달라진다.
+ */
+export function childArgs(cli: string, agent: AgentDef, task: string, parent: ParentModel, promptFile?: string): string[] {
+  const args = [cli, "--mode", "json", "-p", "--no-session"];
+  const provider = agent.provider || parent.provider;
+  const id = agent.model || (agent.provider && agent.provider !== parent.provider ? undefined : parent.id);
+  if (id) { if (provider) args.push("--provider", provider); args.push("--model", id); }
+  const thinking = agent.thinking || parent.thinking;
+  if (thinking) args.push("--thinking", thinking);
+  if (agent.tools.length) args.push("--tools", agent.tools.join(","));
+  if (promptFile) args.push("--append-system-prompt", promptFile);
+  args.push(`Task: ${task}`);
+  return args;
+}
 
 /** agent/agents/*.md (frontmatter: name, description, tools) */
 export function loadAgents(agentDir: string): AgentDef[] {
@@ -27,15 +58,17 @@ export function loadAgents(agentDir: string): AgentDef[] {
     out.push({
       name: meta.name, description: meta.description ?? "",
       tools: (meta.tools ?? "").split(",").map((s) => s.trim()).filter(Boolean), prompt: m[2].trim(),
+      ...(meta.provider ? { provider: meta.provider } : {}), ...(meta.model ? { model: meta.model } : {}),
+      ...(meta.thinking ? { thinking: meta.thinking } : {}), ...(meta.level ? { level: meta.level } : {}),
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** vLLM 이 이미 밀려 있으면(대기 요청 존재) 잠시 기다린다. OXY_VLLM_METRICS=on 일 때만, 실패하면 그냥 진행 */
-async function waitForVllm(log: (s: string) => void, signal?: AbortSignal) {
+async function waitForVllm(baseUrl: string | undefined, log: (s: string) => void, signal?: AbortSignal) {
   if (!/^(on|1|true)$/i.test(process.env.OXY_VLLM_METRICS ?? "")) return;
-  const base = (process.env.OXY_VLLM_BASE_URL ?? "").replace(/\/v1\/?$/, "");
+  const base = (baseUrl ?? "").replace(/\/v1\/?$/, "");
   if (!base) return;
   const deadline = Date.now() + Number(process.env.OXY_VLLM_METRICS_MAX_WAIT_MS ?? 120000);
   for (let first = true; Date.now() < deadline && !signal?.aborted; first = false) {
@@ -54,17 +87,33 @@ async function waitForVllm(log: (s: string) => void, signal?: AbortSignal) {
 const textOf = (msg: any): string =>
   (Array.isArray(msg?.content) ? msg.content : []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("");
 
-/** subagent 하나 실행. manager 의 agentSlots 로 동시 실행 수를 제한한다 */
-export async function runSubagent(
-  mgr: JobManager, job: Job, agent: AgentDef, task: string, cwd: string,
-  opts: { signal?: AbortSignal; onProgress?: (line: string) => void },
-): Promise<void> {
+export interface RunOptions {
+  signal?: AbortSignal;
+  onProgress?: (line: string) => void;
+  parent?: ParentModel;      // 부모 pi 의 지금 모델 · thinking
+  target?: LevelTarget | null; // 작업 수준에서 정해진 대상 (있으면 agent 정의의 provider/model/thinking 보다 우선)
+  slots?: Semaphore;         // 동시 실행 제한 (연결마다). 없으면 mgr.agentSlots
+  metricsBaseUrl?: string;   // 혼잡 감지할 vLLM 주소 (vLLM 연결일 때만)
+  childEnv?: Record<string, string>; // 자식에게만 넘기는 환경변수 (LLM 키 · oxy-llm 이 받자마자 지운다)
+}
+
+/** 자식 pi 의 인자: 작업 수준 대상이 있으면 그것, 없으면 agent 정의 → 부모 */
+export function argsFor(cli: string, agent: AgentDef, task: string, opts: Pick<RunOptions, "parent" | "target">, promptFile?: string): string[] {
+  if (opts.target) {
+    const plain = { ...agent, provider: undefined, model: undefined, thinking: undefined };
+    return childArgs(cli, plain, task, { provider: opts.target.provider, id: opts.target.id, thinking: opts.target.thinking }, promptFile);
+  }
+  return childArgs(cli, agent, task, opts.parent ?? {}, promptFile);
+}
+
+/** subagent 하나 실행. 연결마다의 슬롯(opts.slots)으로 동시 실행 수를 제한한다 */
+export async function runSubagent(mgr: JobManager, job: Job, agent: AgentDef, task: string, cwd: string, opts: RunOptions): Promise<void> {
   const w = mgr.writer(job);
-  const release = await mgr.agentSlots.acquire();
+  const release = await (opts.slots ?? mgr.agentSlots).acquire();
   let tmp: string | undefined;
   try {
     if (job.state === "stopped") return;
-    await waitForVllm(w.line, opts.signal);
+    await waitForVllm(opts.metricsBaseUrl, w.line, opts.signal);
     if (job.state === "stopped") return;
     job.state = "running";
     job.startedAt = Date.now();
@@ -72,19 +121,20 @@ export async function runSubagent(
     w.line(`[task] ${task}`);
     mgr.changed();
 
-    const args = [process.argv[1], "--mode", "json", "-p", "--no-session"];
-    if (agent.tools.length) args.push("--tools", agent.tools.join(","));
+    let promptFile: string | undefined;
     if (agent.prompt) {
       tmp = mkdtempSync(join(tmpdir(), "oxy-agent-"));
-      writeFileSync(join(tmp, "prompt.md"), agent.prompt);
-      args.push("--append-system-prompt", join(tmp, "prompt.md"));
+      promptFile = join(tmp, "prompt.md");
+      writeFileSync(promptFile, agent.prompt);
     }
-    args.push(`Task: ${task}`);
+    const args = argsFor(process.argv[1], agent, task, opts, promptFile);
+    const flag = (f: string) => { const i = args.indexOf(f); return i > 0 ? args[i + 1] : ""; };
+    w.line(`[model] ${opts.target ? `level=${opts.target.level} ` : ""}${[flag("--provider"), flag("--model")].filter(Boolean).join("/") || "(settings 기본값)"} thinking=${flag("--thinking") || "(기본값)"}`);
 
     const depth = Number(process.env.OXY_SUBAGENT_DEPTH ?? 0) + 1;
     const proc = spawn(process.execPath, args, {
       cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, OXY_SUBAGENT_DEPTH: String(depth) },
+      env: { ...process.env, ...opts.childEnv, OXY_SUBAGENT_DEPTH: String(depth) },
     });
     job.proc = proc;
     job.usage = { turns: 0, input: 0, output: 0 };

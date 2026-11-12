@@ -1,6 +1,7 @@
 ---
 name: worker
 description: implements a well-defined change in the files named by the task and verifies it
+level: normal
 tools: read, bash, edit, write, grep, find, ls
 ---
 

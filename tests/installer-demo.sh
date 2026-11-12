@@ -9,7 +9,7 @@ SB="$(mktemp -d)"; trap 'kill "${MOCK_PID:-}" 2>/dev/null || true; rm -rf "$SB"'
 "$NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$PORT" "$(winpath "$SB/req.jsonl")" >/dev/null & MOCK_PID=$!
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && break; sleep 0.1; done
 
-log "mock vLLM 주소: http://127.0.0.1:$PORT   (vLLM 단계에서 입력, API 키는 아무 값)"
+log "mock vLLM 주소: http://127.0.0.1:$PORT   (LLM 연결 단계에서 사내 vLLM 을 선택한 뒤 이 주소를 입력, API 키는 아무 값)"
 log "sandbox: $(winpath "$SB")   (종료 시 삭제)"
 read -r -p "Enter 를 누르면 설치 TUI 를 시작합니다..." _
 # Git Bash 기본 창(mintty)과 Windows Terminal 모두 그대로 실행한다 (화면은 bin/oxy-tui.exe 가 그린다. 없으면 줄 입력 모드)

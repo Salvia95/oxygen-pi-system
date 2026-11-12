@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: read-only review of a change or file for bugs, risks and missing tests
+level: deep
 tools: read, grep, find, ls, bash
 ---
 

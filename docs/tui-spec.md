@@ -222,3 +222,121 @@ cmd · PowerShell 프로필에는 아이콘을 지정하지 않는다 (Windows T
   `oxy_mux_ready`(실행할 수 있는지), `oxy_mux_inside`(세션 안인지), `oxy_mux_exec <세션 이름> <Windows 경로> <명령>`. `OXY_MUX` 값은 `^[a-z0-9-]+$` 일 때만 어댑터 경로로 쓴다.
 - 멀티플렉서를 더할 때: `tools.lock` 행 + `CATALOG` 행 + `MULTIPLEXERS` 한 행 + 어댑터 파일 하나. 단위 테스트가 표의 모든 id 에 어댑터와 구성요소가 있는지 확인한다.
 - 어떤 멀티플렉서를 선택해도 pi 의 bash 도구와 `terminal-session-control` 스킬은 하네스의 psmux(`-L oxy`, pane 셸 Git Bash)를 쓴다.
+
+## 11. LLM 연결과 작업 수준
+
+LLM 연결은 여러 개를 함께 등록해 쓴다 (사내 vLLM 여러 대, 외부망 개발·테스트용 OpenAI 호환 서비스, Anthropic Claude).
+연결마다 등록한 모델을 **기본 모델**(대화하는 pi)과 **작업 수준**(subagent 에게 맡기는 일의 수준)에 배정한다.
+본 모델은 일을 맡길 때 agent 와 작업 수준을 함께 정하고, 작업 수준이 연결 · 모델 · thinking(effort)을 정한다.
+작업에 맞는 모델과 추론 강도를 일마다 정해 맡기는 것이 oxy-jobs 가 pi 기본 subagent 와 다른 점이다.
+
+### 저장 위치
+
+| 파일 | 내용 |
+| --- | --- |
+| `agent/llm.json` (새로, git · 번들 제외) | 연결 목록, 기본 모델, 작업 수준. 비밀값은 없다 |
+| `agent/secrets.json` | API 키. DB 비밀번호와 같은 DPAPI(CurrentUser) 암호문, 키 이름 `llm/<연결 id>` |
+| `agent/oxy.env` | LLM 연결 값은 두지 않는다. 기존 `OXY_VLLM_*` · `OXY_MODEL_*` · `OXY_CONTEXT_WINDOW` · `OXY_VLLM_DROP_PARAMS` · `OXY_PROVIDER_RETRIES` · `OXY_MAX_OUTPUT_TOKENS` 는 처음 한 번 `llm.json` 연결 `vllm` 으로 옮기고(키는 `secrets.json` 으로) oxy.env 에서 지운다 |
+
+`llm.json` 형식 (version 1):
+
+```jsonc
+{
+  "version": 1,
+  "connections": [{
+    "id": "site", "kind": "vllm", "name": "사내 vLLM",
+    "baseUrl": "http://vllm.example.internal:8000/v1",   // 표에 기본 주소가 있는 종류는 생략 가능
+    "maxConcurrent": 2,                                  // 이 연결에 동시에 보내는 subagent 수 (vLLM KV 캐시 · API 사용량 한도)
+    "request": { "retries": 0, "dropParams": ["repetition_penalty"] },   // 종류에 있는 항목만
+    "models": [{ "id": "qwen3.6-coder-30b", "family": "qwen-coder", "contextWindow": 131072, "maxOutput": 16384 }]
+  }],
+  "main": { "connection": "site", "model": "qwen3.6-coder-30b", "thinking": "off" },
+  "levels": [
+    { "id": "light",  "label": "가벼운 작업", "use": "file search, reading, short reports",   "connection": "site", "model": "qwen3.6-coder-30b", "thinking": "off" },
+    { "id": "normal", "label": "보통 작업",   "use": "defined code changes, test runs",       "connection": "site", "model": "qwen3.6-coder-30b", "thinking": "off" },
+    { "id": "deep",   "label": "깊은 작업",   "use": "reviews, design decisions, hard bugs",   "connection": "site", "model": "qwen3.8-27b",       "thinking": "high" }
+  ]
+}
+```
+
+- 연결 id 는 DB 연결과 같은 규칙(`^[a-z][a-z0-9_-]{0,30}$`)이고, pi 의 provider id 는 `oxy-<연결 id>` 다.
+- 작업 수준의 `use` 는 본 모델이 수준을 정할 때 읽는 설명이다 (subagent 도구 설명에 들어간다). 수준은 더하거나 지울 수 있다. 기본 세 개는 설치할 때 모두 기본 모델로 만든다.
+- thinking 값은 그 모델이 지원하는 수준 안에서만 고를 수 있다 (vLLM 계열 프리셋, pi 내장 정보). 지원하지 않는 값이 남아 있으면 pi 가 가장 가까운 수준으로 낮춘다.
+
+### 연결 종류 정의
+
+`scripts/llm-connections.mjs` 의 `LLM_KINDS` 표. 설치 TUI · Tweak · pi extension · 상태 점검이 같은 표를 쓴다.
+화면 문구 · 기본값 · 추천값은 표에 두고, 화면 코드와 extension 에는 종류 이름으로 나누는 분기를 두지 않는다.
+
+| 필드 | 뜻 | vllm | openai | anthropic |
+| --- | --- | --- | --- | --- |
+| `label` · `hint` · `detail` | 화면 | `사내 vLLM` | `OpenAI 호환 서비스` (`외부망 테스트용`) | `Anthropic Claude` (`외부망 테스트용`) |
+| `api` | 요청 형식 | `openai-completions` | `openai-completions` | `anthropic-messages` |
+| `catalog` | 모델 정보 출처 | 계열 프리셋 | 계열 프리셋 (`generic` · `gpt-oss`) | pi 내장 카탈로그 (`vendor/pi/.../providers/data/anthropic.json`) |
+| `baseUrl` | 기본 주소 (없으면 입력 필수) | 없음 | 없음 | `https://api.anthropic.com` |
+| `listModels` | 모델 목록과 최대 길이를 가져오는 방법 | `GET <주소>/models` | 같음 | `GET <주소>/v1/models` (`x-api-key`) |
+| `probe` | 연결할 때 테스트하는 확장 파라미터 | `top_k` 등 4개 | 없음 | 없음 |
+| `request` | 요청 설정 항목 | 재시도 · 제외 파라미터 | 재시도 | 재시도 |
+| `rateLimitHeader` | 분당 토큰 한도 응답 헤더 (있으면 맞춤 설정 제안) | 없음 | `x-ratelimit-limit-tokens` | `anthropic-ratelimit-input-tokens-limit` |
+| `thinkingDefault` | thinking 선택 화면의 (추천) | `off` | `off` | `low` |
+| `maxConcurrent` | 동시 요청 수 기본값 | 2 | 1 | 2 |
+
+종류를 더할 때: 표 한 행, 모델 목록 · 점검 형식이 다르면 함수 하나. 단위 테스트가 모든 행의 필드와 함수를 확인한다.
+
+### pi 에 적용하는 방법 (extension `oxy-llm`, 새로)
+
+- extension 의 비동기 초기화에서 `llm.json` 을 읽고, 키를 **한 번만** 복호화해 연결마다 `pi.registerProvider("oxy-<id>", …)` 로 등록한다.
+  - 키는 pi 프로세스의 메모리에만 있다. 환경변수 · `models.json` · 명령줄에 남지 않으므로 bash 도구로 실행한 명령이 키를 읽을 수 없다.
+  - `models.json` 의 `!command` 는 요청할 때마다 실행되고 캐시되지 않으므로(pi 문서) 쓰지 않는다 (요청마다 PowerShell 복호화 약 0.5초).
+  - 키의 `$` 와 앞의 `!` 는 pi 의 치환 규칙대로 `$$` · `$!` 로 바꿔 넘긴다.
+  - 실측 (2026-11-12, pi 1.5.0): `oxy-claude` 로 등록한 Claude 모델이 `--list-models` 에 131.1K · 16.4K 로 보이고, 요청에 키가 그대로 실리며 `thinking: adaptive` · `effort: low` · `max_tokens: 16384` 로 나갔다.
+- 모델 정보: 계열 프리셋(지금 `render-config.mjs` 의 `MODEL_FAMILIES`)이나 pi 내장 카탈로그를 바탕으로, 연결에 입력한 컨텍스트 길이와 응답 최대 길이를 덮어쓴다 (pi 내장값 1M · 128K 를 그대로 쓰지 않는다).
+- `settings.json`: `defaultProvider` · `defaultModel` · `defaultThinkingLevel` 은 `main`, `enabledModels` 는 모든 연결의 모델 (`/model` 로 오간다). configure 가 `llm.json` 으로 만든다.
+- subagent 의 자식 pi 에는 부모가 띄울 때만 키를 `OXY_LLM_INHERIT_KEYS` 로 넘기고, 자식의 extension 이 받자마자 `process.env` 에서 지운다 (자식이 실행하는 bash · MCP 서버에 남지 않는다. E2E 로 확인).
+  처음 설계는 자식도 직접 복호화하는 것이었지만, 새 프로세스의 첫 DPAPI 복호화가 약 2초 걸려(같은 프로세스의 두 번째부터 0.4초, 2026-11-12 실측) subagent 마다 2초가 붙어서 바꿨다.
+  같은 Windows 사용자는 어차피 secrets.json 을 복호화할 수 있으므로 노출 범위는 늘지 않는다.
+- 복호화는 `installer/secrets.mjs` 의 `getSecrets` (PowerShell 한 번, .NET `ProtectedData`). `ConvertTo-SecureString` 은 보안 모듈을 불러오느라 1~2초 더 걸려 쓰지 않는다. 암호문 형식은 DB 비밀번호와 같다.
+- `pi.registerProvider` 는 provider 단위 `compat` 를 모델에 적용하지 않으므로(실측: `max_completion_tokens` · `store` 가 나감) 종류의 compat 를 모델마다 합쳐 넣는다.
+- 키를 복호화하지 못하면(다른 Windows 사용자, secrets.json 손상) 그 연결만 등록하지 않고, 대화형이면 알림으로 원인과 해결 방법(Tweak 에서 키 다시 입력)을 보인다.
+
+### subagent 와 작업 수준 (oxy-jobs)
+
+- `subagent` 도구에 `level` 을 더한다 (`tasks[]` 의 항목마다도). 값은 작업 수준 id, 설명은 각 수준의 `use`. 도구 설명: 일을 할 수 있는 가장 낮은 수준을 고른다.
+- 자식의 연결 · 모델 · thinking 은 다음 순서로 처음 정해진 것: 도구의 `level` → agent 파일 frontmatter 의 `level` → frontmatter 의 `provider`·`model`·`thinking` → 부모의 지금 모델과 thinking.
+  기본 agent 의 `level`: scout = `light`, worker = `normal`, reviewer = `deep`.
+- 동시 실행 제한은 연결마다 (`maxConcurrent`, 없으면 `OXY_LLM_MAX_CONCURRENT` · 종류의 기본값). 사내 vLLM 이 꽉 차도 다른 연결로 가는 작업은 기다리지 않는다.
+  Tweak 의 실행 제한에 있는 `subagent 동시 실행 수`(`OXY_LLM_MAX_CONCURRENT`)는 연결 편집의 `동시 요청 수` 로 옮긴다.
+- 작업 목록 · 모니터(§3 상태 파일)에는 작업마다 수준 · 연결 · 모델 · thinking 을 보인다.
+
+### 화면: 설치
+
+- LLM 단계: `연결 종류를 선택하세요`(표의 순서, 사내 vLLM 이 (추천)) → 연결 이름(기본값은 종류 id) → 서버 주소(기본 주소가 있으면 미리 채움) → API 키(가림) →
+  모델 목록 가져오기 → 확장 파라미터 테스트(`probe` 가 있는 종류만) → 사용량 제한 맞춤 설정 제안(헤더가 있을 때만). 위치 표시는 그대로 `4/8 LLM`.
+- 모델 단계: 이 연결에서 쓸 모델 선택(여러 개) → 모델마다 컨텍스트 길이 · 응답 최대 길이 → 모델 계열(계열이 있는 종류만) → 기본 모델 → 기본 thinking 수준.
+  - 컨텍스트 길이의 처음 값은 서버가 알려 준 최대 입력 길이다. 설명: `사내 vLLM과 같은 조건으로 테스트하려면 사내 컨텍스트 길이를 입력하세요.`
+  - thinking 화면은 지원하는 수준이 둘 이상일 때만 나온다. 처음 포커스는 지금 값, 신규 설치는 표의 `thinkingDefault` (추천).
+  - 작업 수준 세 개는 기본 모델로 만든다 (확인 단계 요약에 그렇게 보이고, 바꾸는 곳은 Tweak).
+- 설치에서는 연결 하나만 등록한다. 다른 연결은 Tweak 에서 더한다 (설치 단계 흐름을 늘리지 않는다).
+- 확인 단계 요약: `LLM 연결` 행(`사내 vLLM · site · API 키 저장됨`), `모델` 행(`qwen3.6-coder-30b · 128K · thinking off`), `작업 수준` 행(`세 수준 모두 기본 모델`).
+- 줄 입력 모드: LLM 단계 입력이 둘(종류, 이름), 모델 단계 입력이 늘어난다. `tests/installer-sandbox.sh` 의 입력 번호를 함께 고친다.
+
+### 화면: Tweak (허브 원칙 그대로)
+
+LLM 연결 하위 메뉴는 DB 연결과 같은 구성이다. 한 항목을 선택해 그것만 바꾸고 바로 저장한다.
+
+| 하위 항목 | 화면 | 저장 |
+| --- | --- | --- |
+| 연결 목록의 각 연결 | `편집…` · `연결 테스트` · `삭제…` (DB 연결과 같음). 편집은 그 연결의 주소 · 키 · 모델 · 요청 설정을 다시 입력하고, 현재 값이 기본값이다 | 편집 마지막 화면의 Enter 가 `저장` (DB 연결 편집과 같음) |
+| `+ 새 연결 추가…` | 설치 LLM 단계 + 모델 단계와 같은 화면 (기본 모델 · thinking 화면은 빼고) | 마지막 화면의 Enter 가 `저장` |
+| 기본 모델 | 등록된 모든 연결의 모델 목록(값 열에 연결 이름 · 컨텍스트) → thinking 수준 | 각 화면에서 바로 저장 |
+| 작업 수준 | 수준 목록(값 열에 `연결/모델 · thinking`) + `+ 수준 추가…`. 수준 하나를 선택하면 모델 → thinking (→ 이름 · 설명) | 각 화면에서 바로 저장 |
+
+- API 키: 저장된 키가 있으면 `저장된 키 유지`(현재) · `새 키 입력…` · `저장된 키 삭제`(확인 팝업). DB 비밀번호와 같은 문구 구조다. 키는 화면 · 로그 · llm.json 에 보이지 않는다.
+- 연결 삭제: 기본 모델이나 작업 수준이 그 연결을 쓰고 있으면 삭제할 수 없다. 이유(`기본 모델과 작업 수준 2개가 이 연결을 사용합니다`)와 할 일(`먼저 다른 연결의 모델로 바꾸세요`)을 보인다.
+- 저장 결과: `LLM 연결 설정을 저장했습니다. pi를 다시 시작하면 적용됩니다.`
+
+### 상태 점검 (`verify.sh` 의 LLM 절)
+
+- 연결마다 한 묶음: `7. LLM 연결: site (사내 vLLM)`. 키를 복호화할 수 있는지 → 모델 목록에 등록한 모델이 있는지 → 짧은 요청 하나로 tool call 이 구조화되어 오는지.
+- vLLM 전용 안내(`--enable-auto-tool-choice` 등)와 샘플링 파라미터 거부 확인은 `probe` 가 있는 종류만 한다.
+- 기본 모델과 작업 수준이 가리키는 연결 · 모델이 모두 있는지 확인한다.

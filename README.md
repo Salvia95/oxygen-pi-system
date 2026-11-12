@@ -92,8 +92,10 @@ zip 을 푼 폴더의 **`install.cmd` 를 더블클릭**하면 설치 TUI 가 �
 2. 설치 폴더      기본 %LOCALAPPDATA%\Programs\oxygen-pi (또는 현재 폴더 그대로 / 직접 입력)
 3. 구성요소       번들에 있는 구성요소 선택 (선택한 것만 복사), SQLcl·Chrome for Testing 은 직접 받은 zip 으로도 설치
                   브라우저: Chrome for Testing (추천) / Chromium / obscura / PC 의 Edge·Chrome / 사용 안 함
-4. LLM 연결       서버 주소·API 키 입력 → /v1/models 로 연결 확인, 확장 파라미터 지원 여부 확인
-5. 모델           코딩 모델 / 범용 모델(선택), 컨텍스트 길이(max_model_len 으로 자동 입력), 모델 계열
+4. LLM 연결       연결 종류(사내 vLLM / OpenAI 호환 서비스 / Anthropic Claude) · 연결 이름 · 서버 주소 · API 키
+                  → 모델 목록으로 연결 확인, (vLLM) 확장 파라미터 테스트, (한도 헤더가 있으면) 사용량 제한 맞춤 설정
+5. 모델           이 연결에서 쓸 모델(여러 개) · 모델마다 컨텍스트 길이와 응답 최대 길이 · 모델 계열 · 기본 모델 · thinking 수준
+                  작업 수준 세 개(light · normal · deep)는 기본 모델로 만든다. 다른 연결은 tweak.cmd 에서 더한다
 6. GitLab 연결    사내 호스트 (선택)
 7. PATH·바로가기  PATH · Windows Terminal 'Oxygen Pi' 프로필 · 바탕화면 바로가기
 8. 확인           요약 → 설치 → 상태 점검(verify)
@@ -139,13 +141,13 @@ bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
 
 | 항목 | 내용 |
 |---|---|
-| LLM 연결 | **서버 주소·API 키**(연결 확인 후 저장. 지금 모델이 새 서버에 없으면 이어서 모델 선택) · **모델**(코딩·범용 모델, 컨텍스트 길이, 모델 계열) · **요청 설정**(요청에서 제외할 확장 파라미터, 재시도 횟수, 응답 최대 길이) |
+| LLM 연결 | **연결 목록**(연결마다 편집 · 연결 테스트 · 삭제. 편집은 주소, API 키, 모델, 요청 설정, 동시 요청 수) · **새 연결 추가** · **기본 모델**(모델 → thinking 수준) · **작업 수준**(수준마다 모델 → thinking → 이름 → 설명, 수준 추가·삭제). 기본 모델이나 작업 수준이 쓰는 연결은 삭제할 수 없다 |
 | DB 연결 | PostgreSQL · MySQL · MariaDB · SQL Server · Oracle · SQLite 연결 추가·편집·연결 테스트·삭제. 연결마다 **usql**(CLI) / **dbhub**(pi MCP 도구) 중 등록할 곳과 읽기 전용 여부를 정한다. SQLcl 을 zip 으로 설치·교체 |
 | GitLab 연결 | 사내 GitLab 호스트 |
 | 브라우저 | agent-browser 가 사용할 브라우저 (agent-browser 를 반입한 경우만) |
 | 확장 기능 | 위험 명령 차단 · 작업 기록 · 백그라운드 작업 등 extension 켜기/끄기 |
 | 스킬 | 설치된 구성요소의 skill 켜기/끄기 |
-| 실행 제한 | 출력 최대 길이, 반복 호출 허용 횟수, 세션 자동 전환 기준, subagent·백그라운드 작업 동시 실행 수 — 값 하나씩 |
+| 실행 제한 | 출력 최대 길이, 반복 호출 허용 횟수, 세션 자동 전환 기준, 백그라운드 작업 동시 실행 수 — 값 하나씩 (subagent 동시 요청 수는 LLM 연결의 편집에서) |
 | PATH·바로가기 | PATH · Windows Terminal 프로필 · 바탕화면 바로가기 등록/해제 |
 | 상태 점검 | verify 실행 (결과는 터미널에 남는다) |
 
@@ -162,6 +164,25 @@ DB 연결은 다음처럼 저장된다 (모두 PC 로컬, git·번들 제외):
 
 pi 도구 이름: 연결이 하나면 `mcp__dbhub__execute_sql`, 여러 개면 `mcp__dbhub__execute_sql_<연결 이름>` (search_objects 도 같음). 실행 중인 pi 에는 `/reload` 로 반영된다.
 
+## LLM 연결과 작업 수준 (`agent/llm.json`)
+
+LLM 연결은 여러 개를 함께 등록해 쓴다 (사내 vLLM 여러 대, 외부망 테스트용 OpenAI 호환 서비스 · Anthropic Claude). 화면 명세는 [docs/tui-spec.md §11](docs/tui-spec.md#11-llm-연결과-작업-수준).
+
+| 파일 | 내용 |
+|---|---|
+| `agent/llm.json` | 연결 목록(종류 · 주소 · 모델별 컨텍스트 길이와 응답 최대 길이 · 요청 설정 · 동시 요청 수), 기본 모델, 작업 수준 |
+| `agent/secrets.json` | API 키. DPAPI(CurrentUser) 암호문, 키 이름 `llm/<연결 id>`. 같은 Windows 사용자만 복호화할 수 있다 |
+
+- **pi 에 적용**: extension `oxy-llm` 이 시작할 때 키를 한 번 복호화해 연결마다 provider `oxy-<연결 id>` 로 등록한다. 키는 pi 프로세스 메모리에만 있어서
+  bash 도구로 실행한 명령이 읽을 수 없다 (`models.json` 의 `!command` 는 요청마다 실행되어 쓰지 않는다). subagent 에는 띄울 때만 넘기고 자식이 받자마자 지운다.
+- **연결 종류**: `scripts/llm-connections.mjs` 의 `LLM_KINDS` 표 (`vllm` · `openai` · `anthropic`). Claude 는 pi 내장 모델 정보에 입력한 컨텍스트 길이 · 응답 최대 길이를 덮어써서,
+  사내 vLLM 과 같은 조건(예: 128K)으로 테스트할 수 있다. thinking 수준은 effort 로 보낸다.
+- **작업 수준**: `light` · `normal` · `deep` (더하거나 지울 수 있다). 수준마다 연결 · 모델 · thinking 을 정해 두면, 본 모델이 subagent 에게 일을 맡길 때
+  `level` 로 일의 수준을 고른다. agent 기본 수준: scout = light, worker = normal, reviewer = deep.
+- **예전 설치**: `agent/oxy.env` 에 남은 `OXY_VLLM_*` · `OXY_MODEL_*` · `OXY_CONTEXT_WINDOW` · `OXY_VLLM_DROP_PARAMS` · `OXY_PROVIDER_RETRIES` · `OXY_MAX_OUTPUT_TOKENS` 는
+  `just configure` 가 처음 한 번 연결 `vllm` 으로 옮기고(키는 secrets.json 으로) oxy.env 에서 지운다.
+- `just verify` 가 연결마다 키 복호화 · 모델 목록 · tool call · (vLLM) 샘플링 파라미터를 확인한다.
+
 ## 사내 vLLM 요구사항
 
 pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에 다음 옵션이 필요하다.
@@ -169,7 +190,7 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 ```
 --enable-auto-tool-choice --tool-call-parser <모델에 맞는 파서, 예: qwen3_coder / hermes>
 --max-model-len 131072
---served-model-name <oxy.env 의 OXY_MODEL_* 값>
+--served-model-name <llm.json 의 연결에 등록한 모델 id>
 # 하이브리드 thinking 모델: --reasoning-parser qwen3
 ```
 
@@ -177,10 +198,10 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 
 **앞단 게이트웨이 · 다른 OpenAI 호환 엔드포인트**: vLLM 확장 파라미터(`top_k`, `repetition_penalty`, `min_p`,
 thinking 제어용 `chat_template_kwargs`·`reasoning_effort`)를 400 `property '…' is unsupported` 로 거부하는 곳이 있다.
-설치 TUI·Tweak 의 LLM 연결 단계가 1토큰 요청으로 하나씩 확인해서 거부된 것만 `OXY_VLLM_DROP_PARAMS` 에 적고 요청에서 제외한다.
+설치 TUI·Tweak 의 LLM 연결 단계가 1토큰 요청으로 하나씩 확인해서 거부된 것만 그 연결의 `request.dropParams` 에 적고 요청에서 제외한다.
 
 **모델 계열**: 모델마다 thinking(추론) 제어 방식과 권장 샘플링 값이 다르다. 설치 TUI·Tweak 의 모델 단계에서 선택하고(id 로 추정한 값이 기본),
-`OXY_MODEL_CODER_FAMILY` · `OXY_MODEL_GENERAL_FAMILY` 에 기록된다. 모델 설정은 `scripts/render-config.mjs` 의 `MODEL_FAMILIES` 프리셋 하나에서 나온다.
+연결의 모델마다 `family` 로 기록된다. 모델 설정은 `scripts/llm-connections.mjs` 의 `MODEL_FAMILIES` 프리셋 하나에서 나온다.
 
 | 계열 | thinking 제어 | 샘플링 |
 |---|---|---|
@@ -192,14 +213,14 @@ thinking 제어용 `chat_template_kwargs`·`reasoning_effort`)를 400 `property 
 서버가 그 계열의 thinking 제어 파라미터를 거부하면 thinking 제어 없이 쓴다 (모델 이름에 "thinking 제어 없음" 표시).
 
 **사용량 제한이 있는 엔드포인트** (외부망 테스트용 Groq 등): LLM 연결 단계가 응답 헤더(`x-ratelimit-limit-tokens`)로 분당 토큰 한도를 보고,
-30,000 이하이면 맞춤 설정(재시도 · 응답 상한 · subagent 동시 실행 1)을 제안한다. 직접 맞출 때는 Tweak 의 "엔드포인트 세부 설정" 또는 `agent/oxy.env`:
+30,000 이하이면 맞춤 설정(재시도 · 응답 상한 · subagent 동시 실행 1)을 제안한다. 직접 맞출 때는 Tweak 의 LLM 연결에서 그 연결을 편집한다.
 Groq 무료 등급은 분당 입력 7,000 · 출력 1,000 토큰이라, 하네스 요청(약 5,000토큰) 기준으로 1분에 한 번 정도만 보낼 수 있다.
 
-| 설정 | 이유 |
+| 설정 (`llm.json` 의 연결) | 이유 |
 |---|---|
-| `OXY_PROVIDER_RETRIES=4` | Groq 의 429 문구에 "billing" 이 섞여 있어 pi 가 할당량 소진으로 보고 재시도하지 않는다 → 요청 단계에서 서버가 알려 준 대기 시간만큼 기다렸다 재시도 |
-| `OXY_MAX_OUTPUT_TOKENS=1000` | `max_tokens` 가 분당 출력 한도를 넘으면 재시도해도 안 되는 "Request too large" 로 거부된다 |
-| `OXY_LLM_MAX_CONCURRENT=1` | subagent 를 동시에 돌리면 한도에 더 빨리 걸린다 |
+| `request.retries=4` | Groq 의 429 문구에 "billing" 이 섞여 있어 pi 가 할당량 소진으로 보고 재시도하지 않는다 → 요청 단계에서 서버가 알려 준 대기 시간만큼 기다렸다 재시도 (pi 의 재시도 설정은 하나라 연결 중 가장 큰 값) |
+| 모델의 `maxOutput=1000` | `max_tokens` 가 분당 출력 한도를 넘으면 재시도해도 안 되는 "Request too large" 로 거부된다 |
+| `maxConcurrent=1` | subagent 를 동시에 돌리면 한도에 더 빨리 걸린다 |
 
 ## 오프라인 보장 장치
 
@@ -274,14 +295,16 @@ LLM 요약(compaction)에 기대지 않고, **작업 기록 파일**로 컨텍�
 | 도구 | 동작 |
 |---|---|
 | `background` | `action=start` 로 명령을 백그라운드 실행 → 바로 작업 id 반환. **끝나면 결과(종료 코드·마지막 출력)를 메시지로 알려 새 턴을 시작**하므로 모델이 polling 하지 않는다. `status` / `output` / `stop`. bash-guard 검사를 똑같이 거친다 |
-| `subagent` | `agent/agents/*.md` 의 도우미(scout · reviewer · worker)를 별도 pi 프로세스(독립 컨텍스트)로 실행. `tasks=[...]` 로 병렬, `wait=false` 면 백그라운드로 돌리고 완료 시 결과를 알린다. 자식에는 agent 에 지정한 도구만 주어 재귀 실행을 막는다 |
+| `subagent` | `agent/agents/*.md` 의 도우미(scout · reviewer · worker)를 별도 pi 프로세스(독립 컨텍스트)로 실행. `tasks=[...]` 로 병렬, `wait=false` 면 백그라운드로 돌리고 완료 시 결과를 알린다. 자식에는 agent 에 지정한 도구만 주어 재귀 실행을 막는다. 일마다 `level`(작업 수준)을 정해 맡기면 그 수준의 연결 · 모델 · thinking 으로 실행한다 |
 
-- **동시 실행 제한**: `OXY_LLM_MAX_CONCURRENT` (subagent, 기본 2) · `OXY_JOBS_MAX_CONCURRENT` (bash, 기본 4). 넘치는 작업은 대기열에서 순서대로 시작한다.
+- **자식의 모델**: 도구의 `level` → agent 파일 frontmatter 의 `level` → frontmatter 의 `provider:` · `model:` · `thinking:` → 부모가 지금 쓰는 모델 · thinking 순서로 정한다.
+- **동시 실행 제한**: subagent 는 연결마다 (`llm.json` 연결의 `maxConcurrent`, 없으면 `OXY_LLM_MAX_CONCURRENT` · 기본 2). 사내 vLLM 이 꽉 차도 다른 연결로 가는 작업은 기다리지 않는다.
+  bash 작업은 `OXY_JOBS_MAX_CONCURRENT` (기본 4). 넘치는 작업은 대기열에서 순서대로 시작한다.
   사내 vLLM 의 실제 한계는 요청 수보다 **동시에 처리하는 긴 컨텍스트 요청의 KV 캐시**이므로, 128K 기준으로 2 에서 시작해 조정한다.
 - **vLLM 혼잡 감지** (선택): `OXY_VLLM_METRICS=on` 이면 subagent 를 시작하기 전에 vLLM `/metrics` 의 대기 요청 수와 KV 캐시 사용률
   (`OXY_VLLM_KV_LIMIT`, 기본 0.9)을 보고 잠시 기다린다. 지표 이름은 vLLM 버전에 따라 다를 수 있어 사내 서버에서 확인 후 켠다.
 - **가시성**: 입력창 위 작업 패널(`⏳ job-3 bash  npm test  1m12s  마지막 출력`), 상태줄(`jobs 2 · agents 1/2`),
-  `/jobs` (로그 보기 · psmux 안이면 옆 pane, Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/*.log` (최근 50개 보관).
+  `/jobs` (로그 보기 · psmux 안이면 옆 pane, Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/run-<pid>-<시작 시각>/logs/` (끝난 실행은 최근 20개 보관).
 - **비대화형(`-p`)**: 대화가 끝나기 전에 남은 작업을 기다렸다가 결과를 모아 넘기고 이어서 진행한다 (`OXY_JOBS_WAIT_MS`, 기본 30분).
 - pi 를 종료하면 실행 중인 작업은 프로세스 트리째 정리한다. 자가진단이 남은 subagent 프로세스를 찾아 알린다.
 - 켜기/끄기·혼잡 감지·동시 실행 수는 Tweak 의 확장 기능 · 실행 제한에서 변경한다 (`OXY_JOBS=off` 로 끔).

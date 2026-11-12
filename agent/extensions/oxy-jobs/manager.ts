@@ -14,6 +14,7 @@ export interface Job {
   label: string;          // 화면 표시용 (명령 또는 "scout: 작업 요약")
   agent?: string;         // kind=agent: agent 이름
   task?: string;          // 맡긴 작업 전문 (bash: 명령 전문)
+  target?: JobTarget;     // kind=agent: 자식 pi 가 쓰는 작업 수준 · 연결 · 모델 · thinking
   state: JobState;
   createdAt: number;
   startedAt?: number;
@@ -30,6 +31,9 @@ export interface Job {
 }
 
 const TAIL_MAX = 200;
+
+/** subagent 가 쓰는 모델 (작업 수준 · agent 정의 · 부모에서 정해진 값) */
+export interface JobTarget { level?: string; connection?: string; provider?: string; model?: string; thinking?: string }
 
 /** 동시 실행 개수 제한 (FIFO) */
 export class Semaphore {
@@ -112,7 +116,8 @@ export class JobManager {
   private seq = 0;
   private listeners = new Set<() => void>();
   readonly bashSlots: Semaphore;
-  readonly agentSlots: Semaphore;
+  readonly agentSlots: Semaphore;              // 연결을 모를 때(llm.json 없음)의 subagent 동시 실행 제한
+  private connSlots = new Map<string, Semaphore>();
 
   readonly jobsDir: string;
   readonly runDir: string;    // 이 실행(세션)의 폴더. 첫 작업의 로그를 쓸 때 만든다
@@ -126,10 +131,26 @@ export class JobManager {
     mkdirSync(jobsDir, { recursive: true });
   }
 
+  /** 연결마다 따로 두는 subagent 동시 실행 제한 (사내 vLLM 이 꽉 차도 다른 연결로 가는 작업은 기다리지 않는다) */
+  slotsFor(connection: string | undefined, limit: number): Semaphore {
+    if (!connection) return this.agentSlots;
+    let s = this.connSlots.get(connection);
+    if (!s) { s = new Semaphore(limit); this.connSlots.set(connection, s); }
+    s.limit = limit;
+    return s;
+  }
+
+  /** 모든 subagent 슬롯 (상태줄 · 상태 파일) */
+  agentSlotTotals(): { running: number; limit: number; waiting: number } {
+    // 연결별 슬롯을 쓰면 기본 슬롯은 쓰는 중일 때만 센다 (llm.json 이 있으면 보통 쓰지 않는다)
+    const all = [this.agentSlots, ...this.connSlots.values()].filter((s, i) => i > 0 || s.running || s.waiting || !this.connSlots.size);
+    return { running: all.reduce((n, s) => n + s.running, 0), limit: all.reduce((n, s) => n + s.limit, 0), waiting: all.reduce((n, s) => n + s.waiting, 0) };
+  }
+
   onChange(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   changed() { for (const fn of this.listeners) { try { fn(); } catch { /* UI 오류는 무시 */ } } }
 
-  create(kind: JobKind, label: string, notify: boolean, extra: { agent?: string; task?: string } = {}): Job {
+  create(kind: JobKind, label: string, notify: boolean, extra: { agent?: string; task?: string; target?: JobTarget } = {}): Job {
     const id = `job-${++this.seq}`;
     const job: Job = {
       id, kind, label, ...extra, state: "queued", createdAt: Date.now(), logFile: join(this.runDir, "logs", `${id}.log`),
@@ -191,7 +212,7 @@ export class JobManager {
     const slot = (s: Semaphore) => ({ running: s.running, limit: s.limit, waiting: s.waiting });
     const jobs: JobSnapshot[] = this.list().map((j) => ({
       id: j.id, kind: j.kind, state: j.state, label: j.label,
-      ...(j.agent ? { agent: j.agent } : {}), ...(j.task ? { task: j.task } : {}),
+      ...(j.agent ? { agent: j.agent } : {}), ...(j.task ? { task: j.task } : {}), ...(j.target ? { target: { ...j.target } } : {}),
       createdAt: j.createdAt, startedAt: j.startedAt ?? null, endedAt: j.endedAt ?? null, exitCode: j.exitCode ?? null,
       usage: j.usage ? { ...j.usage } : null,
       log: relative(this.runDir, j.logFile).replace(/\\/g, "/"),
@@ -199,7 +220,8 @@ export class JobManager {
     }));
     return {
       version: STATE_VERSION, pid: process.pid, startedAt: this.startedAt, updatedAt: Date.now(), closed: false,
-      cwd: cwd.replace(/\\/g, "/"), slots: { agents: slot(this.agentSlots), bash: slot(this.bashSlots) }, jobs, control,
+      cwd: cwd.replace(/\\/g, "/"), slots: { agents: this.agentSlotTotals(), bash: slot(this.bashSlots),
+        byConnection: Object.fromEntries([...this.connSlots].map(([k, v]) => [k, slot(v)])) }, jobs, control,
     };
   }
 

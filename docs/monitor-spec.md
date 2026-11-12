@@ -95,12 +95,14 @@ agent/jobs/run-<pid>-<시작 시각 ms>/
   "updatedAt": 1762900012345, // 변경 시 + 실행 중이 아니어도 5초마다 (모니터가 pi 가 살아 있는지 판단)
   "closed": false,            // pi 가 이 실행을 끝냄 (세션 종료 · 교체). 강제 종료되면 false 로 남으므로 모니터는 pid 도 확인한다
   "cwd": "C:/work/proj",
-  "slots": { "agents": { "running": 1, "limit": 2, "waiting": 0 }, "bash": { "running": 1, "limit": 4, "waiting": 0 } },
+  "slots": { "agents": { "running": 1, "limit": 2, "waiting": 0 }, "bash": { "running": 1, "limit": 4, "waiting": 0 },
+             "byConnection": { "site": { "running": 1, "limit": 2, "waiting": 0 } } },   // subagent 동시 실행은 연결마다 (agents 는 합계)
   "jobs": [{
     "id": "job-3", "kind": "bash" /* | "agent" */, "state": "running" /* queued|running|done|failed|stopped */,
     "label": "npm test",
     "agent": "scout",          // kind=agent 일 때
     "task": "…",               // kind=agent: 맡긴 작업 전문 (bash: 명령 전문)
+    "target": { "level": "deep", "connection": "claude", "provider": "oxy-claude", "model": "claude-haiku-5-5", "thinking": "high" }, // kind=agent (tui-spec §11)
     "createdAt": 0, "startedAt": 0, "endedAt": null, "exitCode": null,
     "usage": { "turns": 3, "input": 12000, "output": 800 },
     "log": "logs/job-3.log",   // 실행 폴더 기준 상대 경로

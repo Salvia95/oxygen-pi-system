@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { blocked, enabled, envInt } from "../_lib/common.ts";
@@ -22,7 +23,8 @@ import { inspect } from "../oxy-bash-guard.ts";
 import { clip } from "../oxy-context-budget.ts";
 import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration } from "./manager.ts";
 import { type ControlResult, ControlInbox, StateWriter, pruneRuns } from "./state.ts";
-import { type AgentDef, loadAgents, runSubagent } from "./subagent.ts";
+import { type AgentDef, type LevelTarget, loadAgents, runSubagent } from "./subagent.ts";
+import { harnessRoot, INHERIT_ENV, sharedLlm } from "../oxy-llm.ts";
 
 const ICON: Record<string, string> = { queued: "·", running: "⏳", done: "✓", failed: "✗", stopped: "■" };
 
@@ -43,9 +45,17 @@ function psmuxExe(): string | null {
 
 const ok = (text: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text" as const, text }], details });
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   if (!enabled("JOBS")) return;
   const agentDir = process.env.PI_CODING_AGENT_DIR || getAgentDir();
+  // LLM 연결 · 작업 수준 (agent/llm.json, docs/tui-spec.md §11). 없으면 작업 수준 없이 부모 모델을 따른다
+  let llmLib: any = null;
+  let llm: any = null;
+  try {
+    llmLib = await import(pathToFileURL(join(harnessRoot(agentDir), "scripts", "llm-connections.mjs")).href);
+    llm = llmLib.loadLlm(agentDir);
+  } catch { /* 예전 배치 */ }
+  const levels: Array<{ id: string; use?: string }> = llm?.levels ?? [];
   const mgr = new JobManager(join(agentDir, "jobs"), {
     maxBash: envInt("OXY_JOBS_MAX_CONCURRENT", 4),
     maxAgents: envInt("OXY_LLM_MAX_CONCURRENT", 2),
@@ -70,13 +80,17 @@ export default function (pi: ExtensionAPI) {
     uiCtx.ui.setWidget("oxy-jobs", lines.length ? lines : undefined);
     const act = mgr.active();
     uiCtx.ui.setStatus("oxy-jobs", act.length
-      ? `jobs ${act.length} · agents ${mgr.agentSlots.running}/${mgr.agentSlots.limit}${mgr.agentSlots.waiting ? ` (+${mgr.agentSlots.waiting} 대기)` : ""}`
+      ? (() => { const t = mgr.agentSlotTotals(); return `jobs ${act.length} · agents ${t.running}/${t.limit}${t.waiting ? ` (+${t.waiting} 대기)` : ""}`; })()
       : undefined);
     if (act.length && !timer) timer = setInterval(render, 1000);
     if (!act.length && timer) { clearInterval(timer); timer = null; }
   };
   mgr.onChange(render);
   const remember = (ctx: any) => { if (ctx?.hasUI) { uiCtx = ctx; interactive = true; } };
+  const defaultAgents = envInt("OXY_LLM_MAX_CONCURRENT", 2);
+  /** provider id(oxy-<연결 id>) → llm.json 의 연결 */
+  const connectionOf = (provider?: string) => (provider?.startsWith("oxy-") ? llmLib?.findConnection(llm, provider.slice(4)) : undefined);
+  const safeThinking = (): string | undefined => { try { return pi.getThinkingLevel?.() || undefined; } catch { return undefined; } };
 
   // ---------------------------------------------------------------- 모니터용 상태 파일 · 중지 요청 (대화형만)
   let writer: StateWriter | null = null;
@@ -210,27 +224,54 @@ export default function (pi: ExtensionAPI) {
         description:
           `Delegate a self-contained task to a helper agent that has its own fresh context, so your context stays small. Agents: ${list}. ` +
           "The agent cannot see this conversation: write a complete task (goal, paths, what to return). " +
-          "Use tasks=[...] for independent tasks in parallel. wait=false runs them in the background and notifies you when done.",
+          "Use tasks=[...] for independent tasks in parallel. wait=false runs them in the background and notifies you when done." +
+          (levels.length ? ` level sets the model and reasoning effort: ${levels.map((l) => `${l.id} = ${l.use ?? l.id}`).join("; ")}. Pick the lowest level that can do the task.` : ""),
         parameters: Type.Object({
           agent: Type.Optional(Type.String({ description: `Agent name: ${names.join(" | ")}` })),
           task: Type.Optional(Type.String({ description: "Complete task description for a single agent" })),
-          tasks: Type.Optional(Type.Array(Type.Object({ agent: Type.String(), task: Type.String() }), { description: "Independent tasks to run in parallel (max 8)" })),
+          ...(levels.length ? { level: Type.Optional(Type.Union(levels.map((l) => Type.Literal(l.id)))) } : {}),
+          tasks: Type.Optional(Type.Array(Type.Object({
+            agent: Type.String(), task: Type.String(),
+            ...(levels.length ? { level: Type.Optional(Type.Union(levels.map((l) => Type.Literal(l.id)))) } : {}),
+          }), { description: "Independent tasks to run in parallel (max 8)" })),
           wait: Type.Optional(Type.Boolean({ description: "true (default): wait and return results. false: run in background" })),
         }),
         async execute(_id, params: any, signal, onUpdate, ctx) {
           remember(ctx);
-          const items: Array<{ agent: string; task: string }> = params.tasks?.length ? params.tasks
-            : params.agent && params.task ? [{ agent: params.agent, task: params.task }] : [];
+          const items: Array<{ agent: string; task: string; level?: string }> = params.tasks?.length ? params.tasks
+            : params.agent && params.task ? [{ agent: params.agent, task: params.task, level: params.level }] : [];
           if (!items.length) throw new Error("give agent+task, or tasks=[{agent, task}, ...]");
           if (items.length > 8) throw new Error("at most 8 tasks at once");
           const defs = items.map((t) => find(t.agent));
+          // 대상: 도구의 level → agent 정의의 level → agent 정의의 provider/model/thinking → 부모의 지금 모델 · thinking
+          const targets = items.map((t, i) => {
+            const asked = t.level ?? (params.tasks?.length ? params.level : undefined);
+            if (asked) {
+              const r = llmLib?.resolveLevel(llm, asked) as LevelTarget | null;
+              if (!r) throw new Error(`unknown level "${asked}". Levels: ${levels.map((l) => l.id).join(", ") || "none"}`);
+              return r;
+            }
+            return defs[i].level ? (llmLib?.resolveLevel(llm, defs[i].level) as LevelTarget | null) : null;
+          });
           const wait = params.wait !== false;
-          const jobs = items.map((t, i) => mgr.create("agent", `${defs[i].name}: ${t.task.replace(/\s+/g, " ").slice(0, 60)}`, !wait,
-            { agent: defs[i].name, task: t.task }));
-          const runs = jobs.map((j, i) => runSubagent(mgr, j, defs[i], items[i].task, ctx.cwd, {
-            signal: wait ? signal : undefined,
-            onProgress: wait ? () => onUpdate?.(ok(jobs.map((x) => `${ICON[x.state]} ${x.id} ${x.label} ${x.tail.at(-1) ?? ""}`).join("\n"))) : undefined,
-          }).then(() => { if (!wait) report(j); }));
+          const parent = { provider: ctx.model?.provider, id: ctx.model?.id, thinking: safeThinking() };
+          const jobs = items.map((t, i) => mgr.create("agent", `${defs[i].name}: ${t.task.replace(/\s+/g, " ").slice(0, 60)}`, !wait, {
+            agent: defs[i].name, task: t.task,
+            target: targets[i] ? { level: targets[i]!.level, connection: targets[i]!.connection, provider: targets[i]!.provider, model: targets[i]!.id, thinking: targets[i]!.thinking }
+              : { provider: defs[i].provider ?? parent.provider, model: defs[i].model ?? (defs[i].provider ? undefined : parent.id), thinking: defs[i].thinking ?? parent.thinking },
+          }));
+          const keys = sharedLlm()?.keys ?? {};
+          const childEnv = Object.keys(keys).length ? { [INHERIT_ENV]: Buffer.from(JSON.stringify(keys)).toString("base64") } : undefined;
+          const runs = jobs.map((j, i) => {
+            const conn = connectionOf(j.target?.provider);
+            return runSubagent(mgr, j, defs[i], items[i].task, ctx.cwd, {
+              parent, target: targets[i], childEnv,
+              slots: mgr.slotsFor(conn?.id, conn ? (conn.maxConcurrent || llmLib.LLM_KINDS[conn.kind]?.maxConcurrent || defaultAgents) : defaultAgents),
+              metricsBaseUrl: conn?.kind === "vllm" ? conn.baseUrl : undefined,
+              signal: wait ? signal : undefined,
+              onProgress: wait ? () => onUpdate?.(ok(jobs.map((x) => `${ICON[x.state]} ${x.id} ${x.label} ${x.tail.at(-1) ?? ""}`).join("\n"))) : undefined,
+            }).then(() => { if (!wait) report(j); });
+          });
           if (!wait) {
             return ok(`Started ${jobs.map((j) => `${j.id} (${j.label})`).join(", ")}.\nYou will get a message with each result. Do not poll; continue or end your turn.`,
               { ids: jobs.map((j) => j.id) });

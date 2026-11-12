@@ -1,7 +1,7 @@
 // oxygen-pi-system 종합 설정 (Tweak TUI). 설치된 하네스 폴더에서 실행한다: tweak.cmd / tweak.sh / just tweak
 // 이미 설치된 항목을 순서와 상관없이 하나씩 선택해 변경한다 (선택한 항목만 변경하고 바로 저장). 단계 흐름이 아니라 허브다.
 //   허브 (줄 입력 모드의 번호. 제목 행은 없고 묶음 사이에 빈 줄만 둔다)
-//     1 LLM 연결(하위: 서버 주소·API 키 · 모델 · 요청 설정) · 2 DB 연결(하위: 연결 목록 · SQLcl) · 3 GitLab 연결
+//     1 LLM 연결(하위: 연결 목록 · + 새 연결 추가… · 기본 모델 · 작업 수준) · 2 DB 연결(하위: 연결 목록 · SQLcl) · 3 GitLab 연결
 //     4 브라우저 · 5 확장 기능 · 6 스킬 · 7 실행 제한
 //     8 PATH·바로가기(하위: 1 등록 항목 · 2 터미널 셸 · 3 멀티플렉서 · 4 ← 이전) · 9 상태 점검 · 10 종료 (줄 입력 모드에만. 화면에서는 Esc)
 //   쓸 수 없는 항목도 목록에 두고 비활성으로 보인다 (번호가 바뀌지 않게)
@@ -10,15 +10,19 @@ import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BACK, c, errorBlock, rail } from "./tui.mjs";
 import {
-  INTEGRATION_NAMES, ROOT, applyIntegrations, applyOptional, fetchModels, muxName, stateFromInstall, stepBrowser, stepGitlab,
-  stepModel, stepMux, stepRegister, stepShell, stepSqlcl, stepVllm, sys, ui, writeSiteConfig,
+  INTEGRATION_NAMES, ROOT, applyIntegrations, applyOptional, editTarget, kOf, migrateInstalled, muxName, pickThinking, stateFromInstall, stepBrowser, stepGitlab,
+  stepLlm, stepModel, stepMux, stepRegister, stepShell, stepSqlcl, sys, ui, writeSiteConfig,
 } from "./install.mjs";
 import { SHELL_NAMES, normShell } from "./system.mjs";
 import { CATALOG, GROUPS, OPTIONAL, enabledSkills, hasComponent, isInstalled, parseSkillsOff, readLock } from "./components.mjs";
 import { DB_TYPES, ID_RE, loadConnections, probeConnection, saveConnections, secretKey } from "./connections.mjs";
 import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
+import { closestThinking, fixPointers } from "./llm-edit.mjs";
+import {
+  ID_RE as LLM_ID_RE, LLM_KINDS, checkToolCall, connectionUsers, findConnection, listModels, loadLlm, saveLlm, secretKey as llmSecretKey, thinkingChoices,
+} from "../scripts/llm-connections.mjs";
 
-const { parseEnv, mergeEnv, VLLM_EXTRA_PARAMS } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
+const { parseEnv, mergeEnv } = await import(pathToFileURL(join(ROOT, "scripts", "render-config.mjs")).href);
 const AGENT = join(ROOT, "agent");
 const ENV_FILE = join(AGENT, "oxy.env");
 const APPLY_LATER = "pi를 다시 시작하면 적용됩니다";
@@ -282,7 +286,6 @@ const LIMITS = [
   { key: "OXY_READ_MAX_CHARS", label: "파일 읽기 최대 길이", def: 40000, fmt: (v) => `${v}자`, tech: "read", why: "파일을 읽을 때 한 번에 전달하는 최대 길이입니다." },
   { key: "OXY_REPEAT_LIMIT", label: "반복 호출 허용 횟수", def: 3, fmt: (v) => `${v}회`, why: "같은 호출이 이 횟수에 이르면 차단합니다." },
   { key: "OXY_FLOW_ROLLOVER_PCT", label: "세션 자동 전환 기준", def: 50, fmt: (v) => `컨텍스트 ${v}%`, why: "컨텍스트 사용률이 이 값 이상이면 새 세션에서 이어서 처리합니다." },
-  { key: "OXY_LLM_MAX_CONCURRENT", label: "subagent 동시 실행 수", def: 2, fmt: (v) => `${v}개`, tech: "subagent", why: "LLM 서버(vLLM)의 KV 캐시를 고려해 정합니다." },
   { key: "OXY_JOBS_MAX_CONCURRENT", label: "백그라운드 작업 동시 실행 수", def: 4, fmt: (v) => `${v}개`, tech: "bash", why: "동시에 실행할 백그라운드 명령의 수입니다." },
 ];
 const limitValue = (env, l) => (env[l.key] ? `${l.fmt(env[l.key])} (기본값 ${l.def})` : `${l.fmt(l.def)} (기본값)`);
@@ -340,39 +343,7 @@ async function editItem(title, run, applies = APPLY_LATER) {
   return saved(`${title} 설정을 저장했습니다. ${applies}.`);
 }
 
-/** LLM 서버에서 모델 목록을 받아 둔다 (모델 단계에서 고를 수 있게). 실패하면 직접 입력 / 서버 주소부터 */
-async function withModels(state) {
-  ui.screen(`  ${c.bold("LLM 서버에서 모델 목록을 가져오는 중입니다")}\n  ${c.gray(state.baseUrl ?? "")}\n`);
-  try {
-    state.models = await ui.task("모델 목록 가져오기 (/v1/models)", async () => fetchModels(state.baseUrl, state.apiKey));
-    return "next";
-  } catch (e) {
-    state.models = [];
-    const v = await ui.select("모델 목록을 가져오지 못했습니다. 어떻게 할까요?", [
-      { label: "모델 이름 직접 입력", value: "manual" },
-      { label: "서버 주소부터 다시 입력", value: "vllm" },
-    ], { initial: 0, note: errorBlock("모델 목록을 가져오지 못했습니다", e).map((l) => l.slice(2)), result: true });
-    return v === BACK ? BACK : v;
-  }
-}
-
 const items = {
-  vllm: async (state) => {
-    const r = await stepVllm(state);
-    if (r === BACK) return BACK;
-    // 지금 쓰는 모델이 새 서버에 없으면 이어서 모델을 선택한다
-    if (state.models?.length && !state.models.some((m) => m.id === state.coder)) {
-      await ui.notice("warn", `현재 모델(${state.coder})이 이 서버에 없습니다`, { fix: "다음 화면에서 모델을 다시 선택하세요" });
-      return stepModel(state);
-    }
-    return r;
-  },
-  model: async (state) => {
-    const w = await withModels(state);
-    if (w === BACK) return BACK;
-    if (w === "vllm") return items.vllm(state);
-    return stepModel(state);
-  },
   gitlab: (state) => stepGitlab(state),
   browser: (state) => stepBrowser(state),
   // 셸을 바꾸면 등록된 프로필 · 바로가기를 새 셸로 다시 만든다 (applyIntegrations)
@@ -389,41 +360,333 @@ const items = {
   },
 };
 
-// ------------------------------------------------------------------ LLM 연결 (하위 메뉴)
-function endpointHint(env) {
-  const drop = String(env.OXY_VLLM_DROP_PARAMS ?? "").split(/[\s,]+/).filter(Boolean);
-  if (!drop.length && !env.OXY_PROVIDER_RETRIES && !env.OXY_MAX_OUTPUT_TOKENS) return "기본값";
-  return [drop.length ? `제외 파라미터 ${drop.length}개` : null, `재시도 ${env.OXY_PROVIDER_RETRIES || 0}회`].filter(Boolean).join(" · ");
+// ------------------------------------------------------------------ LLM 연결 (하위 메뉴. docs/tui-spec.md §11 화면: Tweak)
+//   연결 목록(각 연결: 편집… · 연결 테스트 · 삭제…) · + 새 연결 추가… · 기본 모델 · 작업 수준 · ← 이전 (줄 입력 모드에만)
+//   편집 · 추가는 마지막 화면에서 저장하고, 기본 모델 · 작업 수준은 화면마다 바로 저장한다
+const LLM_SAVED = saved(`LLM 연결 설정을 저장했습니다. ${APPLY_LATER}.`);
+const kindLabel = (conn) => LLM_KINDS[conn.kind]?.label ?? conn.kind;
+const urlOf = (conn) => conn.baseUrl || LLM_KINDS[conn.kind]?.baseUrl || "없음";
+const pointText = (p) => (p ? `${p.connection}/${p.model} · thinking ${p.thinking ?? "off"}` : "없음");
+
+function llmConnInfo(conn) {
+  return [
+    ["서버 주소", urlOf(conn)], ["모델", (conn.models ?? []).map((m) => m.id).join(", ") || "없음"],
+    ["API 키", hasSecret(AGENT, llmSecretKey(conn.id)) ? "저장됨" : "저장 안 함"], ["동시 요청 수", `${conn.maxConcurrent ?? LLM_KINDS[conn.kind]?.maxConcurrent ?? 1}개`],
+    ["종류", kindLabel(conn)],
+  ];
+}
+
+/** 연결을 쓰는 곳 → 삭제할 수 없는 이유 한 문장 */
+function usersText(users) {
+  const main = users.includes("기본 모델");
+  const n = users.length - (main ? 1 : 0);
+  const who = main && n ? `기본 모델과 작업 수준 ${n}개가` : main ? "기본 모델이" : `작업 수준 ${n}개가`;
+  return `${who} 이 연결을 사용합니다.`;
+}
+
+/** 이 작업 수준을 frontmatter 에 지정한 agent (agent/agents/*.md) */
+function agentsUsing(levelId) {
+  const dir = join(AGENT, "agents");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith(".md")).filter((f) => {
+    const fm = readFileSync(join(dir, f), "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
+    return new RegExp(`^level:\\s*${levelId}\\s*$`, "m").test(fm);
+  }).map((f) => f.replace(/\.md$/, ""));
+}
+
+/** llm.json 을 저장하고 설정 파일(settings.json)을 다시 만든다. 실패하면 알리고 false */
+async function saveLlmNow(llm) {
+  try {
+    saveLlm(AGENT, fixPointers(ROOT, llm));
+    const { reg } = registry();
+    writeSiteConfig(ROOT, { ...stateFromInstall(reg), installDir: ROOT });
+    return true;
+  } catch (e) {
+    await ui.notice("err", `설정 파일을 만들지 못했습니다: ${e.message}`, { fix: "agent/llm.json의 값을 확인한 뒤 다시 저장하세요" });
+    return false;
+  }
+}
+
+/** 등록된 모든 연결의 모델 (기본 모델 · 작업 수준의 모델 선택). 값 열에 연결 이름 · 컨텍스트 */
+function modelRows(llm, sel) {
+  return llm.connections.flatMap((conn, i) => (conn.models ?? []).map((m, j) => ({
+    label: m.id, value: `${conn.id}\t${m.id}`, hint: `${conn.id} · ${kOf(m.contextWindow)}`, gap: i > 0 && j === 0,
+    current: Boolean(sel && sel.connection === conn.id && sel.model === m.id),
+    info: [["연결", `${conn.id} (${kindLabel(conn)})`], ["컨텍스트 길이", `${num(m.contextWindow)} 토큰`], ["응답 최대 길이", `${num(m.maxOutput)} 토큰`]],
+  })));
+}
+const num = (n) => Number(n ?? 0).toLocaleString("en-US");
+
+/** 새 연결 추가(conn 없음) · 연결 편집 → 저장했으면 연결 id */
+async function editLlm(conn) {
+  const { reg } = registry();
+  const state = { ...stateFromInstall(reg), installDir: ROOT, tweak: true, saveLast: true, noMain: true,
+    connFixed: Boolean(conn), editRequest: Boolean(conn) };
+  if (conn) editTarget(state, conn.id);
+  for (;;) {
+    setPath("LLM 연결", conn ? conn.id : "새 연결");
+    if ((await stepLlm(state)) === BACK) return null;
+    if ((await stepModel(state)) !== BACK) break;
+  }
+  ui.screen(`  ${c.bold("LLM 연결 저장 중입니다")}\n`);
+  try {
+    await ui.task("설정 파일 생성", async () => `${writeSiteConfig(ROOT, state)}개 파일`);
+  } catch (e) {
+    if (!e?.reported) errorBlock("LLM 연결을 저장하지 못했습니다", e).forEach((l) => ui.print(l));
+    await ui.pause();
+    return null;
+  }
+  return state.conn.id;
+}
+
+/** 연결 테스트: 키 → 모델 목록(등록한 모델이 있는지) → 짧은 요청으로 tool call. 설정은 바꾸지 않는다 */
+async function testLlm(llm, conn) {
+  const kind = LLM_KINDS[conn.kind];
+  ui.screen(`  ${c.bold("연결을 테스트하는 중입니다")}\n  ${c.gray(urlOf(conn))}\n`);
+  try {
+    let key = "";
+    if (hasSecret(AGENT, llmSecretKey(conn.id))) {
+      await ui.task("API 키 확인 (DPAPI)", async () => {
+        key = getSecret(AGENT, llmSecretKey(conn.id)) ?? "";
+        if (!key) throw Object.assign(new Error("복호화 실패"), { why: "저장된 키를 복호화할 수 없습니다", fix: "편집에서 API 키를 다시 입력하세요" });
+        return "저장됨";
+      });
+    }
+    let list;
+    await ui.task("모델 목록 가져오기", async () => {
+      list = await listModels(conn, key);
+      return `${list.models.length}개`;
+    });
+    const ids = list.models.map((m) => m.id);
+    const missing = (conn.models ?? []).filter((m) => !ids.includes(m.id)).map((m) => m.id);
+    for (const id of missing) ui.print(`  ${c.yellow("!")} ${id}: 서버의 모델 목록에 없습니다. ${kind.hints.models}`);
+    const model = [llm.main?.connection === conn.id ? llm.main.model : null, ...(conn.models ?? []).map((m) => m.id)].find((id) => id && ids.includes(id));
+    if (model) {
+      await ui.task(`tool call 확인 (${model})`, async () => {
+        const r = await checkToolCall(conn, key, model);
+        if (!r.ok) throw Object.assign(new Error(r.detail), { why: `tool call이 구조화되어 오지 않습니다 ${r.detail}`.trim(), fix: kind.hints.toolCall });
+        return "정상";
+      });
+    }
+  } catch { /* 원인 · 해결 방법은 task 가 출력 */ }
+  await ui.pause();
 }
 
 async function llmMenu() {
   let msg = "";
-  let last = 0;
+  let last = null;
   for (;;) {
     setPath("LLM 연결");
-    const { env } = readEnv();
-    const k = Math.round(Number(env.OXY_CONTEXT_WINDOW || 0) / 1024);
+    const llm = loadLlm(AGENT);
+    const conns = llm?.connections ?? [];
+    const levels = llm?.levels ?? [];
+    const hasModels = conns.some((x) => x.models?.length);
+    const none = { disabled: "사용 불가", why: "등록된 LLM 연결이 없어 선택할 수 없습니다.", fix: "먼저 새 연결을 추가하세요." };
     const opts = [
-      { label: "서버 주소·API 키", value: "vllm", hint: env.OXY_VLLM_BASE_URL ?? "없음",
-        detail: "주소와 키를 다시 입력하고 서버 연결을 확인합니다.",
-        info: [["서버 주소", env.OXY_VLLM_BASE_URL ?? "없음"], ["API 키", env.OXY_VLLM_API_KEY && env.OXY_VLLM_API_KEY !== "EMPTY" ? "입력됨" : "없음"]] },
-      { label: "모델", value: "model", hint: `${env.OXY_MODEL_CODER ?? "없음"}${env.OXY_MODEL_GENERAL ? " 외 1개" : ""}`,
-        detail: "코딩 모델, 범용 모델, 컨텍스트 길이, 모델 계열을 변경합니다.",
-        info: [["코딩 모델", env.OXY_MODEL_CODER ?? "없음"], ["범용 모델", env.OXY_MODEL_GENERAL || "사용 안 함"], ["컨텍스트", `${k}K 토큰`]] },
-      { label: "요청 설정", value: "endpoint", hint: endpointHint(env),
-        detail: "제외할 요청 파라미터, 재시도 횟수, 응답 최대 길이를 변경합니다.",
-        info: [["응답 최대 길이", env.OXY_MAX_OUTPUT_TOKENS ? `${env.OXY_MAX_OUTPUT_TOKENS} 토큰` : "모델 기본값"]] },
+      ...conns.map((x) => ({ label: x.id, value: `c:${x.id}`, hint: `${kindLabel(x)} · 모델 ${(x.models ?? []).length}개`,
+        detail: "이 연결을 편집하거나 테스트하거나 삭제합니다.", info: llmConnInfo(x) })),
+      { label: "+ 새 연결 추가…", value: "__add", gap: conns.length > 0,
+        detail: "다음 화면부터 연결 종류, 이름, 주소, API 키, 모델을 입력합니다." },
+      { label: "기본 모델", value: "__main", gap: true, hint: pointText(llm?.main), ...(hasModels ? {} : none),
+        detail: "pi가 대화에 사용하는 모델과 thinking 수준을 변경합니다." },
+      { label: "작업 수준", value: "__levels", hint: levels.length ? `${levels.length}개 (${levels.map((l) => l.id).join(", ")})` : "없음", ...(hasModels ? {} : none),
+        detail: "subagent에게 맡기는 일의 수준마다 모델과 thinking을 정합니다.",
+        info: levels.map((l) => [l.label || l.id, pointText(l)]) },
       { label: "← 이전", value: "__back", lineOnly: true },
     ];
-    const v = await ui.select("LLM 연결에서 변경할 항목을 선택하세요", opts, { initial: last, message: msg,
-      note: "서버 주소를 변경하면 현재 모델이 새 서버에 있는지 이어서 확인합니다." });
+    const k = opts.findIndex((o) => o.value === last);
+    const v = await ui.select("어떤 LLM 연결 설정을 변경할까요?", opts, {
+      ...(k >= 0 ? { initial: k } : {}), message: msg,
+      note: conns.length ? "연결마다 등록한 모델을 기본 모델과 작업 수준에 배정합니다."
+        : "등록된 LLM 연결이 없습니다. 새 연결을 추가하면 pi가 그 모델을 사용합니다.",
+    });
+    msg = "";
+    if (v === BACK || v === "__back") return "";
+    last = v;
+    if (v === "__add") { const id = await editLlm(null); if (id) { last = `c:${id}`; msg = LLM_SAVED; } continue; }
+    if (v === "__main") { msg = await mainModelMenu(); continue; }
+    if (v === "__levels") { msg = await levelsMenu(); continue; }
+    const conn = conns.find((x) => `c:${x.id}` === v);
+    setPath("LLM 연결", conn.id);
+    const users = connectionUsers(llm, conn.id);
+    const act = await ui.select(`${conn.id} 연결에서 할 작업을 선택하세요`, [
+      { label: "편집…", value: "edit", detail: ["서버 주소, API 키, 모델, 요청 설정을 다시 입력합니다.", "현재 값이 기본값입니다."] },
+      { label: "연결 테스트", value: "probe", detail: "모델 목록과 tool call을 확인합니다. 설정은 변경되지 않습니다." },
+      { label: "삭제…", value: "delete", ...(users.length
+        ? { disabled: "사용 중", why: usersText(users), fix: "먼저 다른 연결의 모델로 바꾸세요." }
+        : { detail: "이 연결을 삭제합니다. 다음 화면에서 한 번 더 확인합니다." }) },
+      { label: "← 이전", value: "back", lineOnly: true },
+    ], { initial: 0, summary: [["연결 정보", `${kindLabel(conn)} · ${urlOf(conn)}`], ...llmConnInfo(conn).slice(1, 4)] });
+    if (act === BACK || act === "back") continue;
+    if (act === "edit") { if (await editLlm(conn)) msg = LLM_SAVED; }
+    else if (act === "probe") await testLlm(llm, conn);
+    else if (act === "delete") {
+      if (await ui.confirm(`${conn.id} 연결을 삭제할까요?`, {
+        title: "연결 삭제", yes: `${conn.id} 연결 삭제`, no: "삭제 취소", level: "medium",
+        summary: [["연결 정보", `${kindLabel(conn)} · ${urlOf(conn)}`], ["삭제 대상", "연결 정보, 저장된 API 키"]],
+        warning: "삭제한 뒤에 다시 쓰려면 같은 값으로 새로 추가해야 합니다.",
+      })) {
+        if (hasSecret(AGENT, llmSecretKey(conn.id))) deleteSecret(AGENT, llmSecretKey(conn.id));
+        if (await saveLlmNow({ ...llm, connections: conns.filter((x) => x.id !== conn.id) })) {
+          msg = saved(`${conn.id} 연결을 삭제했습니다. ${APPLY_LATER}.`);
+          last = null;
+        }
+      }
+    }
+  }
+}
+
+/** 기본 모델: 모델 선택(바로 저장) → thinking 수준(바로 저장, 지원하는 수준이 둘 이상일 때) */
+async function mainModelMenu() {
+  setPath("LLM 연결", "기본 모델");
+  const llm = loadLlm(AGENT);
+  const rows = modelRows(llm, llm.main);
+  const k = rows.findIndex((r) => r.current);
+  const v = await ui.select("기본 모델을 선택하세요", rows, { ...(k >= 0 ? { initial: k } : {}), enter: "저장",
+    note: ["pi가 대화에 사용하는 모델입니다.", "다른 모델은 pi의 /model 명령으로 전환할 수 있습니다."] });
+  if (v === BACK) return "";
+  const [cid, mid] = v.split("\t");
+  const conn = findConnection(llm, cid);
+  const main = { connection: cid, model: mid, thinking: closestThinking(thinkingChoices(ROOT, conn, mid), llm.main?.thinking ?? LLM_KINDS[conn.kind].thinkingDefault) };
+  if (!(await saveLlmNow({ ...llm, main }))) return "";
+  if (thinkingChoices(ROOT, conn, mid).length > 1) {
+    const t = await pickThinking(`${mid}의 thinking 수준을 선택하세요`, conn, mid, { current: main.thinking, enter: "저장",
+      note: ["기본 모델이 대화할 때 사용하는 수준입니다.", "높을수록 응답이 느려지고 토큰을 더 사용합니다."] });
+    if (t !== BACK && t !== main.thinking && !(await saveLlmNow({ ...llm, main: { ...main, thinking: t } }))) return "";
+  }
+  return LLM_SAVED;
+}
+
+/** 작업 수준: 목록 + 수준 추가. 수준 하나 = 모델 → thinking → 이름 → 설명 (화면마다 바로 저장) */
+async function levelsMenu() {
+  let msg = "";
+  let last = 0;
+  for (;;) {
+    setPath("LLM 연결", "작업 수준");
+    const llm = loadLlm(AGENT);
+    const levels = llm.levels ?? [];
+    const opts = [
+      ...levels.map((l) => ({ label: l.label || l.id, value: l.id, hint: pointText(l), detail: "이 수준의 모델, thinking, 이름, 설명을 변경합니다.",
+        info: [["수준 id", l.id], ["설명", l.use ?? ""], ["지정한 agent", agentsUsing(l.id).join(", ") || "없음"]] })),
+      { label: "+ 수준 추가…", value: "__add", gap: levels.length > 0, detail: "다음 화면부터 수준 id, 모델, thinking, 이름, 설명을 입력합니다." },
+      { label: "← 이전", value: "__back", lineOnly: true },
+    ];
+    const v = await ui.select("어떤 작업 수준을 변경할까요?", opts, { initial: Math.min(last, opts.length - 1), message: msg,
+      note: ["본 모델이 subagent에게 일을 맡길 때 작업 수준을 정합니다.", "작업 수준이 연결, 모델, thinking을 정합니다."] });
     msg = "";
     if (v === BACK || v === "__back") return "";
     last = opts.findIndex((o) => o.value === v);
-    if (v === "vllm") { setPath("LLM 연결", "서버 주소·API 키"); msg = await editItem("서버 주소·API 키", items.vllm); }
-    else if (v === "model") { setPath("LLM 연결", "모델"); msg = await editItem("모델", items.model); }
-    else if (v === "endpoint") msg = await endpointMenu();
+    msg = v === "__add" ? await addLevel(llm) : await editLevel(llm, levels.find((l) => l.id === v));
   }
+}
+
+const levelModelNote = "이 수준으로 맡긴 subagent가 사용하는 모델입니다. 선택하면 바로 저장합니다.";
+const levelUseNote = ["본 모델이 수준을 정할 때 읽는 설명입니다. 영어로 짧게 쓰세요.", "예: file search, reading, short reports"];
+
+/** 수준 하나 편집: 화면마다 바로 저장. Esc 를 누르면 그때까지 저장한 것을 알린다 */
+async function editLevel(llm, lv) {
+  setPath("LLM 연결", "작업 수준", lv.id);
+  const name = lv.label || lv.id;
+  let cur = { ...lv };
+  let changed = false;
+  const save = async (next) => {
+    const levels = (loadLlm(AGENT).levels ?? []).map((l) => (l.id === lv.id ? next : l));
+    if (!(await saveLlmNow({ ...loadLlm(AGENT), levels }))) return false;
+    cur = next;
+    changed = true;
+    return true;
+  };
+  const done = () => (changed ? LLM_SAVED : "");
+  const agents = agentsUsing(lv.id);
+  const rows = [...modelRows(llm, lv), { label: "이 수준 삭제…", value: "__delete", gap: true,
+    detail: "이 작업 수준을 삭제합니다. 다음 화면에서 한 번 더 확인합니다." }];
+  const k = rows.findIndex((r) => r.current);
+  const v = await ui.select(`${name}에 사용할 모델을 선택하세요`, rows, { ...(k >= 0 ? { initial: k } : {}), enter: "저장", note: levelModelNote });
+  if (v === BACK) return done();
+  if (v === "__delete") {
+    const yes = await ui.confirm(`${lv.id} 작업 수준을 삭제할까요?`, {
+      title: "작업 수준 삭제", yes: `${lv.id} 수준 삭제`, no: "삭제 취소", level: "medium",
+      summary: [["작업 수준", `${name} (${lv.id})`], ["지정한 agent", agents.join(", ") || "없음"]],
+      warning: agents.length ? "이 수준을 지정한 agent는 frontmatter의 모델이나 부모 모델을 사용합니다." : "",
+    });
+    if (!yes) return "";
+    if (!(await saveLlmNow({ ...llm, levels: llm.levels.filter((l) => l.id !== lv.id) }))) return "";
+    return saved(`${lv.id} 작업 수준을 삭제했습니다. ${APPLY_LATER}.`);
+  }
+  const [cid, mid] = v.split("\t");
+  const conn = findConnection(llm, cid);
+  if (!(await save({ ...cur, connection: cid, model: mid, thinking: closestThinking(thinkingChoices(ROOT, conn, mid), cur.thinking ?? "off") }))) return done();
+  if (thinkingChoices(ROOT, conn, mid).length > 1) {
+    const t = await pickThinking(`${name}의 thinking 수준을 선택하세요`, conn, mid, { current: cur.thinking, enter: "저장" });
+    if (t === BACK) return done();
+    if (t !== cur.thinking && !(await save({ ...cur, thinking: t }))) return done();
+  }
+  const label = await ui.input("작업 수준 이름", { initial: cur.label || cur.id, enter: "저장", note: "목록에 표시되는 이름입니다.",
+    validate: (s) => (s.trim() ? null : "이름을 입력하세요") });
+  if (label === BACK) return done();
+  if (label !== cur.label && !(await save({ ...cur, label }))) return done();
+  const use = await ui.input("작업 수준 설명", { initial: cur.use ?? "", enter: "저장", note: levelUseNote,
+    validate: (s) => (s.trim() ? null : "설명을 입력하세요") });
+  if (use === BACK) return done();
+  if (use !== cur.use && !(await save({ ...cur, use }))) return done();
+  return done();
+}
+
+/** 수준 추가: 수준 id → 모델 → thinking → 이름 → 설명. 마지막 화면에서 저장 */
+async function addLevel(llm) {
+  setPath("LLM 연결", "작업 수준", "새 수준");
+  const lv = { id: "", label: "", use: "", connection: "", model: "", thinking: "off" };
+  const choicesOf = () => thinkingChoices(ROOT, findConnection(llm, lv.connection), lv.model);
+  const screens = () => [
+    { run: async () => {
+      const v = await ui.input("작업 수준 id", { initial: lv.id,
+        note: ["subagent 도구의 level 값으로 사용합니다. 예: review", "영문 소문자로 시작하고 소문자, 숫자, -, _ 만 사용할 수 있습니다 (31자 이내)."],
+        validate: (s) => (!LLM_ID_RE.test(s) ? "소문자로 시작하고 소문자, 숫자, -, _ 만 사용할 수 있습니다 (31자 이내)"
+          : (llm.levels ?? []).some((l) => l.id === s) ? "이미 있는 수준입니다. 다른 id를 입력하세요" : null) });
+      if (v === BACK) return BACK;
+      lv.id = v;
+      return "next";
+    } },
+    { run: async () => {
+      const rows = modelRows(llm, lv.model ? lv : null);
+      const k = rows.findIndex((r) => r.current);
+      const v = await ui.select(`${lv.id}에 사용할 모델을 선택하세요`, rows, { ...(k >= 0 ? { initial: k } : {}),
+        note: "이 수준으로 맡긴 subagent가 사용하는 모델입니다." });
+      if (v === BACK) return BACK;
+      [lv.connection, lv.model] = v.split("\t");
+      lv.thinking = closestThinking(choicesOf(), lv.thinking);
+      return "next";
+    } },
+    lv.model && choicesOf().length > 1 && { run: async () => {
+      const t = await pickThinking(`${lv.id}의 thinking 수준을 선택하세요`, findConnection(llm, lv.connection), lv.model, { focus: lv.thinking });
+      if (t === BACK) return BACK;
+      lv.thinking = t;
+      return "next";
+    } },
+    { run: async () => {
+      const v = await ui.input("작업 수준 이름", { initial: lv.label || lv.id, note: "목록에 표시되는 이름입니다.",
+        validate: (s) => (s.trim() ? null : "이름을 입력하세요") });
+      if (v === BACK) return BACK;
+      lv.label = v;
+      return "next";
+    } },
+    { run: async () => {
+      const v = await ui.input("작업 수준 설명", { initial: lv.use, enter: "저장", note: levelUseNote,
+        validate: (s) => (s.trim() ? null : "설명을 입력하세요") });
+      if (v === BACK) return BACK;
+      lv.use = v;
+      return "next";
+    } },
+  ];
+  let i = 0;
+  for (;;) {
+    const list = screens().filter(Boolean);
+    if (i >= list.length) break;
+    const r = await list[i].run();
+    if (r === BACK) { if (i === 0) return ""; i--; } else i++;
+  }
+  if (!(await saveLlmNow({ ...llm, levels: [...(llm.levels ?? []), lv] }))) return "";
+  return LLM_SAVED;
 }
 
 // ------------------------------------------------------------------ PATH·바로가기 (하위 메뉴: 등록 항목 · 터미널 셸 · 멀티플렉서)
@@ -462,58 +725,6 @@ async function integrationsMenu() {
     if (v === "integrations") { setPath("PATH·바로가기", "등록 항목"); msg = await editItem("PATH·바로가기", items.integrations); }
     else if (v === "shell") { setPath("PATH·바로가기", "터미널 셸"); msg = await editItem("터미널 셸", items.shell, "새로 연 터미널부터 적용됩니다"); }
     else if (v === "mux") { setPath("PATH·바로가기", "멀티플렉서"); msg = await editItem("멀티플렉서", items.mux, "다음에 oxy를 실행할 때부터 적용됩니다"); }
-  }
-}
-
-/** 요청 설정: 값 하나씩 변경하고 바로 설정(models.json · settings.json)을 다시 만든다 */
-async function endpointMenu() {
-  let msg = "";
-  let last = 0;
-  for (;;) {
-    setPath("LLM 연결", "요청 설정");
-    const { text, env } = readEnv();
-    const drop = String(env.OXY_VLLM_DROP_PARAMS ?? "").split(/[\s,]+/).filter(Boolean);
-    const opts = [
-      { label: "제외할 요청 파라미터", value: "drop", hint: drop.join(", ") || "없음",
-        detail: "서버가 거부하는 파라미터(top_k 등)를 요청에서 제외합니다.", info: [["설정 변수", "OXY_VLLM_DROP_PARAMS"]] },
-      { label: "재시도 횟수", value: "retries", hint: `${env.OXY_PROVIDER_RETRIES || 0}회`,
-        detail: "서버가 요청을 거부하면(HTTP 429 등) 기다렸다가 다시 보냅니다.", info: [["설정 변수", "OXY_PROVIDER_RETRIES"]] },
-      { label: "응답 최대 길이", value: "maxout", hint: env.OXY_MAX_OUTPUT_TOKENS ? `${env.OXY_MAX_OUTPUT_TOKENS} 토큰` : "모델 기본값",
-        detail: "응답의 최대 토큰 수를 제한합니다.", info: [["설정 변수", "OXY_MAX_OUTPUT_TOKENS"]] },
-      { label: "← 이전", value: "__back", lineOnly: true },
-    ];
-    const k = await ui.select("변경할 값을 선택하세요", opts, { initial: last, message: msg,
-      note: "서버 주소·API 키 항목에서 서버를 확인해 자동으로 정하는 값입니다. 사용량 제한이 있는 서버에 직접 맞출 때 변경하세요." });
-    msg = "";
-    if (k === BACK || k === "__back") return "";
-    last = opts.findIndex((o) => o.value === k);
-    let updates = null;
-    if (k === "drop") {
-      const v = await ui.multiselect("요청에서 제외할 파라미터를 선택하세요", VLLM_EXTRA_PARAMS.map((p) => ({ label: p, value: p, checked: drop.includes(p),
-        hint: p === "chat_template_kwargs" ? "Qwen thinking 켜고 끄기" : p === "reasoning_effort" ? "gpt-oss 추론 강도" : "vLLM 샘플링 확장" })),
-      { enter: "저장", note: "서버가 거부하는 파라미터만 선택하세요. 선택한 파라미터는 요청에 넣지 않습니다." });
-      if (v !== BACK) updates = { OXY_VLLM_DROP_PARAMS: v.join(",") };
-    } else if (k === "retries") {
-      // 0 으로 저장하면 값이 빈칸으로 남는다. 빈칸도 0 으로 보인다
-      const v = await ui.input("재시도 횟수", { initial: env.OXY_PROVIDER_RETRIES || "0", enter: "저장",
-        note: "HTTP 429 등에서 서버가 알려 준 시간만큼 기다렸다가 다시 보냅니다. 사내 vLLM은 보통 0입니다.",
-        validate: (s) => (/^\d{1,2}$/.test(s) ? null : "0~99 사이의 숫자를 입력하세요") });
-      if (v !== BACK) updates = { OXY_PROVIDER_RETRIES: v === "0" ? "" : v };
-    } else if (k === "maxout") {
-      const v = await ui.input("응답 최대 길이 (토큰)", { initial: env.OXY_MAX_OUTPUT_TOKENS ?? "", enter: "저장",
-        note: "비워 두면 모델 기본값을 사용합니다. 분당 출력 토큰 제한보다 작게 설정하세요.",
-        validate: (s) => (s === "" || (/^\d+$/.test(s) && Number(s) >= 256) ? null : "256 이상의 숫자를 입력하거나 비워 두세요") });
-      if (v !== BACK) updates = { OXY_MAX_OUTPUT_TOKENS: v };
-    }
-    if (!updates) continue;
-    writeFileSync(ENV_FILE, mergeEnv(text, updates));
-    const { reg } = registry();
-    try {
-      writeSiteConfig(ROOT, { ...stateFromInstall(reg), installDir: ROOT });
-      msg = saved(`${opts[last].label} 설정을 저장했습니다. ${APPLY_LATER}.`);
-    } catch (e) {
-      await ui.notice("err", `설정 파일을 만들지 못했습니다: ${e.message}`, { fix: "agent/oxy.env의 값을 확인한 뒤 다시 저장하세요" });
-    }
   }
 }
 
@@ -615,7 +826,6 @@ async function verifyNow() {
 // ------------------------------------------------------------------ 허브
 const BROWSER_NAMES = { "chrome-for-testing": "Chrome for Testing", chromium: "Chromium", obscura: "obscura",
   edge: "Microsoft Edge", "chrome-system": "Google Chrome", none: "사용 안 함" };
-const hostOf = (u) => { try { return new URL(u).host; } catch { return u || "없음"; } };
 
 function hubRows() {
   const { env } = readEnv();
@@ -625,7 +835,8 @@ function hubRows() {
   const skillsOn = enabledSkills(ROOT, { browser: env.OXY_BROWSER, off: env.OXY_SKILLS_OFF });
   const limit = (key) => env[key] || LIMITS.find((l) => l.key === key).def;
   const hasBrowser = hasComponent("agent-browser", ROOT);
-  const k = Math.round(Number(env.OXY_CONTEXT_WINDOW || 0) / 1024);
+  const llm = loadLlm(AGENT);
+  const llmConns = llm?.connections ?? [];
   const extOff = EXTENSIONS.filter((e) => !isOn(env, e)).map((e) => e.label);
   const skillsOff = skills.filter((r) => !skillsOn.has(r.value)).map((r) => r.value);
   const has = (x) => (reg.integrations ?? []).includes(x);
@@ -636,9 +847,9 @@ function hubRows() {
   const terminalHint = [registeredText(reg) || "등록 없음", shell, mux].filter(Boolean).join(" · ");
   // 목록에는 레이블과 현재 값만. 설명(detail)과 관련 정보(info)는 포커스한 항목의 상세 패널에 보인다. gap = 묶음이 바뀌는 곳
   return [
-    { label: "LLM 연결", value: "llm", hint: `${hostOf(env.OXY_VLLM_BASE_URL)} · ${env.OXY_MODEL_CODER ?? "모델 없음"}${env.OXY_MODEL_GENERAL ? " 외 1개" : ""}`,
-      detail: "서버 주소, API 키, 모델을 변경합니다.",
-      info: [["서버", env.OXY_VLLM_BASE_URL ?? "없음"], ["코딩 모델", env.OXY_MODEL_CODER ?? "없음"], ["범용 모델", env.OXY_MODEL_GENERAL || "사용 안 함"], ["컨텍스트", `${k}K 토큰`]] },
+    { label: "LLM 연결", value: "llm", hint: llmConns.length ? `${llmConns.length}개 (${llmConns.map((x) => x.id).join(", ")}) · 기본 ${llm.main?.model ?? "없음"}` : "없음",
+      detail: "LLM 연결, 기본 모델, 작업 수준을 변경합니다.",
+      info: [...llmConns.map((x) => [x.id, `${kindLabel(x)} · ${urlOf(x)}`]), ["기본 모델", pointText(llm?.main)], ["작업 수준", `${(llm?.levels ?? []).length}개`]] },
     { label: "DB 연결", value: "db", hint: conns.length ? `${conns.length}개 (${conns.map((x) => x.id).join(", ")})` : "없음",
       detail: "에이전트가 조회할 DB 연결을 추가하거나 수정합니다.",
       info: [...conns.map((x) => [x.id, describe(x)]), ["SQLcl", isInstalled("sqlcl", ROOT) ? "설치됨" : "설치 안 됨"]] },
@@ -655,7 +866,7 @@ function hubRows() {
     { label: "스킬", value: "skills", hint: `${skills.length}개 중 ${skills.length - skillsOff.length}개 사용`,
       detail: "에이전트가 사용할 스킬을 켜거나 끕니다.",
       info: [["사용 중", `${skills.length - skillsOff.length}개`], ["꺼짐", skillsOff.join(", ") || "없음"]] },
-    { label: "실행 제한", value: "limits", hint: `출력 ${Number(limit("OXY_TOOL_OUTPUT_MAX_CHARS")).toLocaleString("en-US")}자 · 동시 실행 ${limit("OXY_LLM_MAX_CONCURRENT")}개`,
+    { label: "실행 제한", value: "limits", hint: `출력 ${Number(limit("OXY_TOOL_OUTPUT_MAX_CHARS")).toLocaleString("en-US")}자 · 백그라운드 작업 ${limit("OXY_JOBS_MAX_CONCURRENT")}개`,
       detail: "출력 길이, 반복 호출 횟수, 동시 실행 수의 제한 값을 변경합니다.",
       info: LIMITS.map((l) => [l.label, l.fmt(Number(limit(l.key)).toLocaleString("en-US"))]) },
     { label: "PATH·바로가기", value: "integrations", gap: true, hint: terminalHint,
@@ -678,6 +889,8 @@ async function main() {
     await ui.pause("종료");
     return 1;
   }
+  // 예전 설치: oxy.env 의 vLLM 값을 llm.json · secrets.json 으로 옮긴다 (configure 와 같은 일)
+  migrateInstalled(AGENT);
   ui.intro();
   let last = 0;
   let msg = "";

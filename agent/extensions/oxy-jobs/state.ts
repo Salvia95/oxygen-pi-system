@@ -19,6 +19,7 @@ export interface JobSnapshot {
   label: string;
   agent?: string;
   task?: string;
+  target?: { level?: string; connection?: string; provider?: string; model?: string; thinking?: string }; // subagent 의 작업 수준 · 연결 · 모델 · thinking
   createdAt: number;
   startedAt: number | null;
   endedAt: number | null;
@@ -40,7 +41,7 @@ export interface JobsState {
   updatedAt: number;
   closed: boolean;      // pi 가 이 실행을 끝냈다 (세션 종료 · 교체). 모니터는 새 실행 폴더로 옮겨 가거나 끝낸다
   cwd: string;
-  slots: { agents: SlotSnapshot; bash: SlotSnapshot };
+  slots: { agents: SlotSnapshot; bash: SlotSnapshot; byConnection?: Record<string, SlotSnapshot> };
   jobs: JobSnapshot[];
   control: ControlResult | null;
 }

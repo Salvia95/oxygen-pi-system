@@ -7,6 +7,7 @@ import { clip } from "../agent/extensions/oxy-context-budget.ts";
 import { docsPointer } from "../agent/extensions/oxy-prompt-trim.ts";
 import { pathKey } from "../agent/extensions/_lib/common.ts";
 import { existsSync as existsSyncTop } from "node:fs";
+import { join } from "node:path";
 
 const ids = (cmd: string) => inspect(cmd, process.cwd()).map((f) => `${f.rule.level}:${f.rule.id}`);
 
@@ -253,6 +254,36 @@ test("oxy-jobs 중지: Git Bash 작업의 손자 프로세스까지 끝나고 �
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("oxy-jobs subagent: 자식 pi 가 부모의 provider · 모델 · thinking 을 따른다 (agent 정의 값 우선)", async () => {
+  const { childArgs } = await import("../agent/extensions/oxy-jobs/subagent.ts");
+  const base = { name: "scout", description: "", tools: ["read", "grep"], prompt: "" };
+  const parent = { provider: "anthropic", id: "claude-haiku-5-5", thinking: "low" };
+  const a = childArgs("cli.js", base, "find x", parent, "p.md");
+  assert.deepEqual(a, ["cli.js", "--mode", "json", "-p", "--no-session", "--provider", "anthropic", "--model", "claude-haiku-5-5",
+    "--thinking", "low", "--tools", "read,grep", "--append-system-prompt", "p.md", "Task: find x"]);
+  // id 에 / 가 들어간 모델도 provider 와 나눠 넘긴다
+  const q = childArgs("cli.js", base, "t", { provider: "oxy-vllm", id: "qwen/qwen3.8-27b", thinking: "off" });
+  assert.deepEqual(q.slice(5, 11), ["--provider", "oxy-vllm", "--model", "qwen/qwen3.8-27b", "--thinking", "off"]);
+  // agent 정의의 값이 우선: model 만 → 부모 provider 의 그 모델 / provider 만 다르면 → 그 provider 의 기본 모델 / thinking
+  assert.deepEqual(childArgs("cli.js", { ...base, model: "qwen3.6-coder-30b" }, "t", { provider: "oxy-vllm", id: "qwen3.8-27b" }).slice(5, 9),
+    ["--provider", "oxy-vllm", "--model", "qwen3.6-coder-30b"]);
+  const other = childArgs("cli.js", { ...base, provider: "oxy-vllm", thinking: "off" }, "t", parent);
+  assert.equal(other.includes("--model"), false);
+  assert.deepEqual(other.slice(5, 7), ["--thinking", "off"]);
+  // 부모 모델을 모르면 settings 기본값 (인자 없음)
+  assert.deepEqual(childArgs("cli.js", { ...base, tools: [] }, "t", {}), ["cli.js", "--mode", "json", "-p", "--no-session", "Task: t"]);
+});
+
+test("oxy-jobs subagent: 작업 수준이 agent 정의 · 부모보다 우선", async () => {
+  const { argsFor } = await import("../agent/extensions/oxy-jobs/subagent.ts");
+  const agent = { name: "scout", description: "", tools: [], prompt: "", provider: "oxy-vllm", model: "qwen3.6-coder-30b", thinking: "off" };
+  const target = { level: "deep", connection: "claude", provider: "oxy-claude", id: "claude-haiku-5-5", thinking: "high" };
+  assert.deepEqual(argsFor("cli.js", agent, "t", { target, parent: { provider: "oxy-x", id: "y" } }).slice(5, 11),
+    ["--provider", "oxy-claude", "--model", "claude-haiku-5-5", "--thinking", "high"]);
+  assert.deepEqual(argsFor("cli.js", agent, "t", { target: null, parent: { provider: "oxy-x", id: "y", thinking: "low" } }).slice(5, 11),
+    ["--provider", "oxy-vllm", "--model", "qwen3.6-coder-30b", "--thinking", "off"]);
+});
+
 test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결과 · 정리 규칙", async () => {
   const { ControlInbox, sendControl, findRun, pruneRuns, runDirName } = await import("../agent/extensions/oxy-jobs/state.ts");
   const { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync, existsSync } = await import("node:fs");
@@ -469,58 +500,152 @@ test("code-intel: ast-grep skill · graphin 을 넣으면 MCP 등록 + skill, �
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("models.json: 서버가 거부한 vLLM 확장 파라미터만 뺀다 (OXY_VLLM_DROP_PARAMS)", async () => {
-  const { renderConfig } = await import("../scripts/render-config.mjs");
-  const { mkdtempSync, cpSync, readFileSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const dir = mkdtempSync(join(tmpdir(), "oxyrc-"));
-  const vars = { OXY_VLLM_BASE_URL: "http://x/v1", OXY_MODEL_CODER: "qwen3.6-coder-30b", OXY_MODEL_GENERAL: "qwen3.8-27b", OXY_DEFAULT_MODEL: "qwen3.6-coder-30b", OXY_CONTEXT_WINDOW: "131072", OXY_SHELL_PATH: "C:/bash.exe" };
-  // c = 코딩 모델, g = 범용 모델
-  const models = (extra: Record<string, string>) => {
-    const v = { ...vars, ...extra };
-    renderConfig(dir, v);
-    const list = JSON.parse(readFileSync(join(dir, "models.json"), "utf8")).providers["oxy-vllm"].models;
-    return { c: list.find((m: any) => m.id === v.OXY_MODEL_CODER), g: list.find((m: any) => m.id === v.OXY_MODEL_GENERAL) };
+test("LLM 연결: 계열 프리셋 · 제외 파라미터 · 응답 최대 길이 · Claude 내장 모델 (providerConfig)", async () => {
+  const { providerConfig, escapeKey } = await import("../scripts/llm-connections.mjs");
+  const root = join(import.meta.dirname, "..");
+  const vllm = (extra: any = {}, models?: any[]) => ({ id: "site", kind: "vllm", baseUrl: "http://x/v1", request: { retries: 0, dropParams: [] }, ...extra,
+    models: models ?? [{ id: "qwen3.6-coder-30b", family: "qwen-coder", contextWindow: 131072, maxOutput: 16384 },
+      { id: "qwen3.8-27b", family: "qwen-thinking", contextWindow: 131072, maxOutput: 32768 }] });
+  const models = (conn: any) => {
+    const list = providerConfig(root, conn, undefined).config.models;
+    return { c: list[0], g: list[1] };
   };
+  const cfg = providerConfig(root, vllm(), undefined).config;
+  assert.equal(cfg.apiKey, "EMPTY");                                   // 키 없는 vLLM
+  assert.equal(cfg.api, "openai-completions");
+  assert.equal(cfg.authHeader, true);
+  assert.equal(cfg.compat, undefined);                                 // registerProvider 는 provider 단위 compat 를 쓰지 않아 모델마다 넣는다
+  assert.equal(cfg.models[0].compat.maxTokensField, "max_tokens");
+  assert.equal(cfg.models[0].compat.supportsStore, false);
+  let m = models(vllm());
+  assert.equal(m.c.samplingParams.repetition_penalty, 1.05);
+  assert.equal(m.c.maxTokens, 16384);
+  assert.equal(m.g.compat.thinkingFormat, "qwen-chat-template");
+  m = models(vllm({ request: { dropParams: ["repetition_penalty"] } }));   // 사내 게이트웨이에서 실제로 거부된 값
+  assert.equal(m.c.samplingParams.repetition_penalty, undefined);
+  assert.equal(m.c.samplingParams.top_k, 20);                          // 받아 주는 것은 남긴다
+  assert.equal(m.g.reasoning, true);
+  m = models(vllm({ request: { dropParams: ["top_k", "repetition_penalty", "chat_template_kwargs", "bogus"] } }));
+  assert.deepEqual(m.c.samplingParams, { temperature: 0.7, top_p: 0.8 });
+  assert.equal(m.g.reasoning, false);
+  assert.equal(m.g.compat.thinkingFormat, undefined);
+  assert.deepEqual(m.g.samplingParams, { temperature: 0.7, top_p: 0.8 });   // thinking 끈 상태의 샘플링
+  // 모델 계열: gpt-oss 는 reasoning_effort, 거부되면 thinking 제어 없이 / 계열이 없으면 id 로 추정
+  const oss = (drop: string[]) => models(vllm({ request: { dropParams: drop } }, [{ id: "openai/gpt-oss-120b", contextWindow: 131072, maxOutput: 1000 }])).c;
+  assert.equal(oss([]).compat.supportsReasoningEffort, true);
+  assert.equal(oss([]).thinkingLevelMap.off, "low");
+  assert.equal(oss([]).maxTokens, 1000);
+  assert.equal(oss(["reasoning_effort"]).reasoning, false);
+  assert.equal(oss(["reasoning_effort"]).compat.supportsReasoningEffort, false);   // 종류의 기본값(false)으로
+  assert.match(oss(["reasoning_effort"]).name, /thinking 제어 없음/);
+  assert.equal(oss(["chat_template_kwargs"]).reasoning, true);          // 다른 방식의 거부는 영향 없음
+  assert.equal(models(vllm({}, [{ id: "qwen/qwen3.8-27b", family: "qwen-coder", contextWindow: 1, maxOutput: 1 }])).c.samplingParams.repetition_penalty, 1.05);
+  assert.deepEqual(models(vllm({}, [{ id: "my-llama", contextWindow: 1, maxOutput: 1 }])).c.samplingParams, { temperature: 0.7 });
+  // Claude: pi 내장 카탈로그의 모델 정보에 입력한 길이를 덮어쓴다. 키의 $ · 앞의 ! 는 글자 그대로 넘어가게 이스케이프
+  const claude = { id: "claude", kind: "anthropic", models: [{ id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384 }, { id: "no-such-model", contextWindow: 1, maxOutput: 1 }] };
+  const r = providerConfig(root, claude, "sk-a$b!c");
+  assert.equal(r.config.api, "anthropic-messages");
+  assert.equal(r.config.baseUrl, "https://api.anthropic.com");
+  assert.equal(r.config.apiKey, "sk-a$$b!c");
+  assert.equal(escapeKey("!cmd"), "$!cmd");
+  assert.deepEqual(r.missing, ["no-such-model"]);
+  const h = r.config.models[0];
+  assert.deepEqual([h.id, h.contextWindow, h.maxTokens, h.compat.forceAdaptiveThinking, h.provider, h.baseUrl], ["claude-haiku-5-5", 131072, 16384, true, undefined, undefined]);
+  assert.throws(() => providerConfig(root, { ...claude, models: [] }, undefined), /API 키가 없습니다/);
+});
+
+test("LLM 연결: 예전 oxy.env 값 옮기기 · settings · 검사 · 작업 수준 · thinking 선택지", async () => {
+  const L = await import("../scripts/llm-connections.mjs");
+  const root = join(import.meta.dirname, "..");
+  const env = { OXY_VLLM_BASE_URL: "http://vllm/v1/", OXY_VLLM_API_KEY: "sk-1", OXY_MODEL_CODER: "qwen3.6-coder-30b", OXY_MODEL_GENERAL: "qwen3.8-27b",
+    OXY_DEFAULT_MODEL: "qwen3.6-coder-30b", OXY_CONTEXT_WINDOW: "65536", OXY_VLLM_DROP_PARAMS: "top_k,bogus", OXY_PROVIDER_RETRIES: "4", OXY_MAX_OUTPUT_TOKENS: "20000", OXY_LLM_MAX_CONCURRENT: "1" };
+  const r = L.migrateLegacy(null, env)!;
+  const v = r.llm.connections[0];
+  assert.deepEqual([v.id, v.kind, v.baseUrl, v.maxConcurrent, v.request], ["vllm", "vllm", "http://vllm/v1", 1, { retries: 4, dropParams: ["top_k"] }]);
+  assert.deepEqual(v.models.map((m: any) => [m.id, m.family, m.contextWindow, m.maxOutput]),
+    [["qwen3.6-coder-30b", "qwen-coder", 65536, 16384], ["qwen3.8-27b", "qwen-thinking", 65536, 20000]]);   // 상한은 예전 기본값과 OXY_MAX_OUTPUT_TOKENS 중 작은 값
+  assert.deepEqual(r.llm.main, { connection: "vllm", model: "qwen3.6-coder-30b", thinking: "off" });
+  assert.deepEqual(r.llm.levels.map((l: any) => [l.id, l.connection, l.model, l.thinking]),
+    [["light", "vllm", "qwen3.6-coder-30b", "off"], ["normal", "vllm", "qwen3.6-coder-30b", "off"], ["deep", "vllm", "qwen3.6-coder-30b", "off"]]);
+  assert.deepEqual([r.key, r.keyAction], ["sk-1", "set"]);
+  assert.equal(L.migrateLegacy(null, { ...env, OXY_VLLM_API_KEY: "EMPTY" })!.keyAction, "delete");
+  assert.equal(L.migrateLegacy(null, { OXY_GITLAB: "x" }), null);                         // 옮길 값 없음
+  // 이미 다른 연결이 기본 모델이면 그대로 두고 vllm 연결만 갱신한다
+  const claude = { id: "claude", kind: "anthropic", models: [{ id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384 }] };
+  const mixed = { version: 1, connections: [claude, v], main: { connection: "claude", model: "claude-haiku-5-5", thinking: "low" },
+    levels: [{ id: "deep", label: "d", use: "u", connection: "claude", model: "claude-haiku-5-5", thinking: "high" }] };
+  const r2 = L.migrateLegacy(mixed, { ...env, OXY_VLLM_BASE_URL: "http://other/v1" })!;
+  assert.deepEqual(r2.llm.connections.map((c: any) => [c.id, c.baseUrl ?? null]), [["claude", null], ["vllm", "http://other/v1"]]);
+  assert.equal(r2.llm.main.connection, "claude");
+  assert.equal(r2.llm.levels.length, 1);
+  // vllm 연결의 모델이 바뀌면, 없는 모델을 가리키던 작업 수준은 기본 모델로 되돌린다 (다른 연결의 수준은 그대로)
+  const stale = { ...r.llm, levels: [...r.llm.levels.map((l: any) => ({ ...l, model: "gone-model", thinking: "high" })),
+    { id: "deep2", connection: "claude", model: "claude-haiku-5-5", thinking: "high" }] };
+  const r3 = L.migrateLegacy({ ...stale, connections: [...stale.connections, claude] }, env)!;
+  assert.deepEqual(r3.llm.levels.map((l: any) => [l.id, l.model, l.thinking]),
+    [["light", "qwen3.6-coder-30b", "off"], ["normal", "qwen3.6-coder-30b", "off"], ["deep", "qwen3.6-coder-30b", "off"], ["deep2", "claude-haiku-5-5", "high"]]);
+  assert.deepEqual(L.validateLlm(r3.llm, root), []);
+  // oxy.env 에서 옮긴 키만 지운다 (주석 · 다른 키 유지)
+  assert.equal(L.removeEnvKeys("# c\nOXY_VLLM_BASE_URL=x\nGITLAB_HOST=g\n# OXY_MODEL_CODER=y\n", L.LEGACY_ENV_KEYS), "# c\nGITLAB_HOST=g\n# OXY_MODEL_CODER=y\n");
+  // settings.json 값
+  assert.deepEqual(L.settingsFromLlm(r2.llm), { enabledModels: ["oxy-claude/**", "oxy-vllm/**"], defaultProvider: "oxy-claude", defaultModel: "claude-haiku-5-5",
+    defaultThinkingLevel: "low", retries: 4 });
+  // 검사
+  assert.deepEqual(L.validateLlm(r2.llm, root), []);
+  const bad = structuredClone(r2.llm);
+  bad.main = { connection: "vllm", model: "qwen3.6-coder-30b", thinking: "high" };       // Coder 계열은 thinking 없음
+  bad.levels.push({ id: "x", connection: "nope", model: "m" });
+  bad.connections.push({ id: "Bad Id", kind: "anthropic", models: [{ id: "claude-nope", contextWindow: 1, maxOutput: 1 }] });
+  const errs = L.validateLlm(bad, root).join(" | ");
+  assert.match(errs, /기본 모델: qwen3.6-coder-30b 은 thinking high 을 지원하지 않음/);
+  assert.match(errs, /작업 수준 x: 연결 nope 이 없음/);
+  assert.match(errs, /연결 이름이 규칙에 맞지 않음: Bad Id/);
+  assert.match(errs, /claude-nope: pi 내장 모델 목록에 없음/);
+  // 작업 수준 → 자식 대상
+  assert.deepEqual(L.resolveLevel(r2.llm, "deep"), { level: "deep", connection: "claude", provider: "oxy-claude", id: "claude-haiku-5-5", thinking: "high" });
+  assert.equal(L.resolveLevel(r2.llm, "nope"), null);
+  assert.deepEqual(L.connectionUsers(r2.llm, "claude"), ["기본 모델", "작업 수준 deep"]);
+  // thinking 선택지
+  const conn = r.llm.connections[0];
+  assert.deepEqual(L.thinkingChoices(root, conn, "qwen3.6-coder-30b"), ["off"]);
+  assert.deepEqual(L.thinkingChoices(root, conn, "qwen3.8-27b"), ["off", "high"]);
+  assert.deepEqual(L.thinkingChoices(root, { ...conn, request: { dropParams: ["chat_template_kwargs"] } }, "qwen3.8-27b"), ["off"]);
+  assert.deepEqual(L.thinkingChoices(root, { ...conn, models: [] }, "openai/gpt-oss-120b"), ["low", "medium", "high"]);
+  assert.deepEqual(L.thinkingChoices(root, claude, "claude-haiku-5-5"), ["off", "low", "medium", "high", "xhigh", "max"]);
+});
+
+test("renderConfig: oxy.env 의 예전 vLLM 값 → llm.json · 키는 DPAPI(secrets.json) · settings.json", { skip: process.platform !== "win32" }, async () => {
+  const { renderConfig } = await import("../scripts/render-config.mjs");
+  const { getSecrets } = await import("../installer/secrets.mjs");
+  const { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "oxyrc-"));
+  const root = join(import.meta.dirname, "..");
   try {
-    cpSync(join(import.meta.dirname, "..", "agent", "templates"), join(dir, "templates"), { recursive: true });
-    let m = models({});
-    assert.equal(m.c.samplingParams.repetition_penalty, 1.05);
-    assert.equal(m.g.compat.thinkingFormat, "qwen-chat-template");
-    m = models({ OXY_VLLM_DROP_PARAMS: "repetition_penalty" });       // 사내 게이트웨이에서 실제로 거부된 값
-    assert.equal(m.c.samplingParams.repetition_penalty, undefined);
-    assert.equal(m.c.samplingParams.top_k, 20);                          // 받아 주는 것은 남긴다
-    assert.equal(m.g.reasoning, true);
-    m = models({ OXY_VLLM_DROP_PARAMS: "top_k, repetition_penalty,chat_template_kwargs,bogus" });
-    assert.deepEqual(m.c.samplingParams, { temperature: 0.7, top_p: 0.8 });
-    assert.equal(m.g.reasoning, false);
-    assert.equal(m.g.compat, undefined);
-    assert.deepEqual(m.g.samplingParams, { temperature: 0.7, top_p: 0.8 });   // thinking 끈 상태의 샘플링
-    m = models({ OXY_MAX_OUTPUT_TOKENS: "1000" });                     // 분당 출력 토큰 제한이 있는 엔드포인트
-    assert.equal(m.c.maxTokens, 1000);
-    assert.equal(m.g.maxTokens, 1000);
-    const st = () => JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
-    assert.equal(st().enabledModels[0], "oxy-vllm/**");                  // 모델 id 에 / 가 있어도 일치 (qwen/qwen3.8-27b)
-    assert.equal(st().retry.provider.maxRetries ?? 0, 0);
-    models({ OXY_PROVIDER_RETRIES: "4" });
-    assert.equal(st().retry.provider.maxRetries, 4);
-    // 모델 계열: gpt-oss 는 reasoning_effort, 거부되면 thinking 제어 없이
-    m = models({ OXY_MODEL_GENERAL: "openai/gpt-oss-120b" });
-    assert.equal(m.g.compat.supportsReasoningEffort, true);
-    assert.equal(m.g.thinkingLevelMap.off, "low");
-    assert.equal(m.g.compat.thinkingFormat, undefined);
-    m = models({ OXY_MODEL_GENERAL: "openai/gpt-oss-120b", OXY_VLLM_DROP_PARAMS: "reasoning_effort" });
-    assert.equal(m.g.reasoning, false);
-    assert.equal(m.g.thinkingLevelMap, undefined);
-    assert.match(m.g.name, /thinking 제어 없음/);
-    m = models({ OXY_MODEL_GENERAL: "openai/gpt-oss-120b", OXY_VLLM_DROP_PARAMS: "chat_template_kwargs" });
-    assert.equal(m.g.reasoning, true);                                   // 다른 방식의 거부는 영향 없음
-    // 명시한 계열이 id 추정보다 우선
-    m = models({ OXY_MODEL_CODER: "qwen/qwen3.8-27b", OXY_DEFAULT_MODEL: "qwen/qwen3.8-27b", OXY_MODEL_CODER_FAMILY: "qwen-coder" });
-    assert.equal(m.c.samplingParams.repetition_penalty, 1.05);
-    m = models({ OXY_MODEL_CODER: "my-llama", OXY_DEFAULT_MODEL: "my-llama" });
-    assert.deepEqual(m.c.samplingParams, { temperature: 0.7 });          // generic
+    cpSync(join(root, "agent", "templates"), join(dir, "templates"), { recursive: true });
+    writeFileSync(join(dir, "oxy.env"), "# site\nOXY_VLLM_BASE_URL=http://x/v1\nOXY_VLLM_API_KEY='k$1 !x'\nOXY_MODEL_CODER=qwen3.6-coder-30b\nOXY_DEFAULT_MODEL=qwen3.6-coder-30b\nGITLAB_HOST=g\n");
+    renderConfig(dir, { OXY_SHELL_PATH: "C:/bash.exe" }, { root });
+    const llm = JSON.parse(readFileSync(join(dir, "llm.json"), "utf8"));
+    assert.equal(llm.connections[0].baseUrl, "http://x/v1");
+    assert.equal(getSecrets(dir, ["llm/vllm"])["llm/vllm"], "k$1 !x");
+    assert.ok(!readFileSync(join(dir, "secrets.json"), "utf8").includes("k$1"));          // 평문이 남지 않는다
+    assert.equal(readFileSync(join(dir, "oxy.env"), "utf8"), "# site\nGITLAB_HOST=g\n");
+    const st = JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
+    assert.deepEqual([st.defaultProvider, st.defaultModel, st.defaultThinkingLevel, st.enabledModels], ["oxy-vllm", "qwen3.6-coder-30b", "off", ["oxy-vllm/**"]]);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, "models.json"), "utf8")).providers, {});
+    // 설치 TUI 가 키 없이 다시 쓰면(EMPTY) 저장된 키를 지운다 · 두 번째 실행은 아무것도 옮기지 않는다
+    writeFileSync(join(dir, "oxy.env"), "OXY_VLLM_BASE_URL=http://y/v1\nOXY_VLLM_API_KEY=EMPTY\nOXY_MODEL_CODER=qwen3.6-coder-30b\n");
+    renderConfig(dir, { OXY_SHELL_PATH: "C:/bash.exe" }, { root });
+    assert.equal(getSecrets(dir, ["llm/vllm"])["llm/vllm"], undefined);
+    assert.equal(JSON.parse(readFileSync(join(dir, "llm.json"), "utf8")).connections[0].baseUrl, "http://y/v1");
+    renderConfig(dir, { OXY_SHELL_PATH: "C:/bash.exe" }, { root });
+    assert.equal(JSON.parse(readFileSync(join(dir, "llm.json"), "utf8")).connections[0].baseUrl, "http://y/v1");
+    // 잘못된 llm.json 은 원인을 알리고 실패
+    const l2 = JSON.parse(readFileSync(join(dir, "llm.json"), "utf8"));
+    l2.main.model = "nope";
+    writeFileSync(join(dir, "llm.json"), JSON.stringify(l2));
+    assert.throws(() => renderConfig(dir, { OXY_SHELL_PATH: "C:/bash.exe" }, { root }), /기본 모델: vllm 연결에 모델 nope 이 없음/);
+    assert.ok(existsSync(join(dir, "psmux.conf")));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
