@@ -403,6 +403,27 @@ test("oxy-monitor 화면: jobs · flow 가 좁은 폭(23칸)에서도 폭 · 줄
   check(flowView(fit, null, { sel: 0, open: new Set() }, 23, 8), 23, 8);
 });
 
+test("oxy-monitor 하단 바: 보일 항목 · 한 줄 · 클릭 범위 (monitor-spec §2)", async () => {
+  const { barItems, barLine, itemAt } = await import("../agent/extensions/oxy-monitor/bar.ts");
+  const none = new Set<string>();
+  assert.deepEqual(barItems({ active: 0, recent: 0 }, { hasContent: false, done: 0, total: 0, node: "" }, none), []);   // 보일 것이 없으면 바도 없다
+  const items = barItems({ active: 2, recent: 1 }, { hasContent: true, done: 3, total: 7, node: "n4" }, new Set(["flow"]));
+  assert.deepEqual(items.map((i) => [i.label, i.open]), [["jobs 2 실행 중 · 1 완료", false], ["flow 3/7", true]]);
+  assert.equal(barItems(null, { hasContent: true, done: 0, total: 0, node: "n4" }, none)[0].label, "flow n4");   // 계획이 없으면 마지막 단계
+  assert.equal(barItems({ active: 0, recent: 0 }, null, new Set(["jobs"]))[0].label, "jobs");                     // 열린 모니터는 닫을 수 있게 보인다
+  const w = (s: string) => [...s].reduce((n, ch) => n + (/[가-힣]/.test(ch) ? 2 : 1), 0);
+  const st = { width: w, item: (s: string, o: boolean) => (o ? `<${s}>` : s), focus: (s: string) => `[${s}]`, hint: (s: string) => `{${s}}` };
+  const r = barLine(items, -1, 80, st);
+  assert.equal(r.line, "▸ jobs 2 실행 중 · 1 완료   <▸ flow 3/7>");
+  assert.deepEqual(r.ranges, [{ kind: "jobs", start: 0, end: 25 }, { kind: "flow", start: 28, end: 38 }]);
+  assert.equal(itemAt(r.ranges, 5), "jobs");
+  assert.equal(itemAt(r.ranges, 26), undefined);                        // 항목 사이
+  assert.equal(itemAt(r.ranges, 30), "flow");
+  const f = barLine(items, 1, 80, st);
+  assert.match(f.line, /\[▸ flow 3\/7\]    \{←→ 이동  Enter 열기·닫기  ↑ 입력창\}$/);   // 바에 들어오면 키 안내
+  assert.equal(barLine(items, 0, 30, st).ranges.length, 1);             // 좁으면 들어가는 항목까지만
+});
+
 test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결과 · 정리 규칙", async () => {
   const { ControlInbox, sendControl, findRun, pruneRuns, runDirName } = await import("../agent/extensions/oxy-jobs/state.ts");
   const { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync, existsSync } = await import("node:fs");

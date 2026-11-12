@@ -75,6 +75,10 @@ pane 관리
   - 하단 바에 항목이 없으면 `↓` 를 가로채지 않는다.
   - 다른 확인 경로: `/monitor jobs`, `/monitor flow` 명령.
 - psmux 밖: 바는 그대로 보이고, `Enter`/클릭하면 지금의 `/jobs` 목록 대화상자를 연다. flow 는 `/flow` 보기와 같다.
+- 구현 (5단계, 2026-11-12): `oxy-monitor/bar.ts` (항목 · 한 줄 · 클릭 범위를 만드는 순수 함수), `index.ts` 의 `setWidget("oxy-bar", 컴포넌트, belowEditor)` + `handleMouse` + `ctx.ui.onTerminalInput`.
+  바가 쓰는 요약은 oxy-jobs · oxy-flow 가 `globalThis[Symbol.for("oxy.jobs" | "oxy.flow")]` 로 내보낸다 (`summary()` · `onChange()`).
+  - psmux 밖의 `/jobs` · `/flow` 는 `pi.sendUserMessage(…, { expandPromptTemplates: true })` 로 연다. 이 옵션이 없으면 "/jobs" 가 모델에게 보내는 메시지가 된다 (실측).
+  - 실측 (pi + psmux, mock LLM): ↓ → 바 선택과 키 안내, Enter 로 모니터 열고 닫기, ↑ 로 입력창, 바에서 글자 키는 입력창으로, mintty 창 클릭으로 모니터 열기, psmux 밖에서는 입력창 위 목록 유지와 Enter 로 `/jobs` 대화상자.
 - 입력창 위 작업 목록 위젯(`oxy-jobs`, 최대 6줄): psmux 안에서는 모니터 pane 이 같은 역할(실행 중 작업과 마지막 출력)을 맡으므로 숨기고 하단 바로 대체한다. psmux 밖에서는 모니터 pane 을 열 수 없어 이 목록이 유일하게 실시간으로 보이는 화면이므로 그대로 둔다. 상태줄(`setStatus`)은 두 경우 모두 그대로 둔다.
 
 ## 3. 데이터 형식: oxy-jobs

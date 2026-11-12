@@ -53,7 +53,19 @@ export default function (pi: ExtensionAPI) {
   let lastPrompt = "";
   const eng = (ctx: any): FileFlowEngine => (engine ??= new FileFlowEngine(ctx.cwd));
 
+  // 하단 바(oxy-monitor)가 쓰는 요약과 변경 알림 (기록이 바뀔 때마다 status 가 불린다)
+  const listeners = new Set<() => void>();
+  (globalThis as any)[Symbol.for("oxy.flow")] = {
+    summary: () => {
+      if (!engine) return null;
+      const f = engine.load();
+      const pg = progress(f.plan);
+      return { hasContent: engine.hasContent(), done: pg.done, total: pg.total, node: f.nodes.at(-1)?.id ?? "" };
+    },
+    onChange: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); },
+  };
   const status = (ctx: any) => {
+    for (const fn of listeners) { try { fn(); } catch { /* 화면 오류는 무시 */ } }
     if (!ctx.hasUI || !engine) return;
     const f = engine.load();
     if (!engine.writable) { ctx.ui.setStatus(CUSTOM, `flow 읽기 전용 (pid ${engine.lockOwner} 사용 중)`); return; }

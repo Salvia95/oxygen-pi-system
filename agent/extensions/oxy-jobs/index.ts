@@ -77,7 +77,8 @@ export default async function (pi: ExtensionAPI) {
       const last = (j.tail.filter((l) => l.trim()).at(-1) ?? "").replace(/\s+/g, " ").slice(0, 50);
       return `${ICON[j.state]} ${j.id} ${j.kind === "agent" ? "agent" : "bash "} ${j.label.slice(0, 40).padEnd(40)} ${dur.padStart(6)}  ${last}`;
     });
-    uiCtx.ui.setWidget("oxy-jobs", lines.length ? lines : undefined);
+    // psmux 안에서는 하단 바와 모니터 pane 이 같은 역할을 해서 목록을 숨긴다 (docs/monitor-spec.md §2)
+    uiCtx.ui.setWidget("oxy-jobs", lines.length && !barMode ? lines : undefined);
     const act = mgr.active();
     uiCtx.ui.setStatus("oxy-jobs", act.length
       ? (() => { const t = mgr.agentSlotTotals(); return `jobs ${act.length} · agents ${t.running}/${t.limit}${t.waiting ? ` (+${t.waiting} 대기)` : ""}`; })()
@@ -86,6 +87,18 @@ export default async function (pi: ExtensionAPI) {
     if (!act.length && timer) { clearInterval(timer); timer = null; }
   };
   mgr.onChange(render);
+
+  // 하단 바(oxy-monitor)가 쓰는 요약과 변경 알림. psmux 안이면 입력창 위 작업 목록 대신 하단 바를 쓴다
+  const barMode = Boolean(process.env.TMUX && process.env.TMUX_PANE && psmuxExe()) && enabled("MONITOR");
+  (globalThis as any)[Symbol.for("oxy.jobs")] = {
+    summary: () => {
+      const now = Date.now();
+      const list = mgr.list();
+      return { active: list.filter((j) => j.state === "running" || j.state === "queued").length,
+        recent: list.filter((j) => j.state !== "running" && j.state !== "queued" && j.endedAt && now - j.endedAt < 120000).length };
+    },
+    onChange: (fn: () => void) => mgr.onChange(fn),
+  };
   const remember = (ctx: any) => { if (ctx?.hasUI) { uiCtx = ctx; interactive = true; } };
   const defaultAgents = envInt("OXY_LLM_MAX_CONCURRENT", 2);
   /** provider id(oxy-<연결 id>) → llm.json 의 연결 */
