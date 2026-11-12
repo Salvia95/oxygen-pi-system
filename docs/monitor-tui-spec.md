@@ -19,7 +19,8 @@ pane 배치 · 하단 바 · 데이터 형식(jobs `state.json`, flow `flow.json
 | 화면이 정돈되어 보이지 않는다 | `view.ts` 가 글자 줄을 직접 이어 붙인다. 구역 구분 · 오른쪽 정렬 · 강조가 화면마다 제각각이다 |
 | 화면 규칙 위반 | `⏳`(그림 글자, 2칸) · `✗` 를 쓴다. `docs/tui-spec.md` §6 은 1칸 글자만 허용한다 (`✓ × ! · …`, 진행 중은 점자 `⠋⠙⠹…`) |
 
-좁은 폭이 전제다: 오른쪽 열은 80×24 에서 23칸, 120×30 에서 35칸이다 (`main-pane-width 70%`, `docs/monitor-spec.md` §1).
+좁은 폭이 전제다: 오른쪽 열은 80×24 에서 23 ~ 24칸, 120×30 에서 35 ~ 36칸이다 (`main-pane-width 70%`, `docs/monitor-spec.md` §1. 2026-11-13 이 PC 의 psmux 3.4.0 에서는 24 · 36칸).
+화면은 exe 가 알리는 실제 크기(`resize` 이벤트)를 따르므로 규칙은 "30칸 미만이면 좁은 폭"으로 둔다.
 
 ## 2. 실시간 활동 내보내기 (pi extension)
 
@@ -48,7 +49,7 @@ pane 배치 · 하단 바 · 데이터 형식(jobs `state.json`, flow `flow.json
 | `session_before_compact` / `session_compact` · `session_compact_failed` | `compacting` / 앞 상태로 |
 | `agent_settled` | `agent.state = idle`, `tools` 비움 |
 | 사용자 요청 (`before_agent_start`, `messageType` 이 `user`) | `events` 에 `kind: user` (앞 60자) |
-| oxy-flow 변화 (`globalThis[Symbol.for("oxy.flow")]` 의 `onChange`) | 새 커밋 노드 → `kind: commit` (`커밋 n3 feat: …`), 할 일 상태 변화 → `kind: plan` (`p1.2 → done 테스트 작성`) |
+| oxy-flow 변화 (`globalThis[Symbol.for("oxy.flow")]` 의 `onChange`) | 새 커밋 노드 → `kind: commit` (`커밋 n3 feat: …`), 할 일 상태 변화 → `kind: plan` (`p1.2 완료 테스트 작성`. 상태는 예정 · 진행 · 완료 · 막힘 · 제외) |
 | oxy-jobs 변화 (`oxy.jobs` 의 `onChange`) | 작업 시작 · 끝 → `kind: job` (`job-2 시작`, `job-2 완료 (exit 0)`) |
 
 - 도구 요약(`summary`): `bash` 는 명령 첫 줄, `read` · `edit` · `write` 는 경로, `grep` 은 찾는 말, `subagent` 는 `<agent>: <일 앞부분>`, `flow_plan` 은 `동작 id 상태`, `flow_note` 는 `종류 글`, 그 밖은 비운다(이벤트에는 도구 이름만). 120자에서 자른다.
@@ -83,7 +84,7 @@ flow           할 일 2/5        ← 제목 · 진행 (오른쪽 정렬)
 ✓ edit src/login.ts              ← 최근 (새 것이 아래)
 × bash npm test
 ✓ 커밋 n1 feat: 라우트
-↑↓ 이동  Enter 펼치기  q 닫기
+▲▼ 이동  Enter 펼치기  q 닫기
 ```
 
 - **지금** (항상 맨 위, 최대 4줄)
@@ -92,7 +93,7 @@ flow           할 일 2/5        ← 제목 · 진행 (오른쪽 정렬)
   - 진행 중인 할 일: 첫 번째 `doing` 할 일(없으면 항목). 계획이 없으면 이 줄을 두지 않는다.
   - `live.json` 이 없거나 10초 넘게 갱신되지 않으면 `pi 상태를 알 수 없습니다` 한 줄 (5초마다 갱신되므로 두 번 놓친 경우. 5초로 하면 갱신 직전에 깜박인다).
 - **계획** (남는 높이를 차지, 스크롤)
-  - 진행 중인 항목 · 할 일은 강조색과 스피너. 화면에 늘 보이도록 스크롤을 맞춘다 (사용자가 `↑↓` 로 움직인 뒤 10초 동안은 사용자 위치를 둔다).
+  - 진행 중인 항목 · 할 일은 강조색과 스피너. 화면에 늘 보이도록 스크롤을 맞춘다 (사용자가 `▲▼` 키로 움직인 뒤 10초 동안은 사용자 위치를 둔다).
   - 연결된 커밋은 오른쪽 정렬(`n2 n3`), 폭이 모자라면 뺀다.
   - 계획이 없고 목표만 있으면 목표 한두 줄, 기록이 없으면 `작업 기록이 없습니다.`
   - 계획 아래에 지금 화면과 같이 `계획 밖 커밋` · `커밋 전 작업`(결정 · 변경 파일 수 · 실패)을 둔다 (`docs/monitor-spec.md` §5 의 기존 정보를 잃지 않는다).
@@ -109,7 +110,7 @@ jobs        실행 중 2 · 완료 1
 ✓ bg   npm test          1:03
 ─────────────────────────
 ⠹ 응답 생성 중            0:05    ← 지금 (한 줄): 본 대화가 무엇을 하는지
-↑↓ 이동  Enter 로그  s 중지  q 닫기
+▲▼ 이동  Enter 로그  s 중지  q 닫기
 ```
 
 - 목록: 상태 기호 · 종류(`bg` · `sub`) · 이름 · 경과(오른쪽 정렬). 23칸이면 종류를 빼고, 그래도 모자라면 이름을 줄인다.
@@ -137,11 +138,20 @@ jobs        실행 중 2 · 완료 1
     줄 배치: 제목 1줄 → (`nowAt: top` 이면) 지금 → 가로줄 → 구역들 (구역 사이 가로줄, 구역 제목은 가로줄 안에) → (`bottom` 이면) 가로줄 → 지금 → 키 안내. 이 규칙의 줄 수는 `model.ts` 의 `modelHeight` 와 같아야 한다.
   - 화면 크기가 바뀌면 exe 가 `{"event":"resize","width","height"}` 를 보내고 Node 가 새 크기로 다시 보낸다.
   - `marker` 는 `spinner` · `todo` · `done` · `failed` · `blocked` · `stopped` · `dropped` (기호는 exe 가 정한다). `since` 가 있으면 exe 가 경과를 그린다.
-  - 이벤트 `{"event":"key","key":"up|down|enter|esc|s|q"}`, `{"event":"select","key":"<행 key>"}` (선택이 바뀔 때).
+  - 이벤트 `{"event":"key","key":"up|down|enter|esc|s|q"}`. 선택한 줄은 Node 가 정해 `selected` 로 보낸다 (exe 는 선택을 따로 기억하지 않는다).
+  - 지원 확인: 새 exe 는 `oxy-tui --version` 에 `monitor` 를 함께 출력한다 (예 `oxy-tui 0.2.0 monitor`). 예전 exe(v0.1.0)는 `--mode` 를 모르고 설치 화면 규약으로 기다리므로, Node 는 띄우기 전에 버전 출력으로 확인한다.
 - 예전 화면(pi-tui)은 남긴다: `oxy-tui.exe` 가 없거나 모니터 모드를 모르면(`--mode monitor` 에 오류) 지금의 pi-tui 화면으로 그린다 (§7 M5).
 
 - 구현 (2단계, 2026-11-13): `agent/extensions/oxy-monitor/model.ts` (`flowModel` · `jobsModel` · `nowRows` · `planRows` · `recentRows` · `modelHeight`). 색 코드 없이 상태 기호 이름(`marker`)만 담는다.
   지금의 pi-tui 화면(`view.ts`)은 M5 대로 대체 화면으로 남기고 아직 바꾸지 않았다 (`⏳` · `✗` 는 4단계에서 대체 화면에도 고친다).
+
+- 구현 (3단계, 2026-11-13, tui-implementer): `installer/oxy-tui/src/monitor.rs` (그리기 · 줄 배치 · 스피너 · 경과), `main.rs` 의 `--mode monitor` · `demo monitor --model`, `--version` 에 `monitor` (`oxy-tui 0.2.0 monitor`).
+  jobs 의 지금(`nowAt: bottom`)은 키 안내 바로 위에 붙이고, 목록이 짧으면 빈 줄은 목록과 그 가로줄 사이에 둔다.
+  예시 모델은 `tests/monitor-fixtures.mjs` 가 `model.ts` 로 만든다 (`tests/fixtures/monitor/`, `model.ts` 를 바꾸면 다시 만든다. unit-tui 가 최신인지 본다).
+  Ctrl+C 는 `{"event":"interrupt"}` 를 보내고(Node 가 `q` 처럼 처리), 지시 연결이 끊기면 터미널을 되돌리고 종료 코드 1.
+  함께 바꾼 공용 규칙: `text::fit` 이 상대 경로와 긴 파일 이름도 가운데를 줄이고, `parts.rs` 의 맥락 · 설명 · 알림 · 결과 줄이 `fit` 을 쓴다 (설치 화면에도 적용). `TERM=dumb` 에서 색을 끈다.
+- 실측 (2026-11-13, mintty 80×24 · 120×30, psmux 오른쪽 30% pane 에 예시 모델, WT 80×24): 줄 넘침 없음, 점자 스피너 · `✓ × ■ ! ▲▼` 1칸, 선택 줄 반전, jobs 지금 줄이 맨 아래.
+  설치 화면(폴더 선택)의 경로가 가운데에서 줄어드는 것도 확인. 증거: scratchpad `mtui2/a-*` · `b-*` · `i-*` (2026-11-13).
 
 ## 5. 확인된 사실
 
@@ -153,8 +163,10 @@ jobs        실행 중 2 · 완료 1
 
 1. 실시간 활동 내보내기 (§2) — 담당: 부모. 자동 검증: 단위(이벤트 → `live.json` 을 만드는 순수 함수, 병렬 도구 · compaction · 실패 포함) + E2E(`tests/rpc-jobs.mjs` 에 bash 도구 실행 중 `agent.state = tool`, 끝난 뒤 `idle` 과 `events`) / 실측: 대화형 pi + mock 에서 `live.json` 을 보며 상태가 바뀌는지
 2. 보기 모델 (§3) — 담당: 부모. 자동 검증: 단위(`view.ts` 를 보기 모델 함수로: 23 · 35칸 × 높이 11 · 24줄에서 구역 · 줄 수 · 진행 중 항목이 보이는지)
-3. `oxy-tui` 모니터 모드 (§3 §4) — 담당: tui-implementer. 자동 검증: `just tui-test`(23×12 · 35×28 버퍼에 그린 결과), 단위(`unit-tui` 의 통신 규약) / 실측: `tuicap` 으로 pi + mock 이 긴 bash 와 계획을 실행하는 동안 mintty 80×24 · 120×30 캡처 (flow · jobs, 두 모니터를 함께 연 경우), WT 캡처 한 장
-4. `monitor.ts` 연결과 예전 화면 대체 (§4) — 담당: 부모. 자동 검증: 단위(모니터 모드가 없는 exe 에서 pi-tui 화면으로) + E2E / 실측: 3단계 캡처와 같은 조건에서 전환이 보이지 않는지
+3. `oxy-tui` 모니터 모드 (§3 §4) — 담당: tui-implementer. 자동 검증: `just tui-test`(23×12 · 35×28 버퍼에 그린 결과), 단위(`unit-tui`: `model.ts` 로 만든 예시 모델을 exe 가 받아 그림) /
+   실측: `model.ts` 로 만든 예시 모델을 exe 에 넣어, psmux 의 오른쪽 30% pane(pi 자리는 빈 셸)에서 mintty 80×24 · 120×30 캡처 (flow · jobs, 두 모니터를 함께 연 경우), WT 캡처 한 장
+4. `monitor.ts` 연결과 예전 화면 대체 (§4) — 담당: 부모. 자동 검증: 단위(모니터 모드가 없는 exe 에서 pi-tui 화면으로) + E2E /
+   실측: `tuicap` 으로 pi + mock 이 긴 bash 와 계획을 실행하는 동안 mintty 80×24 · 120×30 캡처 (실시간 갱신 · 스피너 · 경과), 새 exe 가 없을 때 예전 화면으로 열리는지
 5. 실제 LLM 실측 — 담당: 부모. 실측: Groq 연결로 여러 단계 작업(계획 · 편집 · 테스트 · 커밋)을 시키며 모니터가 따라가는지 `tuicap` 으로 확인 (사용자 화면은 쓰지 않는다)
 6. `oxy-tui` 릴리스 · `manifest/tools.lock.tsv` sha, 번들 · 설치본 반영 — 담당: 부모 [승인 필요: push · 릴리스 · 실제 설치본]
 

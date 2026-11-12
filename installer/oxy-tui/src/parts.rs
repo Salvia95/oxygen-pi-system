@@ -2,7 +2,7 @@
 use ratatui::text::{Line, Span};
 
 use crate::model::{App, FrameSpec, Row, Screen, SelectSpec};
-use crate::text::{pad, trunc, trunc_path, w, wrap};
+use crate::text::{fit, pad, trunc_path, w, wrap};
 use crate::theme;
 
 /// 단계를 모두 지난 뒤의 상태 낱말 (`설치 중` · `설치 완료`)
@@ -181,14 +181,14 @@ pub fn row_spans(r: &Row, focused: bool, multi: bool, label_w: usize, width: usi
 pub fn desc_line(s: &str, width: usize, indent: usize) -> Line<'static> {
     let ind = " ".repeat(indent);
     match s.strip_prefix("! ") {
-        Some(rest) => Line::from(vec![Span::raw(ind), Span::styled(format!("{} ", theme::WARN), theme::warn()), Span::styled(trunc(rest, width.saturating_sub(indent + 2)), theme::strong())]),
-        None => Line::from(vec![Span::raw(ind), Span::raw(trunc(s, width.saturating_sub(indent)))]),
+        Some(rest) => Line::from(vec![Span::raw(ind), Span::styled(format!("{} ", theme::WARN), theme::warn()), Span::styled(fit(rest, width.saturating_sub(indent + 2)), theme::strong())]),
+        None => Line::from(vec![Span::raw(ind), Span::raw(fit(s, width.saturating_sub(indent)))]),
     }
 }
 
 /// 차단 안내 · 검증 오류 한 줄
 pub fn alert_line(mark: &'static str, style: ratatui::style::Style, s: &str, width: usize, indent: usize) -> Line<'static> {
-    Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(format!("{mark} "), style), Span::raw(trunc(s, width.saturating_sub(indent + 2)))])
+    Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(format!("{mark} "), style), Span::raw(fit(s, width.saturating_sub(indent + 2)))])
 }
 
 /// 이름–값 요약표. 값은 폭에 맞춰 줄바꿈한다 (경로는 자르지 않는다). 이름이 빈 행은 윗줄의 이어짐
@@ -212,7 +212,7 @@ pub fn summary_lines(pairs: &[(String, String)], width: usize, indent: usize) ->
 pub fn context_lines(ctx: &[String], width: usize, indent: usize) -> Vec<Line<'static>> {
     let ind = " ".repeat(indent);
     ctx.iter()
-        .flat_map(|c| if c.starts_with(' ') { vec![trunc(c, width.saturating_sub(indent))] } else { wrap(c, width.saturating_sub(indent)) })
+        .flat_map(|c| if c.starts_with(' ') { vec![fit(c, width.saturating_sub(indent))] } else { wrap(c, width.saturating_sub(indent)) })
         .map(|l| Line::raw(format!("{ind}{l}")))
         .collect()
 }
@@ -224,7 +224,7 @@ pub fn result_line(s: &SelectSpec, width: usize, indent: usize) -> Line<'static>
         "err" => (theme::ERR, theme::err()),
         _ => (theme::OK, theme::ok()),
     };
-    Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(format!("{mark} "), style), Span::raw(trunc(&s.result, width.saturating_sub(indent + 2)))])
+    Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(format!("{mark} "), style), Span::raw(fit(&s.result, width.saturating_sub(indent + 2)))])
 }
 
 /// `?` 도움말 내용: 맥락 전체 + 포커스한 행의 값 · 설명 · 관련 정보

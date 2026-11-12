@@ -2,10 +2,14 @@
 //!   oxy-tui --pipe <이름>                         Node(installer/tui.mjs)의 지시를 받아 그린다 (protocol.rs)
 //!   oxy-tui demo <화면> [--focus N] [--help-open] [--keylog <파일>] [--exit-after <ms>]   예시 값으로 그린다 (demo.rs)
 //!   oxy-tui demo colors | panic                  색 견본 · 비정상 종료 때 터미널 복구 확인
+//!   oxy-tui --pipe <이름> --mode monitor          psmux 오른쪽 열의 jobs · flow 모니터 화면 (monitor.rs, docs/monitor-tui-spec.md)
+//!   oxy-tui demo monitor --model <JSON> [--exit-after <ms>] [--size WxH] [--now <ms>]   보기 모델 파일을 그린다
+//!   oxy-tui --version                            `oxy-tui <버전> monitor` (모니터 모드를 아는 exe 는 monitor 를 덧붙인다)
 //! 대체 화면 버퍼에 그리고, 어떤 경로로 끝나든(정상 · Ctrl+C · 오류 · panic · Node 와의 연결 끊김) raw mode 와 대체 화면에서 나온다.
 mod banner;
 mod demo;
 mod model;
+mod monitor;
 mod parts;
 mod protocol;
 mod text;
@@ -14,7 +18,7 @@ mod view;
 mod view_a;
 
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -172,14 +176,25 @@ fn main() -> ExitCode {
         prev(info);
     }));
     let result = if let Some(name) = arg(&args, "--pipe") {
-        run_pipe(&name)
+        match arg(&args, "--mode").as_deref() {
+            None | Some("install") => run_pipe(&name),
+            Some("monitor") => run_monitor(&name),
+            Some(other) => {
+                eprintln!("oxy-tui: 모르는 --mode 입니다: {other} (install · monitor)");
+                Ok(2)
+            }
+        }
     } else if args.first().map(String::as_str) == Some("demo") {
         run_demo(args.get(1).map(String::as_str).unwrap_or("hub"), &args)
     } else if args.iter().any(|a| a == "--version") {
-        println!("oxy-tui {}", env!("CARGO_PKG_VERSION"));
+        // 모니터 모드를 아는지 Node 가 이 출력으로 판단한다 (예전 exe 는 monitor 가 없다)
+        println!("oxy-tui {} monitor", env!("CARGO_PKG_VERSION"));
         Ok(0)
     } else {
-        eprintln!("usage: oxy-tui --pipe <name>\n       oxy-tui demo <{}|colors|panic> [--focus N] [--help-open] [--keylog <file>] [--exit-after <ms>]", demo::SCREENS.join("|"));
+        eprintln!(
+            "usage: oxy-tui --pipe <name> [--mode install|monitor]\n       oxy-tui demo <{}|colors|panic> [--focus N] [--help-open] [--keylog <file>] [--exit-after <ms>]\n       oxy-tui demo monitor --model <json> [--exit-after <ms>] [--size WxH] [--now <ms>]",
+            demo::SCREENS.join("|")
+        );
         Ok(2)
     };
     if is_raw_mode_enabled().unwrap_or(false) {
@@ -199,6 +214,9 @@ fn run_demo(name: &str, args: &[String]) -> io::Result<i32> {
     let keylog = arg(args, "--keylog");
     if name == "colors" {
         return run_colors();
+    }
+    if name == "monitor" {
+        return run_monitor_demo(args);
     }
     let Some(mut app) = demo::app(if name == "panic" { "hub" } else { name }) else {
         eprintln!("화면 이름: {} colors panic", demo::SCREENS.join(" "));
@@ -425,4 +443,143 @@ fn run_pipe(name: &str) -> io::Result<i32> {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- 모니터 모드
+/// 모니터 화면의 키 하나를 Node 에 알릴 이름으로 (선택 · 펼치기 · 중지 · 닫기는 Node 가 정한다)
+fn monitor_key(k: &KeyEvent) -> Option<&'static str> {
+    if k.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
+    }
+    match k.code {
+        KeyCode::Up => Some("up"),
+        KeyCode::Down => Some("down"),
+        KeyCode::Enter => Some("enter"),
+        KeyCode::Esc => Some("esc"),
+        KeyCode::Char('s' | 'S') => Some("s"),
+        KeyCode::Char('q' | 'Q') => Some("q"),
+        _ => None,
+    }
+}
+
+/// 스피너 모양: 시작한 뒤 지난 시간으로 (1초에 10번 바뀐다)
+fn spinner_at(start: Instant) -> usize {
+    monitor::spinner_frame(start.elapsed().as_millis())
+}
+
+/// `--pipe <이름> --mode monitor`: Node 가 보내는 보기 모델(`{"op":"monitor",…}`)을 그리고 키 · 창 크기를 이벤트로 돌려준다.
+/// 연결은 설치 화면과 같다 (protocol.rs). 지시 연결이 끊기면 터미널을 되돌리고 끝낸다
+fn run_monitor(name: &str) -> io::Result<i32> {
+    let mut link = protocol::connect(name)?;
+    let mut model: Option<monitor::MonitorModel> = None;
+    let mut term = enter()?;
+    let start = Instant::now();
+    let mut repaint_at = Some(Instant::now() + REPAINT_AFTER);
+    // 크기 이벤트: 시작하자마자 한 번, 그 뒤로는 크기가 달라졌을 때만 (터미널이 같은 크기를 거듭 알리기도 한다)
+    let mut last_size = term.size()?;
+    link.send(json!({ "event": "resize", "width": last_size.width, "height": last_size.height }))?;
+    loop {
+        // 밀린 지시를 모두 반영한 뒤 한 번 그린다
+        loop {
+            let line = match link.commands.try_recv() {
+                Ok(Some(line)) => line,
+                Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    leave();
+                    eprintln!("oxy-tui: pi 와의 연결이 끊어져 종료합니다.");
+                    return Ok(1);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+            };
+            match monitor::apply(&mut model, &line) {
+                Ok(monitor::Next::Continue) => {}
+                Ok(monitor::Next::Quit(code, summary)) => {
+                    leave();
+                    for l in summary {
+                        println!("{l}");
+                    }
+                    return Ok(code);
+                }
+                Err(e) => link.send(json!({ "event": "error", "message": e }))?,
+            }
+        }
+        if repaint_at.is_some_and(|at| Instant::now() >= at) {
+            repaint_at = None;
+            term.swap_buffers(); // 대체 화면 진입 직후 빠진 글자를 채운다 (run_pipe 와 같다)
+        }
+        let (frame, now) = (spinner_at(start), monitor::now_ms());
+        term.draw(|f| {
+            if let Some(m) = &model {
+                monitor::render(f, m, frame, now);
+            }
+        })?;
+        if !event::poll(Duration::from_millis(50))? {
+            continue;
+        }
+        match event::read()? {
+            Event::Key(k) if k.kind == KeyEventKind::Press => {
+                if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+                    link.send(json!({ "event": "interrupt" }))?;
+                } else if let Some(key) = monitor_key(&k) {
+                    link.send(json!({ "event": "key", "key": key }))?;
+                }
+            }
+            Event::Resize(width, height) if (width, height) != (last_size.width, last_size.height) => {
+                last_size = ratatui::layout::Size::new(width, height);
+                link.send(json!({ "event": "resize", "width": width, "height": height }))?;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `demo monitor --model <JSON>`: 보기 모델 파일을 그린다 (스피너 · 경과가 움직인다. q 로 끝낸다).
+/// 터미널이 아니면(파이프 · 시험) 화면을 만들지 않고 한 장면을 글자로 찍는다: `--size WxH`(기본 80x24), `--now <ms>`(경과를 셀 기준 시각)
+fn run_monitor_demo(args: &[String]) -> io::Result<i32> {
+    let Some(path) = arg(args, "--model") else {
+        eprintln!("usage: oxy-tui demo monitor --model <json> [--exit-after <ms>] [--size WxH] [--now <ms>]");
+        return Ok(2);
+    };
+    let model: monitor::MonitorModel = match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("oxy-tui: 보기 모델을 읽지 못했습니다: {path} ({e})");
+            return Ok(2);
+        }
+    };
+    let now = arg(args, "--now").and_then(|x| x.parse::<i64>().ok());
+    if !io::stdout().is_terminal() || !io::stdin().is_terminal() {
+        let (width, height) = arg(args, "--size").and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<u16>().ok()?, b.parse::<u16>().ok()?)))).unwrap_or((80, 24));
+        for l in monitor::dump(&model, width, height, 0, now.unwrap_or_else(monitor::now_ms)) {
+            println!("{l}");
+        }
+        return Ok(0);
+    }
+    let exit_after = arg(args, "--exit-after").and_then(|x| x.parse::<u64>().ok()).map(Duration::from_millis);
+    let mut term = enter()?;
+    let start = Instant::now();
+    loop {
+        let (frame, at) = (spinner_at(start), now.unwrap_or_else(monitor::now_ms));
+        term.draw(|f| monitor::render(f, &model, frame, at))?;
+        if exit_after.is_some_and(|d| start.elapsed() >= d) {
+            break;
+        }
+        if !event::poll(Duration::from_millis(50))? {
+            continue;
+        }
+        if let Event::Key(k) = event::read()? {
+            if k.kind != KeyEventKind::Press {
+                continue;
+            }
+            if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+                break;
+            }
+            if monitor_key(&k) == Some("q") {
+                break;
+            }
+        }
+    }
+    let size = term.size()?;
+    leave();
+    println!("oxy-tui 데모 종료: monitor {}×{}", size.width, size.height);
+    Ok(0)
 }

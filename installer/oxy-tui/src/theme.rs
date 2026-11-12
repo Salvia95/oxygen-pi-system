@@ -64,10 +64,10 @@ pub fn palette() -> &'static Palette {
     if *LIGHT.get_or_init(|| std::env::var("OXY_TUI_THEME").is_ok_and(|v| v.eq_ignore_ascii_case("light"))) { &LIGHT_BG } else { &DARK_BG }
 }
 
-/// `NO_COLOR` 가 있으면 색을 쓰지 않는다 (굵기 · 반전 · 기호로만 구분한다)
+/// `NO_COLOR` 가 있거나 `TERM=dumb` 이면 색을 쓰지 않는다 (굵기 · 반전 · 기호로만 구분한다)
 pub fn no_color() -> bool {
     static OFF: OnceLock<bool> = OnceLock::new();
-    *OFF.get_or_init(|| std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()))
+    *OFF.get_or_init(|| std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) || std::env::var("TERM").is_ok_and(|v| v == "dumb"))
 }
 
 pub fn rgb(c: Rgb) -> Color {

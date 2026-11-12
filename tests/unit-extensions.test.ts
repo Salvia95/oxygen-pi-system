@@ -992,7 +992,7 @@ test("oxy-monitor 실시간 활동: 작업 · 할 일 · 커밋 변화 → 이�
   let f = L.flowEvents(null, [{ id: "p1", status: "doing", text: "API" }], { id: "n1", title: "base" });
   assert.equal(f.events.length, 0);                                                  // 처음은 기준만
   f = L.flowEvents(f.seen, [{ id: "p1", status: "done", text: "API" }, { id: "p2", status: "todo", text: "문서" }], { id: "n2", title: "feat: api" });
-  assert.deepEqual(f.events.map((e) => `${e.kind}:${e.text}`), ["plan:p1 → done API", "commit:커밋 n2 feat: api"]);
+  assert.deepEqual(f.events.map((e) => `${e.kind}:${e.text}`), ["plan:p1 완료 API", "commit:커밋 n2 feat: api"]);
 });
 
 test("oxy-monitor 보기 모델: flow (지금 · 계획 · 최근, 23 · 35칸 × 11 · 24줄, 진행 중 항목이 보임)", async () => {
@@ -1061,6 +1061,7 @@ test("oxy-monitor 보기 모델: jobs (경과는 exe 가, 좁으면 종류 열�
     assert.equal(rows[0].marker, "spinner"); assert.equal(rows[0].since, 2000); assert.equal(rows[0].right, undefined);
     assert.equal(rows[1].right, "1:03"); assert.equal(rows[2].error, true);
     assert.equal(rows[0].text, width < M.NARROW ? "job-2 일" : "sub  job-2 일");
+    assert.equal(rows[1].text, width < M.NARROW ? "job-1 일" : "bg   job-1 일");   // 종류 폭을 맞춘다
     assert.equal(m.right, "실행 중 1 · 완료 2");
     assert.deepEqual([m.nowAt, m.now[0].text], ["bottom", "응답 생성 중"]);
     assert.ok(m.keys.join(" ").includes("s 중지"));                           // 선택한(첫) 작업이 실행 중

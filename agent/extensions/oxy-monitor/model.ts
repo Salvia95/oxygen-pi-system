@@ -183,7 +183,7 @@ export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: Flo
   const plan = flow?.plan ?? [];
   const leaves = plan.flatMap((p) => (p.children.length ? p.children : [p])).filter((x) => x.status !== "dropped");
   const right = leaves.length ? `할 일 ${leaves.filter((x) => x.status === "done").length}/${leaves.length}` : "";
-  const keys = keyLines(["↑↓ 이동", "Enter 펼치기", "q 닫기"], width, w);
+  const keys = keyLines(["▲▼ 이동", "Enter 펼치기", "q 닫기"], width, w);
   const now4 = nowRows(live, plan, now, 4);
   const nRecent = recentCount(height);
   const recent = recentRows(live, nRecent);
@@ -228,7 +228,7 @@ export function jobsModel(state: JobsState | null, live: LiveState | null, ui: J
   const nowRow = [stateRow(live, now)];
 
   if (ui.mode === "log" && sel) {
-    const keys = keyLines(["↑↓ 스크롤", "Esc 목록", ...(active(sel) ? ["s 중지"] : [])], width, w);
+    const keys = keyLines(["▲▼ 스크롤", "Esc 목록", ...(active(sel) ? ["s 중지"] : [])], width, w);
     const room = Math.max(1, height - 1 - keys.length);
     const lines = logLines.slice(-room).map((l) => ({ marker: "none" as Marker, text: l, indent: 0 }));
     return { op: "monitor", kind: "jobs", title: `${sel.id} 로그`, right: sel.state, now: [], nowAt: "bottom", sections: [{ rows: lines }], selected: null, keys };
@@ -236,7 +236,7 @@ export function jobsModel(state: JobsState | null, live: LiveState | null, ui: J
 
   const narrow = width < NARROW;
   const rows: Row[] = jobs.map((j) => {
-    const kind = narrow ? "" : `${j.kind === "agent" ? "sub" : "bg"}  `;
+    const kind = narrow ? "" : `${(j.kind === "agent" ? "sub" : "bg").padEnd(3)}  `;   // 종류 폭을 맞춰 이름이 같은 칸에서 시작
     const done = !active(j);
     return { key: j.id, marker: jobMarker(j.state), text: `${kind}${j.label}`, indent: 0, error: j.state === "failed",
       ...(done ? { right: clock((j.endedAt ?? now) - (j.startedAt ?? j.createdAt)) } : { since: j.startedAt ?? j.createdAt }) };
@@ -245,7 +245,7 @@ export function jobsModel(state: JobsState | null, live: LiveState | null, ui: J
   else if (!jobs.length) rows.push({ marker: "none", text: "작업이 없습니다.", indent: 0 });
   const keys = ui.mode === "confirm" && sel
     ? keyLines([`${sel.id} 작업을 중지할까요?`, "s 중지", "Esc 취소"], width, w)
-    : keyLines(["↑↓ 이동", "Enter 로그", ...(active(sel) ? ["s 중지"] : []), "q 닫기"], width, w);
+    : keyLines(["▲▼ 이동", "Enter 로그", ...(active(sel) ? ["s 중지"] : []), "q 닫기"], width, w);
   const notice = ui.notice ? [{ marker: "none" as Marker, text: ui.notice, indent: 0 }] : [];
   // 높이: 제목 1 + 목록 + 가로줄 1 + 지금 1 + 알림 + 키 안내
   const room = Math.max(1, height - 1 - 1 - nowRow.length - notice.length - keys.length);

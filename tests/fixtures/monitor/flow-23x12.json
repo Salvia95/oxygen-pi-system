@@ -1,0 +1,73 @@
+{
+  "op": "monitor",
+  "kind": "flow",
+  "title": "flow",
+  "right": "할 일 2/6",
+  "now": [
+    {
+      "marker": "spinner",
+      "text": "도구 실행 중",
+      "since": 1794499910629,
+      "indent": 0,
+      "emphasis": true
+    },
+    {
+      "marker": "none",
+      "text": "bash npm test -- --run login",
+      "indent": 2
+    },
+    {
+      "marker": "spinner",
+      "text": "p2.2 테스트 작성",
+      "indent": 0,
+      "emphasis": true
+    }
+  ],
+  "nowAt": "top",
+  "sections": [
+    {
+      "rows": [
+        {
+          "key": "p:p2.1",
+          "marker": "done",
+          "text": "p2.1 라우트",
+          "indent": 2,
+          "emphasis": false
+        },
+        {
+          "key": "p:p2.2",
+          "marker": "spinner",
+          "text": "p2.2 테스트 작성",
+          "indent": 2,
+          "emphasis": true
+        },
+        {
+          "key": "p:p2.3",
+          "marker": "todo",
+          "text": "p2.3 오류 처리",
+          "indent": 2,
+          "emphasis": false
+        },
+        {
+          "key": "p:p3",
+          "marker": "todo",
+          "text": "p3 결제 연동",
+          "indent": 0,
+          "emphasis": false
+        },
+        {
+          "key": "p:p4",
+          "marker": "blocked",
+          "text": "p4 배포 설정",
+          "indent": 0,
+          "emphasis": false
+        }
+      ]
+    }
+  ],
+  "selected": "p:p2.2",
+  "keys": [
+    "▲▼ 이동  Enter 펼치기",
+    "q 닫기"
+  ]
+}

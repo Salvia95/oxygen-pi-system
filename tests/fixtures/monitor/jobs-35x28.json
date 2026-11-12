@@ -1,0 +1,66 @@
+{
+  "op": "monitor",
+  "kind": "jobs",
+  "title": "jobs",
+  "right": "실행 중 2 · 완료 3",
+  "now": [
+    {
+      "marker": "spinner",
+      "text": "도구 실행 중",
+      "since": 1794499910629,
+      "indent": 0,
+      "emphasis": true
+    }
+  ],
+  "nowAt": "bottom",
+  "sections": [
+    {
+      "rows": [
+        {
+          "key": "job-1",
+          "marker": "spinner",
+          "text": "bg   npm run build",
+          "indent": 0,
+          "error": false,
+          "since": 1794499881629
+        },
+        {
+          "key": "job-2",
+          "marker": "spinner",
+          "text": "sub  scout: 로그 찾기",
+          "indent": 0,
+          "error": false,
+          "since": 1794499910629
+        },
+        {
+          "key": "job-3",
+          "marker": "done",
+          "text": "bg   npm test",
+          "indent": 0,
+          "error": false,
+          "right": "1:03"
+        },
+        {
+          "key": "job-4",
+          "marker": "failed",
+          "text": "bg   npm run lint",
+          "indent": 0,
+          "error": true,
+          "right": "0:10"
+        },
+        {
+          "key": "job-5",
+          "marker": "stopped",
+          "text": "sub  reviewer: 검토",
+          "indent": 0,
+          "error": false,
+          "right": "0:10"
+        }
+      ]
+    }
+  ],
+  "selected": "job-2",
+  "keys": [
+    "▲▼ 이동  Enter 로그  s 중지  q 닫기"
+  ]
+}

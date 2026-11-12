@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
-import { readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -417,4 +417,46 @@ test("LLM 연결 종류 표: 화면 문구(label · hint · detail · urlExample
     assert.ok(k.baseUrl || k.urlExample, `${id}: 기본 주소도 주소 예시도 없음`);
     assert.ok(k.contextNote, `${id}: contextNote 없음`);
   }
+});
+
+// ---------------------------------------------------------------- 모니터 모드 (docs/monitor-tui-spec.md, installer/oxy-tui/src/monitor.rs)
+test("모니터 예시 모델: model.ts 가 지금 만드는 것과 tests/fixtures/monitor 가 같다 (cargo test 가 이 파일을 읽는다)", async () => {
+  const { writeFixtures, DEFAULT_DIR } = await import("./monitor-fixtures.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "oxy-monfx-"));
+  try {
+    const index = JSON.parse(readFileSync(join(DEFAULT_DIR, "index.json"), "utf8"));
+    const files = await writeFixtures({ outDir: dir, now: index.generatedAt });
+    assert.deepEqual(files, index.files, "index.json 의 크기 · modelHeight");
+    for (const f of readdirSync(dir)) {
+      assert.equal(readFileSync(join(dir, f), "utf8"), readFileSync(join(DEFAULT_DIR, f), "utf8"),
+        `${f}: model.ts 와 어긋남. node --experimental-strip-types --no-warnings tests/monitor-fixtures.mjs 로 다시 만든 뒤 just tui-test`);
+    }
+    // since 는 now 기준 몇 초 전, 모든 모델의 줄 수는 높이 안
+    for (const f of files) assert.ok(f.modelHeight <= f.height, `${f.file}: ${f.modelHeight} > ${f.height}`);
+    const flow = JSON.parse(readFileSync(join(dir, "flow-23x12.json"), "utf8"));
+    assert.deepEqual([flow.op, flow.kind, flow.nowAt, flow.now[0].since], ["monitor", "flow", "top", index.generatedAt - 12000]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("oxy-tui.exe: --version 에 monitor, demo monitor --model --exit-after 가 종료 코드 0 이고 그린 줄이 폭 안", async (t) => {
+  const exe = join(import.meta.dirname, "..", "bin", "oxy-tui.exe");
+  if (!existsSync(exe)) return t.skip("bin/oxy-tui.exe 없음 (just tui-build 또는 fetch)");
+  const { spawnSync } = await import("node:child_process");
+  const { DEFAULT_DIR } = await import("./monitor-fixtures.mjs");
+  const v = spawnSync(exe, ["--version"], { encoding: "utf8" });
+  assert.match(v.stdout.trim(), /^oxy-tui \d+\.\d+\.\d+ monitor$/, "예전 exe 는 monitor 를 출력하지 않는다. just tui-build");
+  const at = JSON.parse(readFileSync(join(DEFAULT_DIR, "index.json"), "utf8")).generatedAt;
+  for (const [name, size] of [["flow-23x12", [23, 12]], ["jobs-23x12", [23, 12]], ["flow-35x28", [35, 28]], ["jobs-35x28", [35, 28]]]) {
+    const r = spawnSync(exe, ["demo", "monitor", "--model", join(DEFAULT_DIR, `${name}.json`), "--exit-after", "300", "--size", size.join("x"), "--now", String(at + 5000)], { encoding: "utf8", timeout: 10000 });
+    assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+    const lines = r.stdout.replace(/\r/g, "").split("\n").slice(0, -1);
+    assert.equal(lines.length, size[1], `${name}: 줄 수`);
+    for (const l of lines) assert.ok(displayWidth(l) <= size[0], `${name}: ${size[0]}칸 넘음: ${l}`);
+    assert.match(lines.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, `${name}: 스피너`);
+    assert.match(lines.join("\n"), /\b0:17\b/, `${name}: 경과 m:ss (지금 + 5초 = 0:17)`);
+  }
+  const bad = spawnSync(exe, ["demo", "monitor", "--model", join(DEFAULT_DIR, "없는파일.json")], { encoding: "utf8" });
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /보기 모델을 읽지 못했습니다/);
+  assert.equal(spawnSync(exe, ["--pipe", "x", "--mode", "nope"], { encoding: "utf8" }).status, 2);
 });

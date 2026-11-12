@@ -145,6 +145,8 @@ export function jobEvents(prev: Map<string, string>, jobs: JobLite[]): { events:
 }
 
 export interface PlanLite { id: string; status: string; text: string }
+/** 할 일 상태를 이벤트 글에 쓸 말 (화면 문구 규칙: → 같은 화살표를 쓰지 않는다) */
+const PLAN_WORD: Record<string, string> = { todo: "예정", doing: "진행", done: "완료", blocked: "막힘", dropped: "제외" };
 /** 할 일 상태 변화 · 새 커밋 노드 → 이벤트. 처음 부르면(prev 가 null) 기준만 잡는다 */
 export function flowEvents(prev: { items: Map<string, string>; node: string } | null, items: PlanLite[], node: { id: string; title: string } | null):
   { events: Omit<LiveEvent, "at">[]; seen: { items: Map<string, string>; node: string } } {
@@ -153,7 +155,7 @@ export function flowEvents(prev: { items: Map<string, string>; node: string } | 
   if (!prev) return { events, seen };
   for (const i of items) {
     const was = prev.items.get(i.id);
-    if (was !== undefined && was !== i.status) events.push({ kind: "plan", ok: i.status !== "blocked", text: `${i.id} → ${i.status} ${i.text}` });
+    if (was !== undefined && was !== i.status) events.push({ kind: "plan", ok: i.status !== "blocked", text: `${i.id} ${PLAN_WORD[i.status] ?? i.status} ${i.text}` });
   }
   if (node && node.id && node.id !== prev.node) events.push({ kind: "commit", ok: true, text: `커밋 ${node.id} ${node.title}` });
   return { events, seen };
