@@ -11,7 +11,7 @@
 //!   {"op":"frame", version, title, steps, short, current, path, right}     위치 (다음 화면부터 적용)
 //!   {"op":"select", "id":N, header, context, keep, summary, rows, multi, focus, esc, enter, result, result_kind}
 //!        → {"id":N,"index":i} · multi 면 {"id":N,"indices":[…]} (잠긴 행 포함) · Esc 면 {"id":N,"back":true}
-//!   {"op":"input", "id":N, header, context, value, mask, esc, enter}
+//!   {"op":"input", "id":N, header, context, value, mask, esc, enter, error}   error: 처음부터 보일 오류 (없으면 빈 문자열)
 //!        → {"id":N,"value":"…"} · {"id":N,"back":true}.  값이 틀리면 Node 가 {"op":"invalid","id":N,"message":"…"} 를 보내고,
 //!          exe 는 오류를 보인 채 다시 입력받아 같은 id 로 답한다
 //!   {"op":"confirm", "id":N, title, header, context, summary, warning, yes, no, danger, on_yes}   위험 확인 팝업 (아래에 직전 화면)
@@ -232,6 +232,15 @@ mod tests {
         let Screen::Input(i) = &a.screen else { panic!("입력 화면이 아니다") };
         assert_eq!((i.value.as_str(), i.error.as_str(), a.frozen), ("oxygen-pi", "전체 경로를 입력하세요", false));
         assert_eq!(answer(pending, &a), json!({ "id": 2, "value": "oxygen-pi" }));
+    }
+
+    #[test]
+    fn input_can_open_with_an_error() {
+        let mut a = app();
+        let mut pending = None;
+        apply(&mut a, &mut pending, r#"{"op":"input","id":3,"header":"워크스페이스 ID","value":"wrkspc_x","error":"이 키로 사용할 수 없는 워크스페이스입니다."}"#).unwrap();
+        let Screen::Input(i) = &a.screen else { panic!("입력 화면이 아니다") };
+        assert_eq!((i.value.as_str(), i.error.as_str()), ("wrkspc_x", "이 키로 사용할 수 없는 워크스페이스입니다."));
     }
 
     #[test]

@@ -154,18 +154,25 @@ kt=$(jq -r '[.body.messages[] | select(.role=="tool") | .content | tostring] | j
 chk "LLM 키: 자식 pi 의 bash 환경에 남지 않음 ($kt)" '[[ "$out" == *"(scout: scenario:env-keys look) done"* && "$kt" == "inherit=none " ]]'
 # 두 번째 연결 claude (Anthropic 형식 mock) 를 더하고 deep 수준을 그쪽으로. 키는 DPAPI 로 저장
 APORT=$((PORT + 1)); ALOG="$TMP/anthropic.jsonl"; : > "$ALOG"
-MOCK_ANTHROPIC_KEY='sk-ant-$e2e!' "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-anthropic.mjs")" "$APORT" "$(winpath "$ALOG")" >/dev/null & AMOCK_PID=$!
+# mock 은 워크스페이스가 지정되지 않은 조직 키처럼 동작한다 (anthropic-workspace-id 헤더가 없으면 400)
+MOCK_ANTHROPIC_WORKSPACE=wrkspc_e2e1 MOCK_ANTHROPIC_KEY='sk-ant-$e2e!' "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-anthropic.mjs")" "$APORT" "$(winpath "$ALOG")" >/dev/null & AMOCK_PID=$!
 trap 'kill "${MOCK_PID:-}" "${AMOCK_PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 "$OXY_NODE" --input-type=module -e "const s = await import(process.argv[1]); s.setSecret(process.argv[2], 'llm/claude', 'sk-ant-\$e2e!');" \
   "$(winpath "$OXY_HOME/installer/secrets.mjs" | sed 's#^#file:///#')" "$(winpath "$TMP/agent")"
-jq --arg u "http://127.0.0.1:$APORT" '.connections += [{id: "claude", kind: "anthropic", name: "Claude", baseUrl: $u, maxConcurrent: 2,
+jq --arg u "http://127.0.0.1:$APORT" '.connections += [{id: "claude", kind: "anthropic", name: "Claude", baseUrl: $u, maxConcurrent: 2, workspaceId: "wrkspc_e2e1",
   request: {retries: 0}, models: [{id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384}]}]
   | (.levels[] | select(.id=="deep")) |= (.connection="claude" | .model="claude-haiku-5-5" | .thinking="high")' "$TMP/agent/llm.json" > "$TMP/llm.json" && mv "$TMP/llm.json" "$TMP/agent/llm.json"
 run sub-claude
-ar=$(jq -c '{keyMatches, model, thinking, effort, max_tokens, firstUser}' "$ALOG" | head -1)
+ar=$(jq -c '{keyMatches, model, thinking, effort, max_tokens, workspace, firstUser}' "$ALOG" | head -1)
 chk "여러 연결: 본 대화는 vLLM 기본 모델 그대로"      '[[ $(first .body.model) == qwen3.6-coder-30b ]]'
 chk "여러 연결: deep 수준만 Claude 연결로 ($ar)"     '[[ $(wc -l < "$ALOG") -eq 1 && "$ar" == *"\"model\":\"claude-haiku-5-5\""* && "$ar" == *"claude-task review"* ]]'
 chk "여러 연결: 부모가 넘긴 DPAPI 키로 인증 · effort high · 128K/16K 덮어쓰기" '[[ "$ar" == *"\"keyMatches\":true"* && "$ar" == *"\"thinking\":\"adaptive\",\"effort\":\"high\",\"max_tokens\":16384"* ]]'
+chk "여러 연결: 조직 키의 워크스페이스 헤더 (anthropic-workspace-id)" '[[ "$ar" == *"\"workspace\":\"wrkspc_e2e1\""* ]]'
+nc=$("$OXY_NODE" "$(winpath "$OXY_HOME/scripts/llm-check.mjs")" "$(winpath "$OXY_HOME")" "$(winpath "$TMP/agent")" --net 2>&1 | tr '	' ' ')
+jq '(.connections[] | select(.id=="claude")) |= del(.workspaceId)' "$TMP/agent/llm.json" > "$TMP/llm-nows.json"
+mkdir -p "$TMP/agent-nows"; cp "$TMP/llm-nows.json" "$TMP/agent-nows/llm.json"; cp "$TMP/agent/secrets.json" "$TMP/agent-nows/"
+nw=$("$OXY_NODE" "$(winpath "$OXY_HOME/scripts/llm-check.mjs")" "$(winpath "$OXY_HOME")" "$(winpath "$TMP/agent-nows")" --net 2>&1 | tr '	' ' ')
+chk "상태 점검: 워크스페이스 PASS · 없으면 FAIL 과 해결 방법" '[[ "$nc" == *"PASS 워크스페이스 wrkspc_e2e1"* && "$nw" == *"FAIL 이 API 키는 워크스페이스가 지정되지 않았습니다 → tweak.cmd의 LLM 연결에서 이 연결을 편집해 워크스페이스를 선택하세요"* ]]'
 chk "여러 연결: light 수준은 vLLM 에서 실행"          '[[ "$out" == *"MOCK-ANTHROPIC Task: claude-task review"* && "$out" == *"(scout: scenario:env vllm-task) done"* && "$out" == *"hello-from-Msys"* ]]'
 
 # 대화형 경로 (RPC 모드: 작업 패널·상태줄, 완료 시 새 턴, /jobs 로그 보기)

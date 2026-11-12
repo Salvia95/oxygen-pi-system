@@ -368,13 +368,18 @@ const kindLabel = (conn) => LLM_KINDS[conn.kind]?.label ?? conn.kind;
 const urlOf = (conn) => conn.baseUrl || LLM_KINDS[conn.kind]?.baseUrl || "없음";
 const pointText = (p) => (p ? `${p.connection}/${p.model} · thinking ${p.thinking ?? "off"}` : "없음");
 
+/** 연결 목록의 상세: 서버 주소 · 모델 · API 키 · 워크스페이스(값이 있을 때만) · 동시 요청 수 · 종류 */
 function llmConnInfo(conn) {
   return [
     ["서버 주소", urlOf(conn)], ["모델", (conn.models ?? []).map((m) => m.id).join(", ") || "없음"],
-    ["API 키", hasSecret(AGENT, llmSecretKey(conn.id)) ? "저장됨" : "저장 안 함"], ["동시 요청 수", `${conn.maxConcurrent ?? LLM_KINDS[conn.kind]?.maxConcurrent ?? 1}개`],
+    ["API 키", hasSecret(AGENT, llmSecretKey(conn.id)) ? "저장됨" : "저장 안 함"],
+    LLM_KINDS[conn.kind]?.workspace && conn.workspaceId ? ["워크스페이스", conn.workspaceId] : null,
+    ["동시 요청 수", `${conn.maxConcurrent ?? LLM_KINDS[conn.kind]?.maxConcurrent ?? 1}개`],
     ["종류", kindLabel(conn)],
-  ];
+  ].filter(Boolean);
 }
+/** 연결 작업 화면의 요약: 연결 정보(종류 · 주소) 다음에 상세에서 서버 주소 · 종류를 뺀 것 */
+const llmConnSummary = (conn) => [["연결 정보", `${kindLabel(conn)} · ${urlOf(conn)}`], ...llmConnInfo(conn).filter(([k]) => k !== "서버 주소" && k !== "종류")];
 
 /** 연결을 쓰는 곳 → 삭제할 수 없는 이유 한 문장 */
 function usersText(users) {
@@ -439,6 +444,13 @@ async function editLlm(conn) {
   return state.conn.id;
 }
 
+/** 워크스페이스 문제(Anthropic 조직 키)로 실패한 요청 → 원인 · 해결 방법을 붙인 오류 (상태 점검과 같은 문구) */
+function workspaceError(e) {
+  if (e?.workspace === "unscoped") return Object.assign(e, { why: "이 API 키는 워크스페이스가 지정되지 않았습니다", fix: "편집에서 워크스페이스를 선택하세요" });
+  if (e?.workspace) return Object.assign(e, { why: "이 키로 사용할 수 없는 워크스페이스입니다", fix: "편집에서 워크스페이스를 다시 선택하세요" });
+  return e;
+}
+
 /** 연결 테스트: 키 → 모델 목록(등록한 모델이 있는지) → 짧은 요청으로 tool call. 설정은 바꾸지 않는다 */
 async function testLlm(llm, conn) {
   const kind = LLM_KINDS[conn.kind];
@@ -454,7 +466,7 @@ async function testLlm(llm, conn) {
     }
     let list;
     await ui.task("모델 목록 가져오기", async () => {
-      list = await listModels(conn, key);
+      try { list = await listModels(conn, key); } catch (e) { throw workspaceError(e); }
       return `${list.models.length}개`;
     });
     const ids = list.models.map((m) => m.id);
@@ -464,7 +476,7 @@ async function testLlm(llm, conn) {
     if (model) {
       await ui.task(`tool call 확인 (${model})`, async () => {
         const r = await checkToolCall(conn, key, model);
-        if (!r.ok) throw Object.assign(new Error(r.detail), { why: `tool call이 구조화되어 오지 않습니다 ${r.detail}`.trim(), fix: kind.hints.toolCall });
+        if (!r.ok) throw workspaceError(Object.assign(new Error(r.detail), { workspace: r.workspace, why: `tool call이 구조화되어 오지 않습니다 ${r.detail}`.trim(), fix: kind.hints.toolCall }));
         return "정상";
       });
     }
@@ -516,7 +528,7 @@ async function llmMenu() {
         ? { disabled: "사용 중", why: usersText(users), fix: "먼저 다른 연결의 모델로 바꾸세요." }
         : { detail: "이 연결을 삭제합니다. 다음 화면에서 한 번 더 확인합니다." }) },
       { label: "← 이전", value: "back", lineOnly: true },
-    ], { initial: 0, summary: [["연결 정보", `${kindLabel(conn)} · ${urlOf(conn)}`], ...llmConnInfo(conn).slice(1, 4)] });
+    ], { initial: 0, summary: llmConnSummary(conn) });
     if (act === BACK || act === "back") continue;
     if (act === "edit") { if (await editLlm(conn)) msg = LLM_SAVED; }
     else if (act === "probe") await testLlm(llm, conn);

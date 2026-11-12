@@ -88,6 +88,11 @@ test("원격 input: 검증에 걸리면 invalid 를 같은 id 로 보내고 다�
   const k = remoteUI((m) => (m.op === "input" ? { back: true } : null));
   assert.equal(await k.ui.input("API 키", { mask: true }), BACK);
   assert.equal(k.last("input").mask, true);
+  // error: 처음부터 보일 오류 (앞 화면에서 이 값으로 해 본 일이 실패했을 때). 없으면 빈 문자열
+  assert.equal(i.error, "");
+  const e = remoteUI((m) => (m.op === "input" ? { value: "wrkspc_a" } : null));
+  await e.ui.input("워크스페이스 ID", { initial: "wrkspc_x", error: "이 키로 사용할 수 없는 워크스페이스입니다." });
+  assert.equal(e.last("input").error, "이 키로 사용할 수 없는 워크스페이스입니다.");
 });
 
 test("원격 confirm: 위험한 확인은 팝업(confirm), 가벼운 확인은 목록(select)", async () => {
@@ -384,6 +389,25 @@ test("LLM 연결 편집: 주소 정리 · thinking 맞추기 · 연결 합치기
   const d = E.fixPointers(root, { ...c, connections: c.connections.filter((x) => x.id !== "claude") });
   assert.equal(d.levels.at(-1).connection, "vllm2");
   assert.deepEqual(E.endpointPreset(8000), { retries: 4, maxOut: 1000, concurrency: 1 });
+});
+
+test("LLM 연결 편집: Anthropic 워크스페이스 (저장 · 화면으로 이어지는 실패 · 목록 순서)", async () => {
+  const E = await import("../installer/llm-edit.mjs");
+  const m = [{ id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384 }];
+  // 워크스페이스를 쓰는 종류만, 값이 있을 때만 저장한다 (없으면 필드 자체가 없다)
+  assert.equal(E.cleanConnection({ id: "claude", kind: "anthropic", models: m, workspaceId: "wrkspc_a1" }).workspaceId, "wrkspc_a1");
+  assert.equal("workspaceId" in E.cleanConnection({ id: "claude", kind: "anthropic", models: m }), false);
+  assert.equal("workspaceId" in E.cleanConnection({ id: "claude", kind: "anthropic", models: m, workspaceId: "" }), false);
+  assert.equal("workspaceId" in E.cleanConnection({ id: "site", kind: "vllm", baseUrl: "http://h/v1", models: m, workspaceId: "wrkspc_a1" }), false);
+  // 화면으로 이어지는 실패: 워크스페이스를 쓰는 종류의 미지정 · 형식 · 없는 워크스페이스. 그 밖의 실패(키, 네트워크)는 기존 실패 화면
+  for (const w of ["unscoped", "invalid", "not-found"]) assert.equal(E.needsWorkspace("anthropic", { workspace: w }), true, w);
+  assert.equal(E.needsWorkspace("anthropic", { status: 401, workspace: null }), false);
+  assert.equal(E.needsWorkspace("anthropic", new Error("fetch failed")), false);
+  assert.equal(E.needsWorkspace("vllm", { workspace: "unscoped" }), false);
+  // 기본 워크스페이스 먼저, 나머지는 받은 순서, 같은 ID 는 한 번만
+  assert.deepEqual(E.sortWorkspaces([{ id: "wrkspc_b", name: "b" }, { id: "wrkspc_d", name: "Default", isDefault: true }, { id: "wrkspc_a", name: "a" }, { id: "wrkspc_b", name: "b2" }])
+    .map((w) => w.id), ["wrkspc_d", "wrkspc_b", "wrkspc_a"]);
+  assert.deepEqual(E.sortWorkspaces(undefined), []);
 });
 
 test("LLM 연결 종류 표: 화면 문구(label · hint · detail · urlExample · contextNote)가 한 줄(74칸) 안 · 기본 주소가 없으면 주소 예시가 있다", async () => {

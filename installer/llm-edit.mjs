@@ -34,6 +34,7 @@ export function cleanConnection(conn) {
   }
   const out = { id: conn.id, kind: conn.kind, name: conn.name || kind?.label || conn.id };
   if (conn.baseUrl) out.baseUrl = conn.baseUrl;
+  if (kind?.workspace && conn.workspaceId) out.workspaceId = conn.workspaceId;
   out.maxConcurrent = Number(conn.maxConcurrent) || kind?.maxConcurrent || 1;
   out.request = request;
   out.models = (conn.models ?? []).map((m) => ({ id: m.id, ...(m.family ? { family: m.family } : {}), contextWindow: m.contextWindow, maxOutput: m.maxOutput }));
@@ -93,4 +94,17 @@ export const RATE_LIMITED_TPM = 30000;
 /** 분당 토큰 한도에 맞춘 설정: 연결의 재시도 · 모델마다 응답 최대 길이 · 연결의 동시 요청 수 */
 export function endpointPreset(tpm) {
   return { retries: 4, maxOut: Math.max(512, Math.min(4096, Math.floor(tpm / 8))), concurrency: 1 };
+}
+
+// ------------------------------------------------------------------ Anthropic 워크스페이스 (docs/tui-spec.md §11 Anthropic 워크스페이스)
+/** 모델 목록 실패가 워크스페이스 화면으로 이어지는지: 종류가 워크스페이스를 쓰고, 미지정(400) · 형식 오류(400) · 없는 워크스페이스(404) */
+export function needsWorkspace(kind, e) {
+  return Boolean(LLM_KINDS[kind]?.workspace && ["unscoped", "invalid", "not-found"].includes(e?.workspace));
+}
+
+/** 워크스페이스 선택 목록의 순서: 기본 워크스페이스 먼저, 나머지는 받은 순서. 같은 ID 는 한 번만 */
+export function sortWorkspaces(list) {
+  const seen = new Set();
+  const uniq = (list ?? []).filter((w) => w?.id && !seen.has(w.id) && seen.add(w.id));
+  return [...uniq.filter((w) => w.isDefault), ...uniq.filter((w) => !w.isDefault)];
 }

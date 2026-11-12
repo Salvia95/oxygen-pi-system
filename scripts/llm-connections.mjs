@@ -83,6 +83,7 @@ const OPENAI_COMPAT = { supportsStore: false, supportsDeveloperRole: false, supp
  *   catalog   : "families" (계열 프리셋으로 모델 항목을 만듦) · "pi:<파일>" (pi 내장 카탈로그 vendor/pi/.../providers/data/<파일>.json)
  *   listModels: 모델 목록 형식 "openai" (GET <주소>/models) · "anthropic" (GET <주소>/v1/models, x-api-key)
  *   keyRequired: false 면 키 없이도 연결 (pi 에는 noKey 값을 보낸다)
+ *   workspace : 연결의 workspaceId 를 anthropic-workspace-id 헤더로 보내는지 (조직 API 키, docs/tui-spec.md §11 Anthropic 워크스페이스)
  *   urlExample · contextNote: 설치 TUI · Tweak 의 서버 주소 · 컨텍스트 길이 화면 문구 (기본 주소가 있는 종류는 urlExample 이 없다)
  */
 export const LLM_KINDS = {
@@ -91,7 +92,7 @@ export const LLM_KINDS = {
     detail: ["vLLM 같은 OpenAI 호환 서버에 연결합니다.", "모델 계열에 맞는 샘플링 값과 thinking 제어 방식을 사용합니다."],
     api: "openai-completions", catalog: "families", families: Object.keys(MODEL_FAMILIES), baseUrl: null, listModels: "openai",
     probe: ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs"], request: ["retries", "dropParams"],
-    rateLimitHeader: null, thinkingDefault: "off", maxConcurrent: 2, keyRequired: false, noKey: "EMPTY",
+    rateLimitHeader: null, thinkingDefault: "off", maxConcurrent: 2, keyRequired: false, noKey: "EMPTY", workspace: false,
     provider: { authHeader: true, compat: OPENAI_COMPAT },
     hints: { toolCall: "vLLM의 --enable-auto-tool-choice, --tool-call-parser 설정을 확인하세요", models: "vLLM의 --served-model-name을 확인하세요" },
     urlExample: "http://vllm.example.internal:8000/v1", contextNote: "vLLM의 --max-model-len 값과 맞추세요.",
@@ -101,7 +102,7 @@ export const LLM_KINDS = {
     detail: ["Groq 같은 외부 OpenAI 호환 서비스에 연결합니다.", "vLLM 확장 파라미터는 보내지 않습니다."],
     api: "openai-completions", catalog: "families", families: ["generic", "gpt-oss"], baseUrl: null, listModels: "openai",
     probe: [], request: ["retries"], rateLimitHeader: "x-ratelimit-limit-tokens", thinkingDefault: "off", maxConcurrent: 1,
-    keyRequired: true, provider: { authHeader: true, compat: OPENAI_COMPAT },
+    keyRequired: true, workspace: false, provider: { authHeader: true, compat: OPENAI_COMPAT },
     hints: { toolCall: "서비스가 이 모델의 tool calling을 지원하는지 확인하세요", models: "서비스의 모델 이름을 확인하세요" },
     urlExample: "https://api.groq.com/openai/v1", contextNote: "사내 vLLM과 같은 조건으로 테스트하려면 사내 컨텍스트 길이를 입력하세요.",
   },
@@ -110,7 +111,7 @@ export const LLM_KINDS = {
     detail: ["Anthropic API로 Claude 모델에 연결합니다.", "thinking 수준은 effort로 보냅니다."],
     api: "anthropic-messages", catalog: "pi:anthropic", families: [], baseUrl: "https://api.anthropic.com", listModels: "anthropic",
     probe: [], request: ["retries"], rateLimitHeader: "anthropic-ratelimit-input-tokens-limit", thinkingDefault: "low", maxConcurrent: 2,
-    keyRequired: true, provider: {},
+    keyRequired: true, workspace: true, provider: {},
     hints: { toolCall: "API 키의 권한과 모델 이름을 확인하세요", models: "Anthropic 콘솔에서 이 키로 쓸 수 있는 모델을 확인하세요" },
     contextNote: "사내 vLLM과 같은 조건으로 테스트하려면 사내 컨텍스트 길이를 입력하세요.",
   },
@@ -216,9 +217,28 @@ export function providerConfig(root, conn, apiKey) {
   if (kindCompat) models = models.map((m) => ({ ...m, compat: { ...kindCompat, ...m.compat } }));
   const config = {
     name: conn.name || conn.id, baseUrl: conn.baseUrl || kind.baseUrl, api: kind.api, apiKey: escapeKey(key),
-    ...providerRest, models,
+    ...providerRest, ...(Object.keys(workspaceHeaders(conn)).length ? { headers: workspaceHeaders(conn) } : {}), models,
   };
   return { config, missing };
+}
+
+// ------------------------------------------------------------------ Anthropic 워크스페이스 (워크스페이스가 지정되지 않은 조직 API 키)
+export const WORKSPACE_HEADER = "anthropic-workspace-id";
+export const WORKSPACE_RE = /^wrkspc_[A-Za-z0-9]+$/;
+/** 연결의 워크스페이스 헤더 (종류가 쓰고 값이 있을 때만) */
+export function workspaceHeaders(conn) {
+  return LLM_KINDS[conn?.kind]?.workspace && conn.workspaceId ? { [WORKSPACE_HEADER]: conn.workspaceId } : {};
+}
+/**
+ * 실패한 요청이 워크스페이스 문제인지 → "unscoped" (키에 워크스페이스가 없어 헤더 필요) · "invalid" (ID 형식) · "not-found" · null
+ * 문구는 공식 문서의 오류 메시지 (2026-11-12 확인)
+ */
+export function workspaceProblem(status, text) {
+  const t = String(text ?? "");
+  if (status === 400 && /not scoped to a workspace/i.test(t)) return "unscoped";
+  if (status === 400 && /anthropic-workspace-id header must be a valid workspace id/i.test(t)) return "invalid";
+  if (status === 404 && /Workspace .* not found/i.test(t)) return "not-found";
+  return null;
 }
 
 // ------------------------------------------------------------------ 서버 요청 (모델 목록 · 상태 점검). listModels 형식마다
@@ -236,7 +256,7 @@ const REQUESTS = {
     plainBody: (model, extra = {}) => ({ model, max_tokens: 1, messages: [{ role: "user", content: "hi" }], ...extra }),
   },
   anthropic: {
-    headers: (key) => ({ "x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json" }),
+    headers: (key, conn) => ({ "x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json", ...workspaceHeaders(conn) }),
     modelsUrl: (base) => `${base}/v1/models`,
     parseModels: (j) => (j?.data ?? []).map((m) => ({ id: m.id, ...(m.max_input_tokens ? { maxInput: m.max_input_tokens } : {}), ...(m.max_tokens ? { maxOutput: m.max_tokens } : {}) })),
     toolUrl: (base) => `${base}/v1/messages`,
@@ -253,8 +273,11 @@ export async function listModels(conn, key, { timeoutMs = 10000 } = {}) {
   const kind = LLM_KINDS[conn.kind];
   const R = REQUESTS[kind.listModels];
   const base = trimSlash(conn.baseUrl || kind.baseUrl);
-  const r = await fetch(R.modelsUrl(base), { headers: R.headers(key), signal: AbortSignal.timeout(timeoutMs) });
-  if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
+  const r = await fetch(R.modelsUrl(base), { headers: R.headers(key, conn), signal: AbortSignal.timeout(timeoutMs) });
+  if (!r.ok) {
+    const text = await r.text();
+    throw Object.assign(new Error(`HTTP ${r.status} ${text.slice(0, 200)}`), { status: r.status, workspace: workspaceProblem(r.status, text) });
+  }
   const limit = kind.rateLimitHeader ? Number(r.headers.get(kind.rateLimitHeader)) || null : null;
   return { models: R.parseModels(await r.json()), rateLimit: limit };
 }
@@ -264,12 +287,34 @@ export async function checkToolCall(conn, key, model, { timeoutMs = 60000 } = {}
   const kind = LLM_KINDS[conn.kind];
   const R = REQUESTS[kind.listModels];
   const base = trimSlash(conn.baseUrl || kind.baseUrl);
-  const r = await fetch(R.toolUrl(base), { method: "POST", headers: R.headers(key), body: JSON.stringify(R.toolBody(model)), signal: AbortSignal.timeout(timeoutMs) });
+  const r = await fetch(R.toolUrl(base), { method: "POST", headers: R.headers(key, conn), body: JSON.stringify(R.toolBody(model)), signal: AbortSignal.timeout(timeoutMs) });
   const text = await r.text();
-  if (!r.ok) return { ok: false, detail: `HTTP ${r.status} ${text.slice(0, 200)}` };
+  if (!r.ok) return { ok: false, detail: `HTTP ${r.status} ${text.slice(0, 200)}`, workspace: workspaceProblem(r.status, text) };
   let j = null;
   try { j = JSON.parse(text); } catch { /* 형식 오류 */ }
   return R.toolName(j) === "ping" ? { ok: true, detail: "" } : { ok: false, detail: text.slice(0, 200) };
+}
+
+/**
+ * 이 키로 볼 수 있는 워크스페이스 (워크스페이스가 지정되지 않은 개인 · 서비스 계정 키는 Admin API 목록을 부를 수 있다. 권한에 따라 거부될 수 있음)
+ * → [{ id, name, isDefault }] (보관된 것 제외). 실패하면 throw
+ */
+export async function listWorkspaces(conn, key, { timeoutMs = 10000 } = {}) {
+  const kind = LLM_KINDS[conn.kind];
+  if (!kind?.workspace) return [];
+  const base = trimSlash(conn.baseUrl || kind.baseUrl);
+  const out = [];
+  let after = "";
+  for (let page = 0; page < 10; page++) {
+    const r = await fetch(`${base}/v1/organizations/workspaces?include_default=true&limit=100${after ? `&after_id=${encodeURIComponent(after)}` : ""}`,
+      { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 200)}`), { status: r.status });
+    const j = await r.json();
+    for (const w of j?.data ?? []) if (w?.id && !w.archived_at) out.push({ id: w.id, name: w.name ?? w.id, isDefault: w.name === "Default" });
+    if (!j?.has_more || !j?.last_id) break;
+    after = j.last_id;
+  }
+  return out;
 }
 
 /** pi 가 실제로 붙여 보내는 samplingParams 를 서버가 받는지 (probe 가 있는 종류만) → { ok, status, detail, params } | null */
@@ -279,7 +324,7 @@ export async function checkSampling(root, conn, key, model, { timeoutMs = 60000 
   if (!kind.probe.length || !R.plainBody) return null;
   const m = providerConfig(root, conn, key).config.models.find((x) => x.id === model);
   const params = m?.samplingParams ?? {};
-  const r = await fetch(R.toolUrl(trimSlash(conn.baseUrl || kind.baseUrl)), { method: "POST", headers: R.headers(key),
+  const r = await fetch(R.toolUrl(trimSlash(conn.baseUrl || kind.baseUrl)), { method: "POST", headers: R.headers(key, conn),
     body: JSON.stringify(R.plainBody(model, params)), signal: AbortSignal.timeout(timeoutMs) });
   return { ok: r.ok, status: r.status, detail: r.ok ? "" : (await r.text()).slice(0, 200), params };
 }
@@ -318,6 +363,8 @@ export function validateLlm(llm, root) {
     const kind = LLM_KINDS[c.kind];
     if (!kind) { errs.push(`${c.id}: 알 수 없는 연결 종류 ${c.kind}`); continue; }
     if (!c.baseUrl && !kind.baseUrl) errs.push(`${c.id}: 서버 주소가 없음`);
+    if (c.workspaceId !== undefined && !kind.workspace) errs.push(`${c.id}: 이 연결 종류는 워크스페이스 ID를 쓰지 않음`);
+    if (c.workspaceId !== undefined && kind.workspace && !WORKSPACE_RE.test(c.workspaceId)) errs.push(`${c.id}: 워크스페이스 ID 형식이 아님 (wrkspc_…): ${c.workspaceId}`);
     for (const m of c.models ?? []) {
       if (!(m.contextWindow > 0) || !(m.maxOutput > 0)) errs.push(`${c.id}/${m.id}: 컨텍스트 길이나 응답 최대 길이가 없음`);
       if (kind.catalog !== "families" && root && !catalogModels(root, kind.catalog).some((x) => x.id === m.id)) {

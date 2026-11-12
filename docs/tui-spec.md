@@ -280,6 +280,7 @@ LLM 연결은 여러 개를 함께 등록해 쓴다 (사내 vLLM 여러 대, 외
 | `rateLimitHeader` | 분당 토큰 한도 응답 헤더 (있으면 맞춤 설정 제안) | 없음 | `x-ratelimit-limit-tokens` | `anthropic-ratelimit-input-tokens-limit` |
 | `thinkingDefault` | thinking 선택 화면의 (추천) | `off` | `off` | `low` |
 | `maxConcurrent` | 동시 요청 수 기본값 | 2 | 1 | 2 |
+| `workspace` | 워크스페이스 ID(`anthropic-workspace-id` 헤더)를 쓰는지 (아래 Anthropic 워크스페이스) | 아니오 | 아니오 | 예 |
 
 종류를 더할 때: 표 한 행, 모델 목록 · 점검 형식이 다르면 함수 하나. 단위 테스트가 모든 행의 필드와 함수를 확인한다.
 
@@ -334,6 +335,32 @@ LLM 연결 하위 메뉴는 DB 연결과 같은 구성이다. 한 항목을 선�
 - API 키: 저장된 키가 있으면 `저장된 키 유지`(현재) · `새 키 입력…` · `저장된 키 삭제`(확인 팝업). DB 비밀번호와 같은 문구 구조다. 키는 화면 · 로그 · llm.json 에 보이지 않는다.
 - 연결 삭제: 기본 모델이나 작업 수준이 그 연결을 쓰고 있으면 삭제할 수 없다. 이유(`기본 모델과 작업 수준 2개가 이 연결을 사용합니다`)와 할 일(`먼저 다른 연결의 모델로 바꾸세요`)을 보인다.
 - 저장 결과: `LLM 연결 설정을 저장했습니다. pi를 다시 시작하면 적용됩니다.`
+
+### Anthropic 워크스페이스 (조직 API 키)
+
+공식 문서([인증 · 워크스페이스 선택](https://platform.claude.com/docs/ko/manage-claude/authentication#select-a-workspace), 2026-11-12 확인):
+특정 워크스페이스용으로 만든 키는 워크스페이스 ID 없이 쓰고, **워크스페이스가 지정되지 않은 키는 모든 요청에 `anthropic-workspace-id` 헤더**가 있어야 한다.
+헤더가 없으면 HTTP 400 `This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header …`,
+잘못된 형식이면 400 `anthropic-workspace-id header must be a valid workspace ID.`, 없거나 권한이 없는 워크스페이스면 404 `Workspace <id> not found.`.
+ID 는 Claude Console 의 Settings → Workspaces 화면 **ID** 열에 있고 `wrkspc_` 로 시작한다.
+워크스페이스가 지정되지 않은 개인 · 서비스 계정 키는 Admin API 의 워크스페이스 목록(`GET /v1/organizations/workspaces?include_default=true`)을 부를 수 있다 (키 사용자의 권한에 따라 거부될 수 있다).
+
+- `llm.json`: anthropic 연결에 선택 값 `"workspaceId": "wrkspc_…"`. 비밀값이 아니므로 llm.json 에 둔다. 종류 표의 `workspace: true` 인 종류만 쓴다 (지금은 anthropic).
+- 값이 있으면 **모든 요청**에 `anthropic-workspace-id` 헤더를 붙인다: pi provider 등록(`headers`), 모델 목록, tool calling 점검, 상태 점검.
+- 화면 (설치 LLM 단계 · Tweak 의 `+ 새 연결 추가…` · `편집…` 공통). API 키 다음, 모델 목록을 가져올 때:
+  1. 모델 목록이 위의 400(워크스페이스 미지정)으로 실패하면 `워크스페이스를 선택하세요` 화면을 보인다.
+     - 설명 두 줄: `이 API 키는 워크스페이스가 지정되지 않았습니다.` / `요청마다 워크스페이스 ID를 보내야 합니다.` (한 문장이면 74칸을 넘는다)
+     - 워크스페이스 목록 조회가 되면 목록(`이름` · 값 열에 ID, 기본 워크스페이스는 이름 `기본 워크스페이스`)과 맨 아래 `직접 입력…`. 보관(archived)된 것은 뺀다.
+     - 목록 조회가 안 되면 바로 입력 화면 `워크스페이스 ID` (설명 `Claude Console의 Settings → Workspaces 화면 ID 열에서 확인할 수 있습니다.`, 예 `wrkspc_01Jw…`).
+       `wrkspc_` 로 시작하지 않으면 입력 화면에서 `워크스페이스 ID는 wrkspc_로 시작합니다.` 오류.
+  2. 고른 ID 로 모델 목록을 다시 가져온다. 404 면 `이 키로 사용할 수 없는 워크스페이스입니다.` 와 함께 1 로 돌아간다.
+  3. 키가 워크스페이스용이면(첫 요청이 성공) 이 화면은 나오지 않고 `workspaceId` 를 두지 않는다.
+- `편집…`: 저장된 `workspaceId` 가 있으면 그 값으로 먼저 요청한다. 성공하면 화면 없이 유지, 실패하면(400 · 404) 1 의 화면을 보인다 (처음 포커스는 저장된 값).
+  키를 워크스페이스용 키로 바꾸면 저장된 ID 로도 성공할 수 있으므로, ID 를 지우는 길은 1 의 목록 맨 아래 `사용 안 함`(저장된 값이 있을 때만)이다.
+- Tweak 연결 목록의 오른쪽 상세와 설치 확인 단계 요약: `워크스페이스  wrkspc_…` 행 (값이 있을 때만, `LLM 연결` 행 바로 아래).
+  `LLM 연결` 행 끝에 붙이면 80칸에서 줄이 넘어가고 ` · ` 를 세 번 잇게 되어 따로 둔다 (2026-11-12 캡처로 확인).
+- 상태 점검: 묶음 제목 아래 첫 줄에 워크스페이스가 있으면 `PASS 워크스페이스 wrkspc_…`. 400(미지정)으로 실패하면
+  FAIL `이 API 키는 워크스페이스가 지정되지 않았습니다` + `→ tweak.cmd의 LLM 연결에서 이 연결을 편집해 워크스페이스를 선택하세요`.
 
 ### 상태 점검 (`verify.sh` 의 LLM 절)
 

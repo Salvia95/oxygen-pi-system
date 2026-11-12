@@ -61,13 +61,18 @@ async function serverChecks() {
     if (!kind) continue;
     say("SECTION", `7. LLM 연결: ${c.id} (${kind.label}, ${c.baseUrl || kind.baseUrl})`);
     const key = keys[secretKey(c.id)];
+    if (c.workspaceId) say("PASS", `워크스페이스 ${c.workspaceId}`);
     let list;
     try {
       const r = await listModels(c, key);
       list = r.models.map((m) => m.id);
       say("PASS", `모델 목록 응답: ${list.length}개${r.rateLimit ? ` · 분당 토큰 한도 ${r.rateLimit.toLocaleString()}` : ""}`);
     } catch (e) {
-      say("WARN", `서버 접속 불가: ${e.cause?.code ?? e.message}`);
+      const fix = "→ tweak.cmd의 LLM 연결에서 이 연결을 편집해 워크스페이스를 선택하세요";
+      if (e.workspace === "unscoped") say("FAIL", `이 API 키는 워크스페이스가 지정되지 않았습니다 ${fix}`);
+      else if (e.workspace) say("FAIL", `워크스페이스 ${c.workspaceId ?? ""}를 사용할 수 없습니다 (HTTP ${e.status}) ${fix}`);
+      else if (e.status) say("FAIL", `모델 목록 요청 실패: ${e.message}`);
+      else say("WARN", `서버 접속 불가: ${e.cause?.code ?? e.message}`);
       continue;
     }
     for (const m of c.models ?? []) {

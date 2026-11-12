@@ -80,7 +80,7 @@ pub struct InputSpec {
     pub context: Vec<String>,
     pub value: String,
     pub mask: bool,
-    /// 검증 오류 (Node 가 `invalid` 로 되돌려 준 문구)
+    /// 검증 오류 (Node 가 `invalid` 로 되돌려 준 문구. `input` 의 error 로 처음부터 보일 수도 있다). 입력을 고치면 지운다
     pub error: String,
     pub esc: String,
     pub enter: String,

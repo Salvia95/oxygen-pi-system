@@ -629,8 +629,9 @@ export class UI {
    * 문자열 입력. validate(v) → 오류 문자열(× 뒤에 붙는 문구) 또는 null
    * question: 입력할 값의 이름 (명사형: `포트`, `API 키`) · note(또는 hint): 맥락 (형식 예시 `예: …`)
    * enter · esc: 키 안내의 뜻 · prompt: 줄 입력 모드의 프롬프트를 바꿀 때 (무거운 확인)
+   * error: 처음부터 보일 오류 (앞 화면에서 이 값으로 해 본 일이 실패했을 때. 입력을 고치면 사라진다)
    */
-  async input(question, { initial = "", mask = false, validate = () => null, hint = "", note, back = true, enter, esc = "이전", prompt } = {}) {
+  async input(question, { initial = "", mask = false, validate = () => null, hint = "", note, back = true, enter, esc = "이전", prompt, error = "" } = {}) {
     enter ??= this.enterLabel ?? "확인";
     const ctxAll = toLines(note ?? hint);
     this.waitingFor = question;
@@ -641,6 +642,7 @@ export class UI {
       ctxAll.forEach((l) => lineWrap(l).forEach((x) => this.print(x)));
       if (mask) wrapText("이 터미널에서는 입력한 내용이 화면에 보일 수 있습니다.", 78).forEach((x) => this.print(x));
       this.print("");
+      if (error) this.print(`  ${SYM.err} ${plain(error)}`);
       for (;;) {
         const shown = mask && initial ? "저장된 값" : initial;
         const p = prompt ?? `입력 (${[shown && `Enter=${shown} 유지`, back && `<=${esc}`].filter(Boolean).join(", ")})`.replace(" ()", "");
@@ -653,7 +655,7 @@ export class UI {
       }
     }
     this.#prompt();
-    let r = await this.#ask({ op: "input", header: plain(question), context: ctxAll.map(plain), value: initial, mask, esc: back ? esc : "", enter });
+    let r = await this.#ask({ op: "input", header: plain(question), context: ctxAll.map(plain), value: initial, mask, esc: back ? esc : "", enter, error: plain(error) });
     for (;;) {
       if (r.back) return BACK;
       const err = validate(r.value);

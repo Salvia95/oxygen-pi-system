@@ -9,10 +9,10 @@ import { BACK, UI, c, errorBlock, padDisplay, rail } from "./tui.mjs";
 import { SHELL_NAMES, WT_PROFILE_NAME, createSystem, normShell } from "./system.mjs";
 import { loadConnections } from "./connections.mjs";
 import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
-import { RATE_LIMITED_TPM, closestThinking, endpointPreset, mergeConnection, normalizeBaseUrl } from "./llm-edit.mjs";
+import { RATE_LIMITED_TPM, closestThinking, endpointPreset, mergeConnection, needsWorkspace, normalizeBaseUrl, sortWorkspaces } from "./llm-edit.mjs";
 import {
-  ID_RE, LLM_KINDS, MODEL_FAMILIES, VLLM_EXTRA_PARAMS, catalogModels, detectFamily, findConnection, listModels, loadLlm, migrateAgentDir,
-  saveLlm, secretKey, thinkingChoices,
+  ID_RE, LLM_KINDS, MODEL_FAMILIES, VLLM_EXTRA_PARAMS, WORKSPACE_RE, catalogModels, detectFamily, findConnection, listModels, listWorkspaces, loadLlm,
+  migrateAgentDir, saveLlm, secretKey, thinkingChoices,
 } from "../scripts/llm-connections.mjs";
 import {
   CATALOG, GROUPS, MULTIPLEXERS, OPTIONAL, browserChoices, checkArchive, findArchives, hasComponent, installOptional, isInstalled, readLock, syncSkills,
@@ -439,7 +439,7 @@ function keyFor(state) {
   return state.storedKey;
 }
 
-/** LLM 단계 = 연결 종류 → 연결 이름 → 서버 주소 → API 키 → 모델 목록 → 확장 파라미터 테스트 → 사용량 제한 맞춤 설정 */
+/** LLM 단계 = 연결 종류 → 연결 이름 → 서버 주소 → API 키 → 모델 목록(→ 워크스페이스) → 확장 파라미터 테스트 → 사용량 제한 맞춤 설정 */
 async function stepLlm(state) {
   return runScreens(() => {
     const kind = state.conn ? LLM_KINDS[state.conn.kind] : null;
@@ -504,7 +504,7 @@ async function screenUrl(state) {
   });
   if (v === BACK) return BACK;
   const url = normalizeBaseUrl(state.conn.kind, v);
-  if (url !== state.conn.baseUrl) state.fetched = null;
+  if (url !== state.conn.baseUrl) { state.fetched = null; resetWorkspace(state); }
   state.conn.baseUrl = url;
   return "next";
 }
@@ -528,6 +528,7 @@ async function screenKey(state) {
         });
         if (!yes) continue;
         state.key = "";
+        resetWorkspace(state);
         return "next";
       }
     }
@@ -538,33 +539,113 @@ async function screenKey(state) {
       validate: (s) => (kind.keyRequired && !s ? "API 키를 입력하세요. 이 서비스는 키가 있어야 연결됩니다" : null),
     });
     if (v === BACK) { if (state.keyStored) continue; return BACK; }
+    if (v !== state.key) resetWorkspace(state);
     state.key = v;
     return "next";
   }
 }
 
+/**
+ * 모델 목록 가져오기. 워크스페이스를 쓰는 종류(Anthropic 조직 키)는 지금 워크스페이스 ID(편집이면 저장된 값)로 먼저 요청하고,
+ * 미지정 · 없는 워크스페이스로 실패하면 워크스페이스를 선택받아 다시 요청한다 (docs/tui-spec.md §11 Anthropic 워크스페이스)
+ */
 async function screenFetch(state) {
   const conn = state.conn;
   const kind = LLM_KINDS[conn.kind];
-  ui.screen(`  ${c.bold("LLM 서버에 연결하는 중입니다")}\n  ${c.gray(conn.baseUrl || kind.baseUrl)}\n`);
-  try {
+  let workspaces = null;   // 이 키로 볼 수 있는 워크스페이스 (처음 필요할 때 한 번만 가져온다. 가져오지 못하면 [])
+  for (;;) {
+    ui.screen(`  ${c.bold("LLM 서버에 연결하는 중입니다")}\n  ${c.gray(conn.baseUrl || kind.baseUrl)}\n`);
     let res;
-    await ui.task("모델 목록 가져오기", async () => {
-      res = await listModels(conn, keyFor(state));
-      if (!res.models.length) throw Object.assign(new Error("모델 목록이 비어 있음"), { why: "서버에 등록된 모델이 없습니다", fix: kind.hints.models });
-      return `${res.models.length}개`;
+    try {
+      await ui.task("모델 목록 가져오기", async () => {
+        try { res = await listModels(conn, keyFor(state)); } catch (e) { throw needsWorkspace(conn.kind, e) ? Object.assign(e, { why: WORKSPACE_WHY[e.workspace] }) : e; }
+        if (!res.models.length) throw Object.assign(new Error("모델 목록이 비어 있음"), { why: "서버에 등록된 모델이 없습니다", fix: kind.hints.models });
+        return `${res.models.length}개`;
+      });
+      state.fetched = res;
+      state.afterFetch = true;
+      return "next";
+    } catch (e) {
+      if (needsWorkspace(conn.kind, e)) {
+        workspaces ??= await fetchWorkspaces(state);
+        const id = await pickWorkspace(state, workspaces, conn.workspaceId && e.workspace !== "unscoped" ? WORKSPACE_UNUSABLE : "");
+        if (id === BACK) { resetWorkspace(state); return BACK; }   // 확인하지 못한 ID 는 남기지 않는다
+        if (id) conn.workspaceId = id; else delete conn.workspaceId;
+        continue;
+      }
+      const choice = await ui.select("LLM 서버에 연결하지 못했습니다. 어떻게 할까요?", [
+        { label: "주소와 키 다시 입력", value: "retry" },
+        { label: "연결 확인 없이 계속 (모델 이름 직접 입력)", value: "skip", detail: "모델 목록 없이 다음 화면에서 모델 이름을 직접 입력합니다." },
+      ], { back: false, initial: 0, result: true, enter: "선택",
+        note: [c.gray(conn.baseUrl || kind.baseUrl), ...errorBlock("모델 목록을 가져오지 못했습니다", e).map((l) => l.slice(2))] });
+      if (choice === "skip") { state.fetched = { models: [], rateLimit: null, manual: true }; return "next"; }
+      return { goto: "url" };
+    }
+  }
+}
+
+// ---- Anthropic 워크스페이스 (워크스페이스가 지정되지 않은 조직 API 키)
+const WORKSPACE_WHY = {
+  unscoped: "이 API 키는 워크스페이스가 지정되지 않았습니다",
+  invalid: "이 키로 사용할 수 없는 워크스페이스입니다",
+  "not-found": "이 키로 사용할 수 없는 워크스페이스입니다",
+};
+const WORKSPACE_UNUSABLE = "이 키로 사용할 수 없는 워크스페이스입니다.";
+/** 편집 전 연결에 저장된 워크스페이스 ID (새 연결이면 없음) */
+const savedWorkspace = (state) => (state.origId ? findConnection(state.llm, state.origId)?.workspaceId : undefined);
+/** 키나 주소를 바꾸면 워크스페이스는 저장된 값으로 되돌린다 (새 연결이면 없음. 다음 요청이 성공하면 화면이 나오지 않는다) */
+function resetWorkspace(state) {
+  const saved = savedWorkspace(state);
+  if (saved) state.conn.workspaceId = saved; else delete state.conn.workspaceId;
+}
+
+async function fetchWorkspaces(state) {
+  try {
+    let list = [];
+    await ui.task("워크스페이스 목록 가져오기", async () => {
+      try { list = sortWorkspaces(await listWorkspaces(state.conn, keyFor(state))); } catch (e) {
+        throw Object.assign(e, { why: `이 키로는 워크스페이스 목록을 조회할 수 없습니다${e.status ? ` (HTTP ${e.status})` : ""}`, fix: "다음 화면에서 워크스페이스 ID를 입력하세요" });
+      }
+      return `${list.length}개`;
     });
-    state.fetched = res;
-    state.afterFetch = true;
-    return "next";
-  } catch (e) {
-    const choice = await ui.select("LLM 서버에 연결하지 못했습니다. 어떻게 할까요?", [
-      { label: "주소와 키 다시 입력", value: "retry" },
-      { label: "연결 확인 없이 계속 (모델 이름 직접 입력)", value: "skip", detail: "모델 목록 없이 다음 화면에서 모델 이름을 직접 입력합니다." },
-    ], { back: false, initial: 0, result: true, enter: "선택",
-      note: [c.gray(conn.baseUrl || kind.baseUrl), ...errorBlock("모델 목록을 가져오지 못했습니다", e).map((l) => l.slice(2))] });
-    if (choice === "skip") { state.fetched = { models: [], rateLimit: null, manual: true }; return "next"; }
-    return { goto: "url" };
+    return list;
+  } catch { return []; }
+}
+
+/** 워크스페이스 선택 → ID · null(사용 안 함) · BACK. 목록이 없으면 바로 ID 입력. message: 직전 시도의 결과 (사용할 수 없는 워크스페이스) */
+async function pickWorkspace(state, list, message) {
+  const tried = state.conn.workspaceId;
+  const saved = savedWorkspace(state);
+  for (;;) {
+    let v = "__input";
+    if (list.length) {
+      const rows = [
+        ...list.map((w) => ({ label: w.isDefault ? "기본 워크스페이스" : w.name, value: w.id, hint: w.id, current: w.id === saved,
+          detail: w.isDefault ? "조직의 기본 워크스페이스로 요청합니다." : "이 워크스페이스로 요청합니다." })),
+        { label: "직접 입력…", value: "__input", gap: true, detail: "목록에 없는 워크스페이스의 ID를 입력합니다." },
+        saved && { label: "사용 안 함", value: "__none", detail: "요청에 워크스페이스 ID를 보내지 않습니다." },
+      ].filter(Boolean);
+      const k = rows.findIndex((r) => r.value === saved);
+      v = await ui.select("워크스페이스를 선택하세요", rows, {
+        ...(k >= 0 ? { initial: k } : {}), enter: "선택",
+        note: ["이 API 키는 워크스페이스가 지정되지 않았습니다.", "요청마다 워크스페이스 ID를 보내야 합니다."],
+        message: message ? `${c.red("×")} ${message}` : "",
+      });
+      if (v === BACK) return BACK;
+      if (v === "__none") return null;
+      if (v !== "__input") return v;
+    }
+    // 목록에 없는 ID 를 입력했다가 실패했으면 그 값을 고쳐 쓰게 한다
+    const typed = tried && !list.some((w) => w.id === tried) ? tried : "";
+    const id = await ui.input("워크스페이스 ID", {
+      initial: typed, error: !list.length ? message : "",
+      note: ["Claude Console의 Settings → Workspaces 화면 ID 열에서 확인할 수 있습니다.", "예: wrkspc_01Jw…"],
+      validate: (s) => (!s.trim().startsWith("wrkspc_") ? "워크스페이스 ID는 wrkspc_로 시작합니다."
+        : !WORKSPACE_RE.test(s.trim()) ? "워크스페이스 ID는 wrkspc_ 뒤에 영문과 숫자만 올 수 있습니다." : null),
+    });
+    if (id !== BACK) return id.trim();
+    if (!list.length) return BACK;
+    message = "";
   }
 }
 
@@ -1004,7 +1085,7 @@ const muxName = (id) => (!id || id === "none" ? "사용 안 함" : MULTIPLEXERS.
 const terminalText = (state) => `${SHELL_NAMES[normShell(state.terminalShell)]} · 멀티플렉서 ${muxName(state.mux)}`;
 
 // ------------------------------------------------------------------ 단계: 확인
-/** 확인 단계 요약의 LLM 행: LLM 연결 · 모델 · 작업 수준 (+ 사용량 제한에 맞춘 요청 설정) → { llm, model, levels, request } */
+/** 확인 단계 요약의 LLM 행: LLM 연결 · 워크스페이스(값이 있을 때만) · 모델 · 작업 수준 (+ 사용량 제한에 맞춘 요청 설정) → { llm, workspace, model, levels, request } */
 function llmSummary(state) {
   if (!state.conn?.models?.length) return null;
   const conn = state.conn;
@@ -1017,6 +1098,7 @@ function llmSummary(state) {
   const n = llm.levels.length;
   return {
     llm: `${kind.label} · ${conn.id} · ${key ? "API 키 저장됨" : "API 키 없음"}`,
+    workspace: kind.workspace && conn.workspaceId ? conn.workspaceId : null,
     model: `${main.id}${more} · ${kOf(main.contextWindow)} · thinking ${llm.main.thinking ?? "off"}`,
     levels: onMain === n ? (n === 3 ? "세 수준 모두 기본 모델" : `작업 수준 ${n}개 모두 기본 모델`) : `작업 수준 ${n}개 중 ${onMain}개 기본 모델`,
     request: state.preset ? `재시도 ${conn.request?.retries ?? 0}회 · 동시 요청 ${conn.maxConcurrent}개` : null,
@@ -1036,6 +1118,7 @@ function summary(state) {
   return [
     ["설치 폴더", `${state.installDir}${where}`],
     llm ? ["LLM 연결", llm.llm + changed("llm", llm.llm)] : null,
+    llm?.workspace ? ["워크스페이스", llm.workspace + changed("workspace", llm.workspace)] : null,
     llm ? ["모델", llm.model + changed("model", llm.model)] : null,
     llm?.request ? ["요청 설정", llm.request] : null,
     llm ? ["작업 수준", llm.levels + changed("levels", llm.levels)] : null,
@@ -1209,7 +1292,7 @@ async function reconfigure(reg, { saveRegistry = true } = {}) {
   const target = state.llm?.main?.connection ?? state.llm?.connections[0]?.id;
   if (target && findConnection(state.llm, target)) editTarget(state, target);
   const llm = llmSummary(state);
-  state.orig = { llm: llm?.llm, model: llm?.model, levels: llm?.levels, mainModel: state.main?.model, mainThinking: state.main?.thinking,
+  state.orig = { llm: llm?.llm, workspace: llm?.workspace ?? undefined, model: llm?.model, levels: llm?.levels, mainModel: state.main?.model, mainThinking: state.main?.thinking,
     gitlabHost: state.gitlabHost ?? "", browserId: state.browser?.id, integrations: [...(state.integrations ?? [])], terminal: terminalText(state) };
   const ok2 = await runSteps([stepOptional, stepLlm, stepModel, stepGitlab, stepIntegrate, stepReview], state,
     [RECONF_SHORT, RECONF_LONG, "다시 설정"], { backExits: true });

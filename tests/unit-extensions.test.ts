@@ -833,3 +833,43 @@ test("oxy-monitor: Windows 에서만 pi 와 같은 마우스 켜기 시퀀스를
   assert.equal(mouseReassertSequence({ TMUX: "/tmp/x,1,0" }, "win32"), "\x1b[?1000h\x1b[?1002h\x1b[?1004h\x1b[?1006h");   // 멀티플렉서 안: 버튼 동작만
   assert.equal(mouseReassertSequence({ TERM: "xterm-256color" }, "win32"), "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1004h\x1b[?1006h");
 });
+
+test("LLM 연결: Anthropic 워크스페이스 (워크스페이스가 지정되지 않은 조직 키) · 헤더 · 오류 판정 · 목록", async () => {
+  const L = await import("../scripts/llm-connections.mjs");
+  const root = join(import.meta.dirname, "..");
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  for (const [id, k] of Object.entries(L.LLM_KINDS)) assert.equal(typeof (k as any).workspace, "boolean", `${id}: workspace 필드`);
+  const dir = mkdtempSync(join(tmpdir(), "oxy-ws-"));
+  const port = 18190 + Math.floor(Math.random() * 50);
+  const mock = spawn(process.execPath, [join(root, "tests/mock-anthropic.mjs"), String(port), join(dir, "log.jsonl")],
+    { env: { ...process.env, MOCK_ANTHROPIC_WORKSPACE: "wrkspc_ok1" }, stdio: "ignore" });
+  try {
+    await new Promise((r) => setTimeout(r, 800));
+    const conn: any = { id: "claude", kind: "anthropic", baseUrl: `http://127.0.0.1:${port}`, request: { retries: 0 },
+      models: [{ id: "claude-haiku-5-5", contextWindow: 131072, maxOutput: 16384 }] };
+    // 헤더 없음 → 400 unscoped
+    await assert.rejects(L.listModels(conn, "k"), (e: any) => e.status === 400 && e.workspace === "unscoped");
+    // 목록: 보관된 것은 빼고, Default 는 isDefault
+    assert.deepEqual(await L.listWorkspaces(conn, "k"), [{ id: "wrkspc_default0", name: "Default", isDefault: true }, { id: "wrkspc_ok1", name: "oxy-test", isDefault: false }]);
+    // 다른 ID → 404 not-found, 형식 오류 → invalid (검사는 llm.json 단계에서도)
+    await assert.rejects(L.listModels({ ...conn, workspaceId: "wrkspc_other" }, "k"), (e: any) => e.status === 404 && e.workspace === "not-found");
+    await assert.rejects(L.listModels({ ...conn, workspaceId: "bad id" }, "k"), (e: any) => e.workspace === "invalid");
+    // 맞는 ID → 모델 목록 · tool call 요청 모두 헤더가 붙는다
+    const ok = { ...conn, workspaceId: "wrkspc_ok1" };
+    assert.equal((await L.listModels(ok, "k")).models[0].id, "claude-haiku-5-5");
+    const t = await L.checkToolCall(conn, "k", "claude-haiku-5-5");
+    assert.equal(t.ok, false); assert.equal(t.workspace, "unscoped");
+    // pi provider 등록 설정에 헤더 (값이 없으면 headers 자체가 없다)
+    assert.deepEqual(L.providerConfig(root, ok, "k").config.headers, { "anthropic-workspace-id": "wrkspc_ok1" });
+    assert.equal(L.providerConfig(root, conn, "k").config.headers, undefined);
+    // 검사: 형식 · 종류
+    const llm = (c: any) => ({ version: 1, connections: [c], main: { connection: c.id, model: c.models[0].id, thinking: "off" }, levels: [] });
+    assert.deepEqual(L.validateLlm(llm(ok), root), []);
+    assert.match(L.validateLlm(llm({ ...conn, workspaceId: "ws1" }), root).join(), /워크스페이스 ID 형식/);
+    assert.match(L.validateLlm(llm({ id: "site", kind: "vllm", baseUrl: "http://x/v1", workspaceId: "wrkspc_a", models: [{ id: "m", family: "generic", contextWindow: 1, maxOutput: 1 }] })).join(), /워크스페이스 ID를 쓰지 않음/);
+    assert.equal(L.workspaceProblem(500, "x"), null);
+  } finally { mock.kill(); rmSync(dir, { recursive: true, force: true }); }
+});
+
