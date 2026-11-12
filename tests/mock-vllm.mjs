@@ -48,6 +48,14 @@ const SCENARIOS = {
     bash("echo hi > f.txt && git add f.txt && git -c user.name=t -c user.email=t@t commit -qm 'feat: add f'"),
     { text: "committed" },
   ],
+  // oxy-flow 계획: 계획 쓰기 → 할 일 시작 → 커밋(진행 중인 할 일에 연결) → 완료
+  "flow-plan": [
+    { tool: "flow_plan", args: { action: "set", items: [{ text: "Add g file", children: [{ text: "write g" }, { text: "commit g" }] }, { text: "Report" }] } },
+    { tool: "flow_plan", args: { action: "update", id: "p1.1", status: "doing" } },
+    bash("echo g > g.txt && git add g.txt && git -c user.name=t -c user.email=t@t commit -qm 'feat: add g'"),
+    { tool: "flow_plan", args: { action: "update", id: "p1", status: "done" } },
+    { text: "planned" },
+  ],
   "flow-big": [bash("echo step-one"), { ...bash("echo step-two"), usage: 120000 }, { text: "after-compaction" }],
   "flow-half": [{ text: "half-full", usage: 75000 }],
   "sub-async": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env async check", wait: false } }, { text: "Delegated; waiting." }],

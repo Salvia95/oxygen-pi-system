@@ -7,6 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type PlanInput, type PlanItem, addItem, currentItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
 
 export type NoteKind = "decision" | "goal" | "next" | "blocked" | "done";
 export interface Decision { at: number; text: string; why?: string }
@@ -38,6 +39,7 @@ export interface Flow {
   updatedAt: number;
   baseCommit: string | null; // 작업을 시작할 때의 HEAD
   continueAt?: number;       // 세션 넘기기 표시 (store.markContinue)
+  plan: PlanItem[];          // 앞으로 할 일: 항목 → 할 일 (plan.ts). 예전 파일에는 없다 (load 가 빈 배열로 채움)
   nodes: FlowNode[];
   buffer: Buffer;
 }
@@ -48,6 +50,9 @@ export interface FlowEngine {
   readonly writable: boolean;
   load(): Flow;
   note(kind: NoteKind, text: string, why?: string): Flow;
+  setPlan(items: PlanInput[]): PlanItem[];
+  addPlan(text: string, parent?: string): PlanItem;
+  updatePlan(id: string, change: { status?: string; text?: string }): PlanItem;
   recordFile(path: string): void;
   recordCommand(command: string, ok: boolean, tail: string): void;
   recordJob(text: string): void;
@@ -122,6 +127,7 @@ export class FileFlowEngine implements FlowEngine {
     try {
       this.flow = JSON.parse(readFileSync(file, "utf8")) as Flow;
       this.flow.buffer = { ...empty(), ...this.flow.buffer };
+      if (!Array.isArray(this.flow.plan)) this.flow.plan = [];
     } catch {
       this.flow = this.fresh("");
     }
@@ -131,7 +137,7 @@ export class FileFlowEngine implements FlowEngine {
   private fresh(goal: string): Flow {
     const now = Date.now();
     return { version: 1, id: `flow-${new Date(now).toISOString().slice(0, 19).replace(/[-:T]/g, "")}`, goal, next: "", blocked: "",
-      status: "active", startedAt: now, updatedAt: now, baseCommit: git(this.root, ["rev-parse", "HEAD"]), nodes: [], buffer: empty() };
+      status: "active", startedAt: now, updatedAt: now, baseCommit: git(this.root, ["rev-parse", "HEAD"]), plan: [], nodes: [], buffer: empty() };
   }
 
   /** 기록이 실제로 있는가 (빈 작업이면 컨텍스트에 넣지 않는다) */
@@ -140,11 +146,11 @@ export class FileFlowEngine implements FlowEngine {
     return Boolean(f.goal || this.hasWork());
   }
 
-  /** 목표 말고 진행 기록이 있는가 (커밋 노드 · 결정 · 변경 · 실패 · 다음 단계 · 막힌 점). 목표만 있으면 주입할 가치가 없다 */
+  /** 목표 말고 진행 기록이 있는가 (계획 · 커밋 노드 · 결정 · 변경 · 실패 · 다음 단계 · 막힌 점). 목표만 있으면 주입할 가치가 없다 */
   hasWork(): boolean {
     const f = this.load();
     const b = f.buffer;
-    return Boolean(f.next || f.blocked || f.nodes.length || b.decisions.length || b.files.length || b.failures.length);
+    return Boolean(f.next || f.blocked || f.plan.length || f.nodes.length || b.decisions.length || b.files.length || b.failures.length);
   }
 
   private save(): void {
@@ -165,6 +171,29 @@ export class FileFlowEngine implements FlowEngine {
     if (kind !== "done" && f.status === "done") f.status = "active";
     this.save();
     return f;
+  }
+
+  /** 계획 전체 쓰기 (같은 글의 항목은 상태를 이어받는다) */
+  setPlan(items: PlanInput[]): PlanItem[] {
+    const f = this.load();
+    f.plan = setPlan(f.plan, items);
+    if (f.status === "done") f.status = "active";
+    this.save();
+    return f.plan;
+  }
+
+  addPlan(text: string, parent?: string): PlanItem {
+    const f = this.load();
+    const item = addItem(f.plan, text, parent);
+    if (f.status === "done") f.status = "active";
+    this.save();
+    return item;
+  }
+
+  updatePlan(id: string, change: { status?: string; text?: string }): PlanItem {
+    const item = updateItem(this.load().plan, id, change);
+    this.save();
+    return item;
   }
 
   /** 세션 넘기기 직전에 표시: 다음 세션의 첫 요청은 같은 작업을 이어 가는 것 (2분 안에 쓰지 않으면 무효) */
@@ -248,6 +277,9 @@ export class FileFlowEngine implements FlowEngine {
       f.nodes.push(node);
       made.push(node);
     }
+    // 지금 진행 중인 할 일에 커밋을 붙인다 (계획이 있을 때)
+    const cur = currentItem(f.plan);
+    if (cur) for (const n of made) if (!cur.nodes.includes(n.id)) cur.nodes.push(n.id);
     f.buffer = { ...empty(), failures: f.buffer.failures, jobs: f.buffer.jobs };
     this.save();
     return made;
@@ -291,8 +323,10 @@ export function renderContext(f: Flow, maxChars = 6000, mode: "continue" | "refe
       `Last task goal: ${f.goal || "(not set)"}`,
       "If the user's request is a different task, first call flow_note(kind=\"goal\") with the new goal."];
   if (f.status === "done") head.push("Status: done");
-  if (f.next) head.push(`Next: ${f.next}`);
+  const next = nextStep(f.plan) ?? f.next;   // 계획이 있으면 첫 doing(없으면 todo) 할 일
+  if (next) head.push(`Next: ${next}`);
   if (f.blocked) head.push(`Blocked: ${f.blocked}`);
+  if (f.plan.length) head.push("Plan (update it with flow_plan):", ...renderPlanLines(f.plan, { maxChars: Math.floor(maxChars * 0.4) }));
 
   const tail: string[] = [];
   if (b.decisions.length || b.files.length || b.failures.length || b.jobs.length) {
@@ -335,8 +369,10 @@ export function renderNode(n: FlowNode): string {
 
 export function renderMarkdown(f: Flow): string {
   const out = [`# ${f.goal || "(목표 미정)"}`, "", `- 작업: ${f.id} · ${f.status} · 시작 ${new Date(f.startedAt).toLocaleString()}`];
-  if (f.next) out.push(`- 다음: ${f.next}`);
+  const next = nextStep(f.plan) ?? f.next;
+  if (next) out.push(`- 다음: ${next}`);
   if (f.blocked) out.push(`- 막힘: ${f.blocked}`);
+  if (f.plan.length) out.push("", "## 계획", "", ...renderPlanMarkdown(f.plan));
   out.push("", "## 단계 (커밋)");
   if (!f.nodes.length) out.push("", "(아직 커밋 없음)");
   for (const n of f.nodes) {

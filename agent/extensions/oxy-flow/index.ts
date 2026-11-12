@@ -5,6 +5,7 @@
  *   - 커밋 단위 노드: git commit 이 성공하면(또는 pi 밖 커밋을 나중에 발견하면) 노드를 만들고 그 사이의 결정 사항·파일을 붙인다
  *   - 사실은 자동 기록: 수정 파일 · 명령 성공/실패(마지막 출력) · 백그라운드 작업/subagent
  *   - 모델은 결정과 이유만 기록: flow_note / 필요할 때 조회: flow_show
+ *   - 앞으로 할 일: flow_plan 으로 항목 → 할 일(2단) 계획을 쓰고 상태를 바꾼다. 커밋은 doing 인 할 일에 붙는다 (plan.ts)
  * 컨텍스트
  *   - 새 세션의 첫 요청에 작업 상태를 넣는다 (기록이 있을 때)
  *   - 컨텍스트가 OXY_FLOW_ROLLOVER_PCT(기본 50%) 이상일 때 사용자가 새 메시지를 보내면, 그 메시지를 새 세션에서 이어서 처리한다
@@ -17,6 +18,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { enabled, envInt, textOf } from "../_lib/common.ts";
 import { FileFlowEngine, type FlowNode, git, renderContext, renderMarkdown, renderNode, traceDecisions } from "./store.ts";
+import { PLAN_STATUSES, type PlanItem, nextStep, progress, renderPlanLines } from "./plan.ts";
+
+/** 커밋 노드가 붙은 계획 항목 (할 일 우선) */
+const findLinked = (plan: PlanItem[], nodeId: string): PlanItem | null => {
+  for (const p of plan) {
+    for (const c of p.children) if (c.nodes.includes(nodeId)) return c;
+    if (p.nodes.includes(nodeId)) return p;
+  }
+  return null;
+};
 
 const CUSTOM = "oxy-flow";
 const COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+(?:-[cC]\s+\S+\s+)*commit\b/;
@@ -48,7 +59,8 @@ export default function (pi: ExtensionAPI) {
     if (!engine.writable) { ctx.ui.setStatus(CUSTOM, `flow 읽기 전용 (pid ${engine.lockOwner} 사용 중)`); return; }
     if (!engine.hasContent()) { ctx.ui.setStatus(CUSTOM, undefined); return; }
     const pend = f.buffer.decisions.length;
-    ctx.ui.setStatus(CUSTOM, `flow ${f.nodes.at(-1)?.id ?? "n0"}${pend ? ` +${pend}결정` : ""}${f.buffer.failures.length ? ` ✗${f.buffer.failures.length}` : ""}`);
+    const pg = progress(f.plan);
+    ctx.ui.setStatus(CUSTOM, `flow ${f.nodes.at(-1)?.id ?? "n0"}${pg.total ? ` · 할 일 ${pg.done}/${pg.total}` : ""}${pend ? ` +${pend}결정` : ""}${f.buffer.failures.length ? ` ✗${f.buffer.failures.length}` : ""}`);
   };
 
   const injected = (ctx: any): boolean =>
@@ -101,9 +113,12 @@ export default function (pi: ExtensionAPI) {
     status(ctx);
     if (!made.length) return undefined;
     const last = made.at(-1)!;
-    const hint = last.decisions.length
+    let hint = last.decisions.length
       ? `[oxy-flow] Recorded step ${last.id} for commit ${last.commit.slice(0, 8)} with ${last.decisions.length} decision(s).`
       : `[oxy-flow] Recorded step ${last.id} for commit ${last.commit.slice(0, 8)}. No decision was recorded for it: if you chose between options, call flow_note(kind="decision", text, why).`;
+    // 소형 모델은 커밋 뒤 계획 항목을 done 으로 바꾸는 것을 잊기 쉽다 (실제 모델 확인)
+    const linked = findLinked(e.load().plan, last.id);
+    if (linked) hint += ` Linked to plan item ${linked.id} "${linked.text.slice(0, 60)}". If this commit finishes it, call flow_plan(action="update", id="${linked.id}", status="done").`;
     return { content: [...event.content, { type: "text", text: hint }] };
   });
 
@@ -172,6 +187,41 @@ export default function (pi: ExtensionAPI) {
       e.note(params.kind, text, params.why);
       status(ctx);
       return ok(`Recorded ${params.kind}.`);
+    },
+  });
+
+  pi.registerTool({
+    name: "flow_plan",
+    label: "Task plan",
+    description:
+      "Plan the current task as steps with optional sub-tasks (2 levels). set: items=[{text, children:[{text}]}] replaces the plan. " +
+      "add: text, with parent=\"p2\" for a sub-task. update: id plus status or text. Mark an item doing when you start it and done when finished.",
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("set"), Type.Literal("add"), Type.Literal("update")]),
+      items: Type.Optional(Type.Array(Type.Object({
+        text: Type.String(),
+        children: Type.Optional(Type.Array(Type.Object({ text: Type.String() }))),
+      }))),
+      text: Type.Optional(Type.String()),
+      parent: Type.Optional(Type.String()),
+      id: Type.Optional(Type.String()),
+      status: Type.Optional(Type.Union(PLAN_STATUSES.map((s) => Type.Literal(s)))),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      const e = eng(ctx);
+      if (!e.writable) throw new Error(`task log is read-only: another pi session (pid ${e.lockOwner}) is using .oxy/flow in this project`);
+      let head: string;
+      if (params.action === "set") { e.setPlan(params.items ?? []); head = "Plan saved."; }
+      else if (params.action === "add") { const it = e.addPlan(String(params.text ?? ""), params.parent || undefined); head = `Added ${it.id}.`; }
+      else {
+        if (!params.id) throw new Error("id is required for action=update");
+        const it = e.updatePlan(String(params.id), { status: params.status, text: params.text });
+        head = `Updated ${it.id} [${it.status}].`;
+      }
+      status(ctx);
+      const plan = e.load().plan;
+      const next = nextStep(plan);
+      return ok([head, ...renderPlanLines(plan, { maxChars: 3000 }), next ? `Next: ${next}` : "All items are done or dropped."].join("\n"));
     },
   });
 

@@ -151,9 +151,12 @@ agent/jobs/run-<pid>-<시작 시각 ms>/
   - `action=set, items=[{text, children:[{text}]}]` — 계획 전체를 쓴다. id 는 extension 이 매긴다. 이미 done 인 항목은 같은 글이면 상태를 유지한다.
   - `action=add, parent?="p2", text` — 항목(또는 할 일) 하나 추가
   - `action=update, id="p2.2", status?, text?` — 상태·글 바꾸기. 할 일이 모두 done 이면 위 항목도 done 으로 바꾼다.
-- 자동 기록: 커밋 노드가 생기면 그 시점에 doing 인 가장 깊은 항목의 `nodes` 에 붙인다.
+- 자동 기록: 커밋 노드가 생기면 그 시점에 doing 인 가장 깊은 항목의 `nodes` 에 붙인다. doing 인 할 일이 여럿이면 가장 최근에 doing 이 된 것, doing 인 할 일이 없으면 doing 인 항목, 그것도 없으면 붙이지 않는다.
+- 커밋 직후 안내: 커밋이 계획 항목에 붙으면 커밋 결과에 `Linked to plan item p2 "…". If this commit finishes it, call flow_plan(action="update", id="p2", status="done").` 를 덧붙인다. 실제 모델(qwen3.8-27b, Groq)이 커밋 뒤 done 표시를 빠뜨리는 것을 보고 넣었고, 넣은 뒤에는 바로 done 으로 바꿨다.
+- 할 일이 있는 항목의 상태는 할 일을 따른다: 모두 done/dropped → done (모두 dropped 면 dropped), 하나라도 doing 이거나 일부만 done → doing, 남은 것이 모두 blocked → blocked.
+- 모델 입력 크기: 요청마다 도구 정의 +1,013자, AGENTS.md 안내 한 줄 +164자 (약 300토큰, 2026-11-12 mock 요청으로 측정).
 - `next` 와의 관계: 계획이 있으면 컨텍스트와 FLOW.md 의 "다음"은 첫 번째 doing(없으면 todo) 할 일로 보여 준다. `flow_note kind=next` 는 계획이 없을 때를 위해 남긴다.
-- 컨텍스트에 넣는 계획: done 항목은 접어서 개수만, 나머지는 한 줄씩. 프롬프트 길이가 늘어나므로 넣기 전후를 실측한다 (scenario-eval, Groq 실제 모델).
+- 컨텍스트에 넣는 계획: done 항목은 접어서 개수만, 나머지는 한 줄씩. 작업 상태 상한(`OXY_FLOW_CONTEXT_MAX_CHARS`)의 40% 를 넘으면 todo 항목의 할 일도 접고, 그래도 넘으면 뒤를 자른다.
 - `/flow new` 로 작업을 보관하면 계획도 함께 보관된다.
 
 ## 5. 모니터 프로그램 (Node 스크립트)

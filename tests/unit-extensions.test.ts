@@ -347,6 +347,96 @@ test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 ·
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("oxy-flow 계획 트리: 쓰기 · 추가 · 상태 · 상위 항목 따라가기 · 다시 쓰기 (monitor-spec §4)", async () => {
+  const { setPlan, addItem, updateItem, currentItem, nextStep, progress, renderPlanLines, findItem } = await import("../agent/extensions/oxy-flow/plan.ts");
+  let plan = setPlan([], [
+    { text: "기존 구조 파악", children: [{ text: "결제 흐름 읽기" }, { text: "테스트 현황 확인" }] },
+    { text: "PaymentService 분리", children: [{ text: "인터페이스 정의" }, { text: "구현 옮기기" }] },
+    { text: "통합 테스트" },
+  ], 1);
+  assert.deepEqual(plan.map((p) => [p.id, p.status, p.children.map((c) => c.id)]),
+    [["p1", "todo", ["p1.1", "p1.2"]], ["p2", "todo", ["p2.1", "p2.2"]], ["p3", "todo", []]]);
+  assert.equal(nextStep(plan), "p1.1 결제 흐름 읽기 (in p1 기존 구조 파악)");
+  updateItem(plan, "p1.1", { status: "doing" }, 2);
+  assert.equal(findItem(plan, "p1")!.item.status, "doing");                  // 할 일이 시작되면 항목도 진행 중
+  updateItem(plan, "p1.1", { status: "done" }, 3);
+  assert.equal(findItem(plan, "p1")!.item.status, "doing");                  // 일부만 끝남
+  updateItem(plan, "P1.2", { status: "done" }, 4);                             // id 대소문자 무시
+  assert.equal(findItem(plan, "p1")!.item.status, "done");                   // 모두 끝나면 항목도 끝
+  updateItem(plan, "p2.1", { status: "doing" }, 5);
+  assert.equal(currentItem(plan)!.id, "p2.1");
+  assert.equal(nextStep(plan), "p2.1 인터페이스 정의 (in p2 PaymentService 분리)");
+  const added = addItem(plan, "호출부 바꾸기", "p2", 6);
+  assert.equal(added.id, "p2.3");
+  assert.equal(addItem(plan, "문서", undefined, 7).id, "p4");
+  assert.throws(() => addItem(plan, "x", "p2.1"), /2 levels: add the sub-task to p2/);
+  assert.throws(() => updateItem(plan, "p9", { status: "done" }), /unknown item "p9". Items: p1, p1.1/);
+  assert.throws(() => updateItem(plan, "p3", { status: "finished" }), /status must be one of/);
+  assert.throws(() => setPlan(plan, []), /non-empty/);
+  assert.deepEqual(progress(plan), { done: 2, total: 7 });
+  // 할 일이 있는 항목을 done 으로: 끝나지 않은 할 일도 done
+  updateItem(plan, "p2", { status: "done" }, 8);
+  assert.deepEqual(findItem(plan, "p2")!.item.children.map((c) => c.status), ["done", "done", "done"]);
+  // 다시 쓰기: 같은 글은 상태 유지, 순서·id 는 새로, 새 항목은 todo
+  plan = setPlan(plan, [{ text: "PaymentService 분리", children: [{ text: "인터페이스 정의" }, { text: "새 할 일" }] }, { text: "통합 테스트" }], 9);
+  assert.deepEqual(plan.map((p) => [p.id, p.status]), [["p1", "doing"], ["p2", "todo"]]);
+  assert.deepEqual(plan[0].children.map((c) => [c.id, c.status]), [["p1.1", "done"], ["p1.2", "todo"]]);
+  // 모델용 줄: 끝난 항목의 할 일은 접는다
+  const done = setPlan([], [{ text: "A", children: [{ text: "a1" }] }, { text: "B", children: [{ text: "b1" }] }]);
+  updateItem(done, "p1.1", { status: "done" });
+  assert.deepEqual(renderPlanLines(done), ["- p1 [done] A (1/1 sub-tasks done)", "- p2 [todo] B", "  - p2.1 [todo] b1"]);
+  const big = setPlan([], Array.from({ length: 20 }, (_, i) => ({ text: `step ${i} `.repeat(8), children: Array.from({ length: 10 }, (_, j) => ({ text: `sub ${j} `.repeat(8) })) })));
+  const lines = renderPlanLines(big, { maxChars: 2000 });
+  assert.ok(lines.join("\n").length <= 2000, `len ${lines.join("\n").length}`);
+});
+
+test("oxy-flow 계획 + 엔진: 저장 · 커밋이 진행 중인 할 일에 붙음 · 컨텍스트 · FLOW.md · 예전 파일", async () => {
+  const { FileFlowEngine, renderContext, renderMarkdown } = await import("../agent/extensions/oxy-flow/store.ts");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "oxyplan-"));
+  const g = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, stdio: "ignore" });
+  try {
+    g("init", "-q"); writeFileSync(join(dir, "a.txt"), "1"); g("add", "."); g("commit", "-qm", "base");
+    // 예전 형식(plan 없음) 파일도 읽힌다
+    mkdirSync(join(dir, ".oxy", "flow"), { recursive: true });
+    writeFileSync(join(dir, ".oxy", "flow", "flow.json"), JSON.stringify({ version: 1, id: "flow-old", goal: "old", next: "", blocked: "", status: "active", startedAt: 0, updatedAt: 0, baseCommit: null, nodes: [], buffer: {} }));
+    const e = new FileFlowEngine(dir);
+    assert.deepEqual(e.load().plan, []);
+    assert.equal(e.hasWork(), false);
+    e.setPlan([{ text: "Login API", children: [{ text: "route" }, { text: "tests" }] }]);
+    assert.equal(e.hasWork(), true);                                              // 계획만 있어도 진행 기록
+    e.updatePlan("p1.1", { status: "doing" });
+    writeFileSync(join(dir, "a.txt"), "2"); g("commit", "-qam", "feat: route");
+    const [n1] = e.syncCommits(false);
+    assert.deepEqual(e.load().plan[0].children[0].nodes, [n1.id]);              // 진행 중인 할 일에 커밋 연결
+    e.updatePlan("p1.1", { status: "done" });
+    writeFileSync(join(dir, "a.txt"), "3"); g("commit", "-qam", "chore: between sub-tasks");
+    e.syncCommits(false);
+    assert.deepEqual(e.load().plan[0].children.map((c) => c.nodes), [["n1"], []]);
+    assert.deepEqual(e.load().plan[0].nodes, ["n2"]);                           // 진행 중인 할 일이 없으면 진행 중인 항목에
+    const again = new FileFlowEngine(dir, true);                                // 다른 프로세스(모니터)가 읽기 전용으로 읽음
+    assert.equal(again.load().plan[0].children[0].status, "done");
+    const ctx = renderContext(e.load(), 6000);
+    assert.match(ctx, /Next: p1\.2 tests \(in p1 Login API\)/);
+    assert.match(ctx, /Plan \(update it with flow_plan\):\n- p1 \[doing\] Login API \(commits n2\)\n  - p1\.1 \[done\] route \(commits n1\)\n  - p1\.2 \[todo\] tests/);
+    e.updatePlan("p1", { status: "done" });
+    writeFileSync(join(dir, "a.txt"), "4"); g("commit", "-qam", "docs: after plan");
+    e.syncCommits(false);
+    assert.equal(e.load().plan[0].nodes.includes("n3"), false);                  // 진행 중인 항목이 없으면 붙이지 않는다
+    assert.match(renderContext(e.load(), 6000), /- p1 \[done\] Login API \(commits n2\) \(2\/2 sub-tasks done\)/);
+    e.updatePlan("p1.2", { status: "todo" });
+    const md = renderMarkdown(e.load());
+    assert.match(md, /## 계획\n\n- ⏳ p1 Login API — n2\n  - ✓ p1\.1 route — n1\n  - · p1\.2 tests/);
+    assert.match(readFileSync(join(dir, ".oxy", "flow", "FLOW.md"), "utf8"), /## 계획/);
+    e.startNew("next task");
+    assert.deepEqual(e.load().plan, []);                                          // 새 작업은 빈 계획 (이전 계획은 archive 에)
+    e.release();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("code-intel: ast-grep skill · graphin 을 넣으면 MCP 등록 + skill, 빼면 해제 (다른 서버 유지)", async () => {
   const { syncSkills } = await import("../installer/components.mjs");
   const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, rmSync } = await import("node:fs");

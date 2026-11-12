@@ -22,6 +22,7 @@
 - A `[oxy-flow] Task state` message is the record of earlier work in this task. Trust it; use `flow_show` for details of a step.
 - When you choose between options (design, library, approach, a fix for a failure), call `flow_note(kind="decision", text, why)`.
   Before ending a turn with work left, set `flow_note(kind="next")`. Files, commands, failures and commits are recorded automatically.
+- For a task with several steps, first write the plan with `flow_plan(action="set")`, then mark each item `doing` when you start it and `done` when it is finished.
 
 # Working rules
 
