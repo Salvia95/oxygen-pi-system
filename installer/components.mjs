@@ -77,6 +77,18 @@ export const HARNESS_FILES = { "oxy-tui": "bin/oxy-tui.exe" };
 export const hasComponent = (name, root) => (HARNESS_FILES[name] ? existsSync(join(root, HARNESS_FILES[name]))
   : Boolean(CATALOG[name]) && existsSync(join(root, CATALOG[name].check)));
 
+/**
+ * 터미널 멀티플렉서 (oxy.env 의 OXY_MUX). 화면 선택지는 `사용 안 함` + 이 표의 순서 (docs/tui-spec.md §10)
+ *   id        : OXY_MUX 값. 실행은 scripts/mux/<id>.sh 어댑터가 맡는다 (oxy 가 source)
+ *   component : CATALOG 의 구성요소. 설치되지 않았으면 선택할 수 없다
+ * 멀티플렉서를 더할 때: tools.lock 행 + CATALOG 행 + 이 표 한 행 + 어댑터 파일 하나
+ */
+export const MULTIPLEXERS = [
+  { id: "psmux", component: "psmux", label: "psmux", hint: "oxy가 폴더별 psmux 세션에서 pi를 실행",
+    detail: ["oxy가 폴더마다 psmux 세션을 만들어 그 안에서 pi를 실행합니다.", "창을 닫아도 세션이 남고, 같은 폴더에서 oxy를 실행하면 다시 연결됩니다."],
+    info: [["세션 이름", "oxy-<폴더 이름>-<경로 해시>"], ["바로 실행", "oxy --no-mux (한 번만)"], ["알려진 제한", "Shift+Enter가 Enter와 같게 입력될 수 있음"]] },
+];
+
 // ------------------------------------------------------------------ skill 자동 활성화
 // skill 원본은 agent/skill-library/<name> 에 두고, 설치된 구성요소에 해당하는 것만 agent/skills/ 로 복사한다.
 // (pi 는 agent/skills 만 읽는다. skill-library 에 없는 사용자 skill 은 건드리지 않는다)

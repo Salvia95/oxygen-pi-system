@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # oxygen-pi-system 런처: 번들 Node 22 + pi 를 하네스 환경으로 실행한다.
-#   ./oxy                 # 대화형 TUI
-#   ./oxy -p "질문"       # 1회 실행
+#   ./oxy                 # 대화형 TUI (oxy.env 의 OXY_MUX 를 켰으면 폴더별 멀티플렉서 세션 안에서)
+#   ./oxy -p "질문"       # 1회 실행 (항상 지금 창)
+#   ./oxy --no-mux [인자] # 이번만 지금 창에서
+#   ./oxy mux [인자]      # 이번만 멀티플렉서 세션에서 (OXY_MUX 가 none 이면 psmux)
+# 판정 순서와 문구: docs/tui-spec.md §10
 set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
@@ -9,15 +12,49 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 [[ -x "$OXY_NODE" ]] || { echo "[oxy] 번들 Node 없음: $OXY_NODE (설치가 끝났는지 확인)" >&2; exit 1; }
 [[ -f "$PI_CODING_AGENT_DIR/models.json" ]] || { echo "[oxy] models.json 없음 → 'just configure' 먼저 실행" >&2; exit 1; }
 
-# oxy mux [pi 인자…]: 지금 폴더 이름의 psmux 세션 안에서 pi 를 실행한다 (있으면 다시 붙음).
-#   세션 안에서는 /jobs 의 로그를 옆 pane 으로 열 수 있고, 창을 닫아도 psmux 세션은 남는다 (oxy mux 로 다시 붙음).
-if [[ "${1:-}" == mux ]]; then
-  shift
-  [[ -x "$OXY_HOME/bin/psmux.exe" ]] || { echo "[oxy] psmux 가 반입되지 않았습니다 (선택 구성요소 dev-tools/psmux)" >&2; exit 1; }
-  [[ -n "${TMUX:-}" ]] && exec "$OXY_NODE" "$OXY_PI_CLI" "$@"   # 이미 psmux 안
-  name="oxy-$(basename "$PWD" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-40)"
-  cmd="$(printf '%q' "$OXY_HOME/oxy")"; for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done   # pane 의 bash 가 해석
-  exec "$OXY_HOME/wrappers/psmux" new-session -A -s "$name" -c "$(cygpath -w "$PWD")" "$cmd"
+direct() { exec "$OXY_NODE" "$OXY_PI_CLI" "$@"; }
+
+force=""
+case "${1:-}" in
+  mux) shift; force=1 ;;
+  --no-mux) shift; direct "$@" ;;
+esac
+mux="${OXY_MUX:-none}"
+[[ -n $force && $mux == none ]] && mux=psmux
+[[ $mux == none ]] && direct "$@"
+
+# 대화형이 아니면 (파이프, 1회 실행, 도움말, pi 하위 명령) 세션으로 감싸지 않는다
+interactive() {
+  [[ -t 0 && -t 1 ]] || return 1
+  case "${1:-}" in install|remove|uninstall|update|list|config|auth|mcp) return 1 ;; esac
+  local a
+  for a in "$@"; do
+    [[ $a == -- ]] && break
+    case "$a" in -p|--print|--mode|--mode=*|--export|--export=*|--list-models|--list-models=*|-h|--help|-v|--version) return 1 ;; esac
+  done
+}
+[[ -z $force ]] && ! interactive "$@" && direct "$@"
+
+# 실행할 수 없으면: oxy mux 는 오류로 끝내고, 자동 실행은 알리고 지금 창에서 실행한다
+cannot() { # <원인> <oxy mux 일 때의 해결 방법>
+  if [[ -n $force ]]; then printf '[oxy] %s\n' "$1" "$2" >&2; exit 1; fi
+  printf '[oxy] %s\n' "$1" "tweak.cmd의 PATH·바로가기에서 멀티플렉서를 변경하세요." >&2
+}
+adapter="$OXY_HOME/scripts/mux/$mux.sh"
+if [[ ! $mux =~ ^[a-z0-9-]+$ || ! -f $adapter ]]; then
+  cannot "알 수 없는 멀티플렉서(OXY_MUX=$mux)라서 지금 창에서 실행합니다." "agent/oxy.env의 OXY_MUX 값을 확인하세요."
+  direct "$@"
+fi
+# shellcheck disable=SC1090
+source "$adapter"
+oxy_mux_inside && direct "$@"   # 이미 세션 안: 다시 감싸지 않는다
+if ! oxy_mux_ready; then
+  cannot "${mux}가 설치되지 않아 지금 창에서 pi를 실행합니다." "${mux}를 포함한 번들로 install.cmd의 업데이트를 실행하세요."
+  direct "$@"
 fi
 
-exec "$OXY_NODE" "$OXY_PI_CLI" "$@"
+# 세션 이름: oxy-<폴더 이름>-<경로 해시 4자리> (다른 경로의 같은 폴더 이름과 섞이지 않게. 대소문자는 구분하지 않는다)
+crc=$(printf '%s' "${PWD,,}" | cksum | cut -d' ' -f1)
+name="oxy-$(printf '%s' "${PWD##*/}" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-40)-$(printf '%04x' $((crc % 65536)))"
+cmd="$(printf '%q' "$OXY_HOME/oxy")"; for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done   # pane 의 bash 가 해석
+oxy_mux_exec "$name" "$(cygpath -w "$PWD")" "$cmd"

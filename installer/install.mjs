@@ -6,10 +6,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BACK, UI, c, errorBlock, padDisplay, rail } from "./tui.mjs";
-import { WT_PROFILE_NAME, createSystem } from "./system.mjs";
+import { SHELL_NAMES, WT_PROFILE_NAME, createSystem, normShell } from "./system.mjs";
 import { loadConnections } from "./connections.mjs";
 import {
-  CATALOG, GROUPS, OPTIONAL, browserChoices, checkArchive, findArchives, hasComponent, installOptional, isInstalled, readLock, syncSkills,
+  CATALOG, GROUPS, MULTIPLEXERS, OPTIONAL, browserChoices, checkArchive, findArchives, hasComponent, installOptional, isInstalled, readLock, syncSkills,
 } from "./components.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -588,7 +588,19 @@ const INTEGRATIONS = [
   { label: "바탕화면 바로가기", value: "shortcut", hint: "Oxygen Pi.lnk",
     detail: ["바탕화면에 Oxygen Pi.lnk를 만듭니다.", INTEGRATION_UNDO] },
 ];
+/** PATH·바로가기 단계 = 등록 항목 → 터미널 셸 → 멀티플렉서 (세 화면은 항상 나온다. docs/tui-spec.md §10) */
 async function stepIntegrate(state) {
+  for (;;) {
+    if ((await stepRegister(state)) === BACK) return BACK;
+    for (;;) {
+      if ((await stepShell(state)) === BACK) break;
+      if ((await stepMux(state)) === BACK) continue;
+      return "next";
+    }
+  }
+}
+
+async function stepRegister(state) {
   const prev = state.integrations;
   const has = (k) => (prev ? prev.includes(k) : true);
   // 설정(Tweak) 안에서는 "나중에 tweak.cmd 에서" 안내를 보이지 않는다
@@ -598,6 +610,75 @@ async function stepIntegrate(state) {
   state.integrations = v;
   return "next";
 }
+
+/** 다시 설정과 Tweak 은 지금 값에 (현재), 신규 설치는 권장값에 (추천) */
+const hasCurrent = (state) => Boolean(state.orig || state.tweak);
+
+async function stepShell(state) {
+  const ps = sys.findPowerShell();
+  const later = state.tweak ? null : "나중에 tweak.cmd의 PATH·바로가기에서 변경할 수 있습니다.";
+  const viaOxyCmd = "oxy를 실행하면 oxy.cmd가 Git Bash로 하네스 환경을 적용합니다.";
+  const cur = normShell(state.terminalShell);
+  const rows = [
+    { label: "Git Bash", value: "git-bash", hint: "oxy와 번들 도구(rg, fd, jq 등)를 바로 사용", recommended: !hasCurrent(state),
+      detail: ["env.sh를 적용한 Git Bash를 홈 폴더에서 엽니다.", later ?? "번들 도구(rg, fd, jq 등)와 oxy를 바로 사용할 수 있습니다."],
+      info: [["실행 파일", state.gitBash ?? "찾을 수 없음"]] },
+    { label: "명령 프롬프트", value: "cmd", hint: "cmd.exe에서 oxy 실행",
+      detail: ["명령 프롬프트를 홈 폴더에서 열고 PATH 앞에 설치 폴더를 추가합니다.", viaOxyCmd], info: [["실행 파일", sys.cmdExe()]] },
+    { label: "PowerShell", value: "powershell", hint: `${basename(ps ?? "powershell.exe")}에서 oxy 실행`,
+      disabled: ps ? false : "찾을 수 없음", why: "PowerShell을 찾을 수 없어 선택할 수 없습니다.", fix: "Git Bash나 명령 프롬프트를 선택하세요.",
+      detail: ["PowerShell을 홈 폴더에서 열고 PATH 앞에 설치 폴더를 추가합니다.", viaOxyCmd], info: [["실행 파일", ps ?? "찾을 수 없음"]] },
+  ].map((r) => ({ ...r, current: hasCurrent(state) && r.value === cur }));
+  const k = rows.findIndex((r) => r.value === state.terminalShell && !r.disabled);
+  const opens = (state.integrations ?? []).some((x) => x === "wt" || x === "shortcut");
+  const v = await ui.select("프로필과 바로가기에서 사용할 셸을 선택하세요", rows, {
+    ...(k >= 0 ? { initial: k } : {}), enter: state.tweak ? "저장" : undefined,
+    note: ["pi의 명령 실행(bash 도구)은 어떤 셸을 선택해도 Git Bash를 사용합니다.",
+      opens ? null : "! 프로필과 바로가기를 선택하지 않아 지금은 적용되지 않습니다."].filter(Boolean),
+  });
+  if (v === BACK) return BACK;
+  state.terminalShell = v;
+  return "next";
+}
+
+/** 멀티플렉서를 선택할 수 없는 이유 (선택할 수 있으면 {}) */
+function muxBlocked(state, m) {
+  const name = m.component;
+  const notInstalled = `${m.label}가 설치되지 않아 선택할 수 없습니다.`;
+  if (state.components) { // 설치 단계: 구성요소 단계의 선택이 기준
+    if (!hasComponent(name, ROOT)) return { disabled: "반입 안 됨", why: `${m.label}가 번들에 없어 선택할 수 없습니다.`, fix: `${FETCH_FIX}.` };
+    if (!state.components.includes(name)) return { disabled: "설치 안 됨", why: notInstalled, fix: `구성요소 단계에서 ${m.label}를 선택하면 사용할 수 있습니다.` };
+    return {};
+  }
+  if (state.installDir && hasComponent(name, state.installDir)) return {};
+  return { disabled: "설치 안 됨", why: notInstalled, fix: `${m.label}를 포함한 번들로 install.cmd의 업데이트를 실행하세요.` };
+}
+
+async function stepMux(state) {
+  const cur = state.mux || "none";
+  // 선택할 수 없는 행은 이유와 할 일만 보인다 (관련 정보는 선택할 수 있을 때만)
+  const muxRows = MULTIPLEXERS.map((m) => {
+    const blocked = muxBlocked(state, m);
+    return { label: m.label, value: m.id, hint: m.hint, detail: m.detail, ...(blocked.disabled ? blocked : { info: m.info }) };
+  });
+  const usable = muxRows.find((r) => !r.disabled);
+  const rows = [
+    { label: "사용 안 함", value: "none", hint: "oxy가 지금 창에서 pi를 실행",
+      detail: ["oxy가 지금 창에서 바로 pi를 실행합니다.", usable ? `${usable.label} 세션이 필요할 때만 oxy mux로 실행합니다.` : null].filter(Boolean) },
+    ...muxRows,
+  ].map((r) => ({ ...r, current: hasCurrent(state) && r.value === cur }));
+  const k = rows.findIndex((r) => r.value === cur && !r.disabled);
+  const v = await ui.select("터미널 멀티플렉서를 선택하세요", rows, {
+    initial: Math.max(0, k), enter: state.tweak ? "저장" : undefined,
+    note: "멀티플렉서를 사용하면 oxy가 폴더별 세션 안에서 pi를 실행합니다.",
+  });
+  if (v === BACK) return BACK;
+  state.mux = v;
+  return "next";
+}
+
+const muxName = (id) => (!id || id === "none" ? "사용 안 함" : MULTIPLEXERS.find((m) => m.id === id)?.label ?? id);
+const terminalText = (state) => `${SHELL_NAMES[normShell(state.terminalShell)]} · 멀티플렉서 ${muxName(state.mux)}`;
 
 // ------------------------------------------------------------------ 단계: 확인
 function summary(state) {
@@ -622,6 +703,7 @@ function summary(state) {
     state.browser ? ["브라우저", `${state.browser.label ?? state.browser.id}${state.browser.archive ? c.gray(" " + state.browser.archive) : ""}${changed("browserId", state.browser.id)}`] : null,
     state.integrations ? ["PATH·바로가기", (state.integrations.length ? state.integrations.map((k) => INTEGRATION_NAMES[k]).join(", ") : c.gray("없음")) +
       (removed.length ? " " + c.gray(`(해제: ${removed.map((k) => INTEGRATION_NAMES[k]).join(", ")})`) : "")] : null,
+    state.terminalShell || state.mux ? ["터미널", terminalText(state) + changed("terminal", terminalText(state))] : null,
   ].filter(Boolean);
 }
 
@@ -655,6 +737,10 @@ function writeSiteConfig(installDir, state) {
     // 번들 안의 브라우저(chrome-for-testing, chromium)는 env.sh 가 OXY_HOME 기준으로 경로를 계산한다
     ...(state.browser ? { OXY_BROWSER: state.browser.id, OXY_BROWSER_PATH: (state.browser.path ?? "").replace(/\\/g, "/") } : {}),
     ...(state.skillsOff ? { OXY_SKILLS_OFF: state.skillsOff.join(",") } : {}),
+    // 터미널 셸 · 멀티플렉서 (docs/tui-spec.md §10). oxy.cmd 는 OXY_GIT_BASH 로 Git Bash 를 찾는다
+    ...(state.terminalShell ? { OXY_TERMINAL_SHELL: normShell(state.terminalShell) } : {}),
+    ...(state.mux ? { OXY_MUX: state.mux } : {}),
+    ...(state.gitBash ? { OXY_GIT_BASH: state.gitBash } : {}),
   };
   writeFileSync(envFile, mergeEnv(base, updates));
   const vars = { ...parseEnv(readFileSync(envFile, "utf8")), OXY_SHELL_PATH: state.gitBash.replace(/\\/g, "/") };
@@ -669,9 +755,10 @@ async function applyIntegrations(state, reg) {
   const dir = state.installDir;
   if (want.has("path")) await ui.task("PATH 등록", async () => { sys.addUserPath(dir); reg.path = true; });
   else if (reg.path) await ui.task("PATH 등록 해제", async () => { sys.removeUserPath(dir); reg.path = false; });
-  if (want.has("wt")) await ui.task("Windows Terminal 프로필 등록", async () => { reg.terminalProfile = sys.addTerminalProfile(dir, state.gitBash); });
+  const shell = normShell(state.terminalShell);
+  if (want.has("wt")) await ui.task("Windows Terminal 프로필 등록", async () => { reg.terminalProfile = sys.addTerminalProfile(dir, state.gitBash, shell); });
   else if (reg.terminalProfile) await ui.task("Windows Terminal 프로필 해제", async () => { sys.removeTerminalProfile(reg.terminalProfile); reg.terminalProfile = null; });
-  if (want.has("shortcut")) await ui.task("바탕화면 바로가기 등록", async () => { reg.shortcut = sys.addShortcut(dir, state.gitBash, want.has("wt")); });
+  if (want.has("shortcut")) await ui.task("바탕화면 바로가기 등록", async () => { reg.shortcut = sys.addShortcut(dir, state.gitBash, want.has("wt"), shell); });
   else if (reg.shortcut) await ui.task("바탕화면 바로가기 해제", async () => { sys.removeShortcut(reg.shortcut); reg.shortcut = null; });
 }
 
@@ -749,6 +836,7 @@ async function done(state, passed) {
     ...rail([
       state.integrations?.includes("path") ? ["새 터미널에서", "cd <프로젝트 폴더> 후 oxy 실행"] : ["실행", `${state.installDir}\\oxy.cmd`],
       state.integrations?.includes("wt") ? ["Windows Terminal", `새 탭 목록의 ${WT_PROFILE_NAME} 프로필`] : null,
+      state.mux && state.mux !== "none" ? ["멀티플렉서", `oxy가 ${muxName(state.mux)} 세션에서 pi 실행 (바로 실행: oxy --no-mux)`] : null,
       state.gitlabHost ? ["GitLab 토큰", `glab auth login --hostname ${state.gitlabHost}`] : null,
     ], { indent: 4, width: 16 }),
     "", `  ${c.bold("다음에 할 일")}`,
@@ -779,13 +867,15 @@ function stateFromInstall(reg) {
       concurrency: Number(env.OXY_LLM_MAX_CONCURRENT) || null } } : {}),
     integrations: reg.integrations ?? [],
     ...(env.OXY_BROWSER ? { browser: { id: env.OXY_BROWSER, path: env.OXY_BROWSER_PATH ?? "" } } : {}),
+    // 키가 없는 예전 설치는 지금 동작(Git Bash, 멀티플렉서 사용 안 함)과 같다
+    terminalShell: normShell(env.OXY_TERMINAL_SHELL), mux: env.OXY_MUX || "none",
   };
 }
 
 async function reconfigure(reg, { saveRegistry = true } = {}) {
   const state = { ...stateFromInstall(reg), doneTitle: "설정을 적용했습니다" };
   state.orig = { baseUrl: state.baseUrl, coder: state.coder, general: state.general ?? "", contextWindow: state.contextWindow,
-    gitlabHost: state.gitlabHost ?? "", browserId: state.browser?.id, integrations: [...(state.integrations ?? [])] };
+    gitlabHost: state.gitlabHost ?? "", browserId: state.browser?.id, integrations: [...(state.integrations ?? [])], terminal: terminalText(state) };
   const ok2 = await runSteps([stepOptional, stepVllm, stepModel, stepGitlab, stepIntegrate, stepReview], state,
     [RECONF_SHORT, RECONF_LONG, "다시 설정"], { backExits: true });
   if (!ok2) return 1;
@@ -842,8 +932,28 @@ async function uninstall(reg) {
       word, note: [`삭제하려면 ${word === name ? "폴더 이름 " : ""}${word} 입력 후 Enter를 누르세요. 삭제하면 복구할 수 없습니다.`, c.gray(reg.installDir)],
     });
     if (!yes) return 1;
+    if (!(await stopPsmuxFirst(reg.installDir, "제거"))) return 1;
   }
   return removeNow(reg, backup);
+}
+
+/**
+ * 업데이트 · 제거 전: 설치 폴더의 psmux 가 실행 중이면 그 파일을 덮어쓰거나 지울 수 없다 (EBUSY).
+ * 하네스 서버(-L oxy)의 세션을 보이고 확인을 받아 종료한다. 처음 포커스는 취소. 취소하면 false
+ */
+async function stopPsmuxFirst(dir, what) {
+  const run = sys.psmuxRunning(dir);
+  if (!run) return true;
+  const n = run.sessions.length;
+  const go = await ui.confirm("실행 중인 psmux 세션을 종료할까요?", {
+    title: "psmux 세션 종료", level: "medium", yes: "세션 종료", no: `${what} 취소`,
+    note: `psmux가 실행 중이면 ${what}에 필요한 파일을 바꿀 수 없습니다.`,
+    summary: [["세션", n ? `${n}개 (${run.sessions.join(", ")})` : "없음 (psmux 프로그램만 실행 중)"], ["설치 폴더", dir]],
+    warning: "종료하면 세션 안에서 실행 중인 pi와 명령도 함께 종료됩니다.",
+  });
+  if (go !== true) return false;
+  await ui.task("psmux 세션 종료", async () => { sys.stopPsmux(dir, run.pids); });
+  return true;
 }
 
 async function removeNow(reg, backup) {
@@ -926,6 +1036,7 @@ async function manage(reg) {
         state.components = [...readLock(ROOT).filter((e) => e.required).map((e) => e.name), ...picked.filter((n) => n !== "__core")];
         if (picked.includes("sqlcl") && !isInstalled("sqlcl", state.installDir)) state.sqlcl = { action: "bundle" };
       }
+      if (!(await stopPsmuxFirst(state.installDir, "업데이트"))) continue;
       state.stage = (finished) => setFrame(null, undefined, undefined, ["설치 관리", finished ? "업데이트 완료" : "업데이트 중"]);
       state.stage(false);
       setInstallInterrupt();
@@ -958,7 +1069,8 @@ async function main() {
 // Tweak TUI(installer/tweak.mjs) 가 import 해서 쓸 수 있도록, 직접 실행할 때만 main 을 돈다
 export {
   ui, sys, ROOT, VERSION, setFrame, finishWithVerify, reconfigure, stateFromInstall, writeSiteConfig, INTEGRATIONS, INTEGRATION_NAMES,
-  stepSqlcl, stepBrowser, stepVllm, stepModel, stepGitlab, stepIntegrate, applyOptional, applyIntegrations, fetchModels,
+  stepSqlcl, stepBrowser, stepVllm, stepModel, stepGitlab, stepIntegrate, stepRegister, stepShell, stepMux, muxName,
+  applyOptional, applyIntegrations, fetchModels,
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

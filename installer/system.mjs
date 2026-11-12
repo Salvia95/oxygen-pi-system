@@ -22,8 +22,16 @@ const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "a
 /** 하네스 자체 파일 (구성요소 바이너리 외) */
 const HARNESS_FILES = [
   "installer/components.mjs", "wrappers/sql", "wrappers/jq", "config/ripgreprc", "agent/templates/models.json",
-  "agent/templates/settings.json", "env.sh", "oxy", "oxy.cmd", "scripts/verify.sh", "manifest/tools.lock.tsv",
+  "agent/templates/settings.json", "env.sh", "oxy", "oxy.cmd", "scripts/verify.sh", "manifest/tools.lock.tsv", "scripts/mux/psmux.sh",
 ];
+
+/**
+ * 터미널 셸 (oxy.env 의 OXY_TERMINAL_SHELL): Windows Terminal 프로필과 바탕화면 바로가기가 여는 셸 (docs/tui-spec.md §10).
+ * pi 의 bash 도구와 psmux pane 의 셸은 이 값과 관계없이 항상 Git Bash 다.
+ */
+export const TERMINAL_SHELLS = ["git-bash", "cmd", "powershell"];
+export const SHELL_NAMES = { "git-bash": "Git Bash", cmd: "명령 프롬프트", powershell: "PowerShell" };
+export const normShell = (v) => (TERMINAL_SHELLS.includes(v) ? v : "git-bash");
 
 export const toPosix = (p) => p.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
 const fwd = (p) => p.replace(/\\/g, "/");
@@ -185,13 +193,36 @@ export function createSystem({ root, sandbox = null }) {
     shellArgs(installDir) {
       return `--login -i -c "source '${toPosix(installDir)}/env.sh' && cd ~ && exec bash -i"`;
     },
-    addTerminalProfile(installDir, gitBash) {
+    /** PowerShell: pwsh.exe(PowerShell 7)가 있으면 그것, 없으면 Windows PowerShell. 둘 다 없으면 null */
+    findPowerShell() {
+      if (sys._pwsh !== undefined) return sys._pwsh;
+      const r = spawnSync("where.exe", ["pwsh"], { encoding: "utf8" });
+      const pwsh = r.status === 0 ? (r.stdout.split(/\r?\n/).find(Boolean) ?? null) : null;
+      const win = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+      sys._pwsh = pwsh ?? (existsSync(win) ? win : null);
+      return sys._pwsh;
+    },
+    cmdExe() { return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"); },
+    /** 셸을 하네스 환경으로 여는 실행 파일과 인수. cmd · PowerShell 은 설치 폴더만 PATH 앞에 둔다 (oxy → oxy.cmd → Git Bash 로 env.sh) */
+    launchSpec(shell, installDir, gitBash) {
+      const dir = String(installDir).replace(/\//g, "\\");
+      if (shell === "cmd") return { exe: sys.cmdExe(), args: `/k "set "OXY_HOME=${dir}" & set "PATH=${dir};%PATH%""` };
+      if (shell === "powershell") {
+        const exe = sys.findPowerShell() ?? "powershell.exe";
+        // -Command 문자열은 실행 정책(ps1 차단)의 영향을 받지 않는다
+        return { exe, args: `-NoLogo -NoExit -Command "$env:OXY_HOME=${psq(dir)}; $env:Path=${psq(dir + ";")}+$env:Path"` };
+      }
+      return { exe: gitBash, args: sys.shellArgs(installDir) };
+    },
+    addTerminalProfile(installDir, gitBash, shell = "git-bash") {
       const dir = join(LOCAL, "Microsoft", "Windows Terminal", "Fragments", "oxygen-pi");
       mkdirSync(dir, { recursive: true });
-      const icon = sys.gitIcon(gitBash);
+      // cmd · PowerShell 프로필은 아이콘을 지정하지 않는다 (Windows Terminal 기본 아이콘)
+      const icon = shell === "git-bash" ? sys.gitIcon(gitBash) : null;
+      const run = sys.launchSpec(shell, installDir, gitBash);
       const profile = {
         guid: WT_GUID, name: WT_PROFILE_NAME, startingDirectory: "%USERPROFILE%",
-        commandline: `"${gitBash}" ${sys.shellArgs(installDir)}`,
+        commandline: `"${run.exe}" ${run.args}`,
         ...(icon ? { icon } : {}),
       };
       const file = join(dir, "oxygen-pi.json");
@@ -201,12 +232,13 @@ export function createSystem({ root, sandbox = null }) {
     removeTerminalProfile(file) { if (file) rmSync(dirname(file), { recursive: true, force: true }); },
 
     // ---------------------------------------------------------- 바탕화면 바로가기
-    addShortcut(installDir, gitBash, useTerminalProfile) {
+    addShortcut(installDir, gitBash, useTerminalProfile, shell = "git-bash") {
       const wt = sys.findWindowsTerminal();
       const viaWt = useTerminalProfile && Boolean(wt);
-      const target = viaWt ? wt : gitBash;
-      const args = viaWt ? `-p "${WT_PROFILE_NAME}"` : sys.shellArgs(installDir);
-      const icon = sys.gitIcon(gitBash) ?? "";
+      const run = sys.launchSpec(shell, installDir, gitBash);
+      const target = viaWt ? wt : run.exe;
+      const args = viaWt ? `-p "${WT_PROFILE_NAME}"` : run.args;
+      const icon = (shell === "git-bash" ? sys.gitIcon(gitBash) : run.exe) ?? "";
       if (sandbox) {
         const file = join(sandbox, "Desktop", "Oxygen Pi.lnk.json");
         mkdirSync(dirname(file), { recursive: true });
@@ -226,6 +258,32 @@ export function createSystem({ root, sandbox = null }) {
         Write-Output $file`);
     },
     removeShortcut(file) { if (file) rmSync(file, { force: true }); },
+
+    // ---------------------------------------------------------- psmux 서버 (업데이트 · 제거 전)
+    /**
+     * 설치 폴더의 bin/psmux.exe 로 실행 중인 프로세스와 하네스 서버(-L oxy)의 세션 이름.
+     * 실행 중인 psmux.exe 는 덮어쓰거나 지울 수 없다 (EBUSY). 다른 폴더의 psmux 는 보지 않는다
+     */
+    psmuxRunning(installDir) {
+      const exe = join(installDir, "bin", "psmux.exe");
+      if (!existsSync(exe)) return null;
+      let pids = [];
+      try {
+        const out = powershell(`Get-Process psmux -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -ieq ${psq(exe)}) } | ForEach-Object { $_.Id }`);
+        pids = out.split(/\s+/).filter(Boolean).map(Number);
+      } catch { return null; }
+      if (!pids.length) return null;
+      const r = spawnSync(exe, ["-L", "oxy", "list-sessions", "-F", "#{session_name}"], { encoding: "utf8", timeout: 5000 });
+      const sessions = r.status === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+      return { pids, sessions };
+    },
+    /** 하네스 서버를 끝내고, 그래도 남은 이 폴더의 psmux.exe 만 종료한다 */
+    stopPsmux(installDir, pids) {
+      spawnSync(join(installDir, "bin", "psmux.exe"), ["-L", "oxy", "kill-server"], { timeout: 10000 });
+      const left = sys.psmuxRunning(installDir);
+      const kill = (left?.pids ?? []).filter((p) => pids.includes(p));
+      if (kill.length) powershell(`Stop-Process -Id ${kill.join(",")} -Force -ErrorAction SilentlyContinue`);
+    },
 
     // ---------------------------------------------------------- 설치 기록
     loadRegistry() {

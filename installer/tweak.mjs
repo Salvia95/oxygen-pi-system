@@ -3,16 +3,17 @@
 //   허브 (줄 입력 모드의 번호. 제목 행은 없고 묶음 사이에 빈 줄만 둔다)
 //     1 LLM 연결(하위: 서버 주소·API 키 · 모델 · 요청 설정) · 2 DB 연결(하위: 연결 목록 · SQLcl) · 3 GitLab 연결
 //     4 브라우저 · 5 확장 기능 · 6 스킬 · 7 실행 제한
-//     8 PATH·바로가기 · 9 상태 점검 · 10 종료 (줄 입력 모드에만. 화면에서는 Esc)
+//     8 PATH·바로가기(하위: 1 등록 항목 · 2 터미널 셸 · 3 멀티플렉서 · 4 ← 이전) · 9 상태 점검 · 10 종료 (줄 입력 모드에만. 화면에서는 Esc)
 //   쓸 수 없는 항목도 목록에 두고 비활성으로 보인다 (번호가 바뀌지 않게)
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BACK, c, errorBlock, rail } from "./tui.mjs";
 import {
-  INTEGRATION_NAMES, ROOT, applyIntegrations, applyOptional, fetchModels, stateFromInstall, stepBrowser, stepGitlab, stepIntegrate,
-  stepModel, stepSqlcl, stepVllm, sys, ui, writeSiteConfig,
+  INTEGRATION_NAMES, ROOT, applyIntegrations, applyOptional, fetchModels, muxName, stateFromInstall, stepBrowser, stepGitlab,
+  stepModel, stepMux, stepRegister, stepShell, stepSqlcl, stepVllm, sys, ui, writeSiteConfig,
 } from "./install.mjs";
+import { SHELL_NAMES, normShell } from "./system.mjs";
 import { CATALOG, GROUPS, OPTIONAL, enabledSkills, hasComponent, isInstalled, parseSkillsOff, readLock } from "./components.mjs";
 import { DB_TYPES, ID_RE, loadConnections, probeConnection, saveConnections, secretKey } from "./connections.mjs";
 import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
@@ -318,7 +319,7 @@ function registry() {
 }
 
 /** 선택한 항목 하나만 변경하고 바로 저장한다 → 메시지 줄에 보일 결과 (BACK 이면 아무것도 바꾸지 않고 "") */
-async function editItem(title, run) {
+async function editItem(title, run, applies = APPLY_LATER) {
   const { registered, reg } = registry();
   const state = { ...stateFromInstall(reg), installDir: ROOT, tweak: true };
   const r = await run(state);
@@ -336,7 +337,7 @@ async function editItem(title, run) {
     await ui.pause();
     return "";
   }
-  return saved(`${title} 설정을 저장했습니다. ${APPLY_LATER}.`);
+  return saved(`${title} 설정을 저장했습니다. ${applies}.`);
 }
 
 /** LLM 서버에서 모델 목록을 받아 둔다 (모델 단계에서 고를 수 있게). 실패하면 직접 입력 / 서버 주소부터 */
@@ -374,9 +375,12 @@ const items = {
   },
   gitlab: (state) => stepGitlab(state),
   browser: (state) => stepBrowser(state),
+  // 셸을 바꾸면 등록된 프로필 · 바로가기를 새 셸로 다시 만든다 (applyIntegrations)
+  shell: async (state) => ((await stepShell(state)) === BACK ? BACK : "integrations"),
+  mux: (state) => stepMux(state),
   integrations: async (state) => {
     const before = [...(state.integrations ?? [])];
-    if ((await stepIntegrate(state)) === BACK) return BACK;
+    if ((await stepRegister(state)) === BACK) return BACK;
     const removed = before.filter((k) => !state.integrations.includes(k));
     if (removed.length && !(await ui.confirm(`${removed.map((k) => INTEGRATION_NAMES[k]).join(", ")} 등록을 해제할까요?`, {
       title: "등록 해제", yes: "등록 해제", no: "해제 취소", level: "medium", warning: "해제하면 그 방법으로는 oxy를 실행할 수 없습니다.",
@@ -419,6 +423,45 @@ async function llmMenu() {
     if (v === "vllm") { setPath("LLM 연결", "서버 주소·API 키"); msg = await editItem("서버 주소·API 키", items.vllm); }
     else if (v === "model") { setPath("LLM 연결", "모델"); msg = await editItem("모델", items.model); }
     else if (v === "endpoint") msg = await endpointMenu();
+  }
+}
+
+// ------------------------------------------------------------------ PATH·바로가기 (하위 메뉴: 등록 항목 · 터미널 셸 · 멀티플렉서)
+const REGISTERED_NAMES = { path: "PATH", wt: "Windows Terminal", shortcut: "바탕화면" };
+const registeredText = (reg) => (reg.integrations ?? []).map((x) => REGISTERED_NAMES[x]).filter(Boolean).join(", ");
+
+async function integrationsMenu() {
+  let msg = "";
+  let last = 0;
+  for (;;) {
+    setPath("PATH·바로가기");
+    const { env } = readEnv();
+    const { reg } = registry();
+    const shell = normShell(env.OXY_TERMINAL_SHELL);
+    const mux = env.OXY_MUX || "none";
+    const mark = (x) => ((reg.integrations ?? []).includes(x) ? "등록됨" : "등록 안 됨");
+    const shellExe = shell === "git-bash" ? (reg.gitBash ?? sys.findGitBash() ?? "찾을 수 없음")
+      : shell === "cmd" ? sys.cmdExe() : (sys.findPowerShell() ?? "찾을 수 없음");
+    const opts = [
+      { label: "등록 항목", value: "integrations", hint: registeredText(reg) || "없음",
+        detail: "PATH 등록, Windows Terminal 프로필, 바탕화면 바로가기를 선택합니다.",
+        info: [["PATH", mark("path")], ["Windows Terminal 프로필", mark("wt")], ["바탕화면 바로가기", mark("shortcut")]] },
+      { label: "터미널 셸", value: "shell", hint: SHELL_NAMES[shell],
+        detail: "프로필과 바로가기가 여는 셸을 변경합니다. 등록된 프로필을 다시 만듭니다.",
+        info: [["터미널 셸", SHELL_NAMES[shell]], ["실행 파일", shellExe]] },
+      { label: "멀티플렉서", value: "mux", hint: muxName(mux),
+        detail: "oxy가 pi를 폴더별 세션에서 실행할지 정합니다.",
+        info: [["멀티플렉서", muxName(mux)], ...(mux !== "none" ? [["세션 이름", "oxy-<폴더 이름>-<경로 해시>"], ["바로 실행", "oxy --no-mux (한 번만)"]] : [])] },
+      { label: "← 이전", value: "__back", lineOnly: true },
+    ];
+    const v = await ui.select("PATH·바로가기에서 변경할 항목을 선택하세요", opts, { initial: last, message: msg,
+      note: "등록 항목, 터미널 셸, 멀티플렉서를 변경하면 바로 저장합니다." });
+    msg = "";
+    if (v === BACK || v === "__back") return "";
+    last = opts.findIndex((o) => o.value === v);
+    if (v === "integrations") { setPath("PATH·바로가기", "등록 항목"); msg = await editItem("PATH·바로가기", items.integrations); }
+    else if (v === "shell") { setPath("PATH·바로가기", "터미널 셸"); msg = await editItem("터미널 셸", items.shell, "새로 연 터미널부터 적용됩니다"); }
+    else if (v === "mux") { setPath("PATH·바로가기", "멀티플렉서"); msg = await editItem("멀티플렉서", items.mux, "다음에 oxy를 실행할 때부터 적용됩니다"); }
   }
 }
 
@@ -586,8 +629,11 @@ function hubRows() {
   const extOff = EXTENSIONS.filter((e) => !isOn(env, e)).map((e) => e.label);
   const skillsOff = skills.filter((r) => !skillsOn.has(r.value)).map((r) => r.value);
   const has = (x) => (reg.integrations ?? []).includes(x);
-  const registered = (reg.integrations ?? []).map((x) => ({ path: "PATH", wt: "Windows Terminal", shortcut: "바탕화면" })[x]);
   const mark = (on) => (on ? "등록됨" : "등록 안 됨");
+  const shell = SHELL_NAMES[normShell(env.OXY_TERMINAL_SHELL)];
+  const mux = env.OXY_MUX && env.OXY_MUX !== "none" ? muxName(env.OXY_MUX) : null;
+  // 값 열의 ` · ` 는 두 번까지 (docs/tui-spec.md §6)
+  const terminalHint = [registeredText(reg) || "등록 없음", shell, mux].filter(Boolean).join(" · ");
   // 목록에는 레이블과 현재 값만. 설명(detail)과 관련 정보(info)는 포커스한 항목의 상세 패널에 보인다. gap = 묶음이 바뀌는 곳
   return [
     { label: "LLM 연결", value: "llm", hint: `${hostOf(env.OXY_VLLM_BASE_URL)} · ${env.OXY_MODEL_CODER ?? "모델 없음"}${env.OXY_MODEL_GENERAL ? " 외 1개" : ""}`,
@@ -612,9 +658,10 @@ function hubRows() {
     { label: "실행 제한", value: "limits", hint: `출력 ${Number(limit("OXY_TOOL_OUTPUT_MAX_CHARS")).toLocaleString("en-US")}자 · 동시 실행 ${limit("OXY_LLM_MAX_CONCURRENT")}개`,
       detail: "출력 길이, 반복 호출 횟수, 동시 실행 수의 제한 값을 변경합니다.",
       info: LIMITS.map((l) => [l.label, l.fmt(Number(limit(l.key)).toLocaleString("en-US"))]) },
-    { label: "PATH·바로가기", value: "integrations", gap: true, hint: registered.join(", ") || "없음",
-      detail: "PATH 등록, Windows Terminal 프로필, 바탕화면 바로가기를 관리합니다.",
-      info: [["PATH", mark(has("path"))], ["Windows Terminal 프로필", mark(has("wt"))], ["바탕화면 바로가기", mark(has("shortcut"))]] },
+    { label: "PATH·바로가기", value: "integrations", gap: true, hint: terminalHint,
+      detail: "PATH 등록, 프로필, 바로가기와 터미널 셸, 멀티플렉서를 관리합니다.",
+      info: [["PATH", mark(has("path"))], ["Windows Terminal 프로필", mark(has("wt"))], ["바탕화면 바로가기", mark(has("shortcut"))],
+        ["터미널 셸", shell], ["멀티플렉서", mux ?? "사용 안 함"]] },
     { label: "상태 점검", value: "verify", detail: ["도구, 설정, LLM 연결이 정상인지 확인합니다.", "설정은 변경되지 않습니다."],
       info: [["소요 시간", "약 30초"], ["결과 위치", "화면을 잠시 나가 터미널에 출력"]] },
     // 줄 입력 모드에만 있다 (화면에서는 Esc 가 종료)
@@ -648,7 +695,7 @@ async function main() {
     else if (v === "ext") msg = await extensionMenu();
     else if (v === "skills") msg = await skillsMenu();
     else if (v === "limits") msg = await limitsMenu();
-    else if (v === "integrations") { setPath("PATH·바로가기"); msg = await editItem("PATH·바로가기", items.integrations); }
+    else if (v === "integrations") msg = await integrationsMenu();
     else if (v === "verify") msg = await verifyNow();
   }
 }

@@ -306,3 +306,45 @@ test("복사 전에 쓴 설치 표시(partial)가 있으면 같은 폴더를 우
     assert.equal(sys.readMarker(dir).partial, true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("멀티플렉서 정의: 표의 모든 id 에 어댑터(scripts/mux/<id>.sh)와 구성요소가 있고, 문구는 한 줄(74칸) 안", async () => {
+  const { CATALOG, MULTIPLEXERS } = await import("../installer/components.mjs");
+  const root = join(import.meta.dirname, "..");
+  assert.ok(MULTIPLEXERS.length >= 1);
+  for (const m of MULTIPLEXERS) {
+    assert.match(m.id, /^[a-z0-9-]+$/, m.id);
+    assert.notEqual(m.id, "none");
+    assert.ok(CATALOG[m.component], `${m.id}: CATALOG 에 ${m.component} 없음`);
+    const adapter = readFileSync(join(root, "scripts", "mux", `${m.id}.sh`), "utf8");
+    for (const fn of ["oxy_mux_ready", "oxy_mux_inside", "oxy_mux_exec"]) assert.ok(adapter.includes(`${fn}()`), `${m.id}: ${fn} 없음`);
+    for (const s of [m.hint, ...m.detail]) assert.ok(displayWidth(s) <= 74, `${m.id}: ${s}`);
+  }
+});
+
+test("터미널 셸: 프로필과 바로가기가 선택한 셸을 하네스 환경으로 연다 (cmd · PowerShell 은 설치 폴더만 PATH 앞에)", async () => {
+  const { createSystem, normShell } = await import("../installer/system.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "oxy-shell-"));
+  try {
+    const sys = createSystem({ root: join(import.meta.dirname, ".."), sandbox: dir });
+    const inst = String.raw`C:\Users\kim\Programs\oxygen-pi`;
+    const bash = String.raw`C:\Program Files\Git\bin\bash.exe`;
+    assert.equal(normShell("zsh"), "git-bash");
+    assert.equal(normShell(undefined), "git-bash");
+    const g = sys.launchSpec("git-bash", inst, bash);
+    assert.equal(g.exe, bash);
+    assert.match(g.args, /source '\/c\/Users\/kim\/Programs\/oxygen-pi\/env\.sh' && cd ~ && exec bash -i/);
+    const c = sys.launchSpec("cmd", inst, bash);
+    assert.match(c.exe, /cmd\.exe$/i);
+    assert.equal(c.args, String.raw`/k "set "OXY_HOME=C:\Users\kim\Programs\oxygen-pi" & set "PATH=C:\Users\kim\Programs\oxygen-pi;%PATH%""`);
+    const p = sys.launchSpec("powershell", inst, bash);
+    assert.match(p.exe, /(pwsh|powershell)\.exe$/i);
+    assert.equal(p.args, String.raw`-NoLogo -NoExit -Command "$env:OXY_HOME='C:\Users\kim\Programs\oxygen-pi'; $env:Path='C:\Users\kim\Programs\oxygen-pi;'+$env:Path"`);
+    // Windows Terminal 프로필: cmd 는 아이콘 없음 · commandline 은 실행 파일 + 인수
+    const prof = JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "cmd"), "utf8")).profiles[0];
+    assert.equal(prof.commandline, `"${c.exe}" ${c.args}`);
+    assert.equal(prof.icon, undefined);
+    // 바로가기 (Windows Terminal 프로필 없이): 셸을 직접 연다
+    const lnk = JSON.parse(readFileSync(sys.addShortcut(inst, bash, false, "powershell"), "utf8"));
+    assert.deepEqual(lnk, { target: p.exe, args: p.args });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

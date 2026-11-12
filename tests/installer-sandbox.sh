@@ -25,10 +25,10 @@ NONE_IDX=$("$NODE" --input-type=module -e "import('$(winpath "$OXY_HOME/installe
 
 # 1) 신규 설치: 점검 계속 / 기본 위치 / (긴 경로 경고 시 1 = 이 경로에 설치) / 구성요소: 표시된 대로("" = 반입된 것 전부, SQLcl 포함)
 #    / 브라우저: Chromium(2) / LLM 서버 주소 / 키 / 확인 결과대로 계속("") / 코딩 1 / 범용 1 / ctx 기본 / 계열 기본 ×2
-#    / GitLab / PATH·바로가기 전부 / 설치 시작 / 상태 점검 실행 / 종료
+#    / GitLab / PATH·바로가기: 등록 전부 · 셸 기본(Git Bash) · 멀티플렉서 2 psmux / 설치 시작 / 상태 점검 실행 / 종료
 #    주의: 구성요소 화면에 "1" 을 넣으면 "1번만 선택"이 되어 나머지가 모두 해제된다
 long=$([[ ${#I} -gt 100 ]] && echo 1 || true)
-run "신규 설치" "$NODE" 1 1 $long "" 2 "http://127.0.0.1:$PORT" mock-key "" 1 1 "" "" "" gitlab.example.internal "" 1 1 ""
+run "신규 설치" "$NODE" 1 1 $long "" 2 "http://127.0.0.1:$PORT" mock-key "" 1 1 "" "" "" gitlab.example.internal "" "" 2 1 1 ""
 chk "설치 종료코드 0"                     '[[ $RC == 0 ]]'
 chk "파일 복사 + 설치 표시 (복사를 마치면 partial 표시 없음)" '[[ -f "$I/.oxy-install" && -x "$I/runtime/node/node.exe" ]] && ! grep -q partial "$I/.oxy-install"'
 chk "oxy.env 에 입력값 기록"               'grep -q "^OXY_VLLM_BASE_URL=http://127.0.0.1:$PORT/v1$" "$I/agent/oxy.env" && grep -q "^GITLAB_HOST=gitlab.example.internal$" "$I/agent/oxy.env"'
@@ -40,21 +40,31 @@ chk "선택하지 않은 브라우저는 복사 안 함"       '[[ -f "$I/vendor
 chk "브라우저 선택 기록 (chromium)"           'grep -q "^OXY_BROWSER=chromium$" "$I/agent/oxy.env"'
 chk "skill 자동 활성화 (설치된 도구만)"        '[[ -f "$I/agent/skills/sql-querying/SKILL.md" && -f "$I/agent/skills/web-page-automation/SKILL.md" && ! -d "$I/agent/skill-library/../skills/nonexistent" ]]'
 chk "verify 통과 (FAIL 0)"               'grep -q "FAIL 0" "$SB/out.txt"'
+WTF="$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi/oxygen-pi.json"
+chk "터미널 셸 · 멀티플렉서 기록 (git-bash · psmux) + oxy.cmd 용 OXY_GIT_BASH"  'grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_GIT_BASH=.*bash.exe" "$I/agent/oxy.env"'
+chk "WT 프로필: Git Bash 로 env.sh"           'grep -q "bash.exe.*env.sh" "$WTF"'
+chk "확인 요약 · 완료 화면에 멀티플렉서"         'grep -q "터미널.*Git Bash · 멀티플렉서 psmux" "$SB/out.txt" && grep -q "oxy --no-mux" "$SB/out.txt"'
+# oxy 런처: OXY_MUX=psmux 여도 비대화형(파이프)·--no-mux 는 세션 없이 바로 실행
+ver=$(cd "$SB" && env -u TMUX bash "$I/oxy" --version </dev/null 2>&1 | tail -1)
+chk "oxy: 비대화형이면 psmux 세션 없이 바로 실행 ($ver)"   '[[ "$ver" =~ ^[0-9]+\.[0-9]+ ]]'
+ver2=$(cd "$SB" && env -u TMUX bash "$I/oxy" --no-mux --version </dev/null 2>&1 | tail -1)
+chk "oxy --no-mux: 바로 실행 ($ver2)"            '[[ "$ver2" == "$ver" ]]'
 
 # 2) 업데이트: 설치 관리 메뉴 3 업데이트 / 1 업데이트 시작 (덮어쓰기 확인) / 2 상태 점검 건너뛰기 / 종료
 #    (번들에 새로 들어온 구성요소가 없으므로 구성요소 화면은 나오지 않는다)
 echo "OXY_CUSTOM_KEEP=1" >> "$I/agent/oxy.env"
 run "업데이트" "$NODE" 3 1 2 ""
-chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_KEEP=1$" "$I/agent/oxy.env"'
+chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_KEEP=1$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env"'
 
 # 3) 설정 변경 (설치 관리 메뉴 1 다시 설정): / SQLcl 유지 / 브라우저 '사용 안 함' / URL·키 유지 / 계속 / 코딩 1 / 범용 '사용 안 함' / ctx / GitLab 유지
-#    / 등록 1,2 / 적용 / verify 아니요 / 종료
-run "설정 변경" "$NODE" 1 1 "$NONE_IDX" "" "" "" 1 2 "" "" "" "1,2" 1 2 ""
+#    / 등록 1,2 · 셸 2 명령 프롬프트 · 멀티플렉서 1 사용 안 함 / 적용 / verify 아니요 / 종료
+run "설정 변경" "$NODE" 1 1 "$NONE_IDX" "" "" "" 1 2 "" "" "" "1,2" 2 1 1 2 ""
 chk "브라우저 '사용 안 함' 기록"              'grep -q "^OXY_BROWSER=none$" "$I/agent/oxy.env"'
 chk "브라우저 없음 → web-page-automation skill 꺼짐" '[[ ! -d "$I/agent/skills/web-page-automation" && -d "$I/agent/skills/web-page-reading" ]]'
 chk "SQLcl 유지"                          '[[ -f "$I/runtime/sqlcl/bin/sql" ]]'
 chk "범용 모델 제거 → models.json 1개"      '[[ $(grep -c "\"id\"" "$I/agent/models.json") == 1 ]]'
 chk "바로가기만 해제"                       '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" && -f "$SB/user-path.txt" ]]'
+chk "셸 변경: WT 프로필이 cmd.exe /k 로, OXY_MUX=none"  'grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && ! grep -q "env.sh" "$WTF" && grep -q "^OXY_TERMINAL_SHELL=cmd$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=none$" "$I/agent/oxy.env"'
 
 # 3-1) 설치된 복사본의 Tweak TUI: SQLite 연결 추가 (usql + dbhub) → 설치 위치 기준 파일 생성
 "$I/bin/usql.exe" "sqlite:$(winpath "$SB/t.db")" -c "create table t(a int); insert into t values (5),(6);" >/dev/null 2>&1
@@ -80,6 +90,13 @@ chk "Tweak 항목별: 종료코드 0"                   '[[ $RC == 0 ]]'
 chk "Tweak 항목별: GitLab 호스트만 변경"           'grep -q "^GITLAB_HOST=gitlab2.example.internal$" "$I/agent/oxy.env" && [[ "$(grep "^OXY_VLLM_BASE_URL=" "$I/agent/oxy.env")" == "$before_url" ]]'
 chk "Tweak 항목별: 한도 값 하나만 저장"            'grep -q "^OXY_TOOL_OUTPUT_MAX_CHARS=9000$" "$I/agent/oxy.env" && ! grep -q "^OXY_READ_MAX_CHARS=" "$I/agent/oxy.env"'
 chk "Tweak 항목별: 단계 흐름 없이 바로 저장"        '! grep -q "설정을 적용하는 중입니다" "$SB/out.txt" && grep -q "GitLab 연결 저장 중입니다" "$SB/out.txt"'
+
+# 3-2-1) Tweak: PATH·바로가기 하위 메뉴 (1 등록 항목 · 2 터미널 셸 · 3 멀티플렉서 · 4 ← 이전)
+#      입력: 8 PATH·바로가기 / 3 멀티플렉서 / 2 psmux / 2 터미널 셸 / 3 PowerShell / 4 ← 이전 / 10 종료
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: 터미널 셸 · 멀티플렉서" "$I/runtime/node/node.exe" 8 3 2 2 3 4 10
+chk "Tweak 셸·멀티플렉서: 종료코드 0"            '[[ $RC == 0 ]]'
+chk "Tweak 셸·멀티플렉서: 값 저장 + 결과 줄"       'grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_TERMINAL_SHELL=powershell$" "$I/agent/oxy.env" && grep -q "멀티플렉서 설정을 저장했습니다" "$SB/out.txt"'
+chk "Tweak 셸: WT 프로필을 PowerShell 로 다시 만듦"  'grep -qE "powershell.exe|pwsh.exe" "$WTF" && grep -q "NoExit" "$WTF"'
 
 # 3-3) 확장 파라미터를 거부하는 게이트웨이 (사내에서 받은 400 "property 'repetition_penalty' is unsupported")
 #      Tweak 의 LLM 연결 · 서버 주소·API 키 가 하나씩 확인해서 거부된 것만 요청에서 제외한다. 그 설정으로 pi 요청이 통과

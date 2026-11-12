@@ -18,7 +18,9 @@
   - **줄 입력 모드**: 파이프 입력, `TERM=dumb`, exe 없음, `OXY_TUI=line`. 번호를 입력한다. 회귀 테스트(`tests/installer-sandbox.sh`)가 이 방식으로 돈다.
     선택지의 순서나 개수를 바꾸면 테스트의 입력 번호도 함께 고친다.
 - 설치 TUI 는 단계 흐름(점검 → 폴더 → 구성요소 → LLM → 모델 → GitLab → PATH·바로가기 → 확인)이다.
+  PATH·바로가기 단계는 화면 세 개(등록 항목 → 터미널 셸 → 멀티플렉서)이고, 위치 표시는 셋 모두 `7/8 바로가기` 다.
   Tweak 은 허브다: 항목을 하나 선택해 그것만 변경하고 바로 저장한다. Tweak 을 단계 흐름으로 만들지 않는다.
+  허브의 PATH·바로가기는 하위 메뉴(등록 항목 · 터미널 셸 · 멀티플렉서)를 열고, 하위 항목 하나를 변경하면 바로 저장한다.
 - 출력이 길어 스크롤백에 남아야 하는 것(상태 점검 `verify.sh`)은 `ui.outside` 로 화면 밖(본 화면)에서 실행하고 돌아온다.
 
 ## 2. 배너
@@ -119,6 +121,10 @@ mintty 와 Windows Terminal 양쪽에서 **1칸으로 그려지는 글자만** �
 | 연결 테스트 | 연결 시험 |
 | 이전 (Esc) | 뒤로 |
 | 반입 (폐쇄망으로 가져옴) · 번들 (가져온 묶음) | 번들링하다 → 번들을 만들다 |
+| 터미널 셸 | 셸 종류, 쉘 |
+| 명령 프롬프트 (`cmd.exe`) | cmd 창, 커맨드 창 |
+| 멀티플렉서 (헤더에서는 터미널 멀티플렉서) | 먹스, mux (명령 `oxy mux` 는 원문) |
+| 세션 (psmux 세션) | 작업 공간 |
 
 ## 7. 종료와 복구
 
@@ -159,3 +165,60 @@ mintty 와 Windows Terminal 양쪽에서 **1칸으로 그려지는 글자만** �
 - 글자와 Enter 를 한 번에 보내면 붙여넣기로 판정되어 Enter 가 무시된다. Enter 는 따로 보낸다.
 - 텍스트 캡처는 줄마다 표시 폭이 창 폭 이내인지, 말줄임(`…`)으로 끝난 줄이 의도한 것인지 확인한다.
 - 캡처가 끝나면 세션과 붙인 창을 `stop` 으로 정리한다.
+
+## 10. 터미널 셸과 멀티플렉서
+
+PATH·바로가기에서 정하는 두 값이다. 서로 독립이다. 값은 `agent/oxy.env` 에 기록한다 (업데이트해도 유지).
+
+| 값 | 바꾸는 것 | 바꾸지 않는 것 |
+| --- | --- | --- |
+| 터미널 셸 `OXY_TERMINAL_SHELL` (`git-bash` 기본 · `cmd` · `powershell`) | Windows Terminal `Oxygen Pi` 프로필과 바탕화면 바로가기가 여는 셸, 그 셸에 하네스를 적용하는 방법 | pi 의 bash 도구(`shellPath`, 항상 Git Bash), psmux pane 의 셸(`agent/psmux.conf`, 항상 Git Bash), `oxy` 런처의 동작 |
+| 멀티플렉서 `OXY_MUX` (`none` 기본 · `psmux` · 이후 추가분) | `oxy` 를 대화형으로 실행할 때 pi 를 멀티플렉서 세션 안에서 실행할지 | 프로필 · 바로가기(셸만 연다), `oxy -p` 같은 비대화형 실행 |
+
+### 화면
+
+- 설치: 등록 항목(지금 화면) → 터미널 셸 → 멀티플렉서. Esc 는 앞 화면으로, 등록 항목에서의 Esc 는 이전 단계로 간다.
+  세 화면은 등록 항목 선택과 관계없이 항상 나온다 (줄 입력 모드의 입력 개수가 바뀌지 않게).
+- 프로필과 바로가기를 하나도 선택하지 않았으면 셸 화면의 맥락에 `! 프로필과 바로가기를 선택하지 않아 지금은 적용되지 않습니다.` 를 더한다. 선택한 값은 그대로 기록한다.
+- Tweak: 하위 메뉴 `등록 항목` · `터미널 셸` · `멀티플렉서` (줄 입력 모드에는 `← 이전` 을 더한다). 각 화면의 Enter 는 `저장`.
+  등록 해제 확인은 지금처럼 팝업이다. 셸을 저장하면 등록된 프로필과 바로가기를 새 셸로 다시 만든다.
+- 처음 포커스: 신규 설치는 `Git Bash (추천)` 과 `사용 안 함`, 다시 설정과 Tweak 은 `(현재)`.
+- 셸 선택지는 Git Bash · 명령 프롬프트 · PowerShell 세 개로 고정이다. PowerShell 은 `pwsh.exe` 가 있으면 그것을, 없으면 `powershell.exe` 를 쓰고 값 열에 실행 파일 이름을 보인다.
+- 멀티플렉서 선택지는 `사용 안 함` + 멀티플렉서 정의 표의 순서다. 설치되지 않은 것도 목록에 남기고 값 열에 상태를 둔다:
+  설치 단계에서 구성요소를 선택하지 않았으면 `설치 안 됨`, 번들에 없으면 `반입 안 됨`.
+- 지금 값이 선택할 수 없게 되면(psmux 제거 등) 포커스는 `사용 안 함` 에 두고, 그대로 진행하면 `none` 으로 기록한다.
+- 확인 단계 요약에는 `터미널` 행 하나를 더한다 (`Git Bash · 멀티플렉서 psmux`).
+- 완료 화면 시작하기: 멀티플렉서를 쓰면 `멀티플렉서   oxy가 psmux 세션에서 pi 실행 (바로 실행: oxy --no-mux)` 행을 더한다.
+- 저장 결과: `터미널 셸 설정을 저장했습니다. 새로 연 터미널부터 적용됩니다.` · `멀티플렉서 설정을 저장했습니다. 다음에 oxy를 실행할 때부터 적용됩니다.`
+- 업데이트(파일 복사)와 제거 전에 하네스의 psmux 서버(`-L oxy`)에 세션이 있으면 팝업으로 세션 수를 보이고 확인을 받은 뒤 종료한다 (실행 중인 `psmux.exe` 는 덮어쓰거나 지울 수 없다). 처음 포커스는 취소 쪽이다.
+
+### 셸별 실행 방법 (프로필의 commandline, 바로가기의 대상과 인수)
+
+| 셸 | 실행 | 하네스 적용 |
+| --- | --- | --- |
+| Git Bash | `"<bash.exe>" --login -i -c "source '<설치>/env.sh' && cd ~ && exec bash -i"` | `env.sh` 전체 |
+| 명령 프롬프트 | `%SystemRoot%\System32\cmd.exe /k "set "OXY_HOME=<설치>" & set "PATH=<설치>;%PATH%""` | 설치 폴더만 PATH 앞에. `oxy` → `oxy.cmd` → Git Bash 로 `env.sh` |
+| PowerShell | `<pwsh.exe 또는 powershell.exe> -NoLogo -NoExit -Command "$env:OXY_HOME='<설치>'; $env:Path='<설치>;'+$env:Path"` | 같다. `-Command` 라서 실행 정책(ps1 차단)의 영향을 받지 않는다 |
+
+바탕화면 바로가기는 Windows Terminal 프로필을 선택했고 `wt.exe` 가 있으면 `wt.exe -p "Oxygen Pi"`, 아니면 위 표의 실행 파일을 대상으로 한다. 시작 폴더는 모두 `%USERPROFILE%`.
+Windows Terminal 은 commandline 의 `%VAR%` 를 스스로 전개한다 (WT 프로세스의 값). 그래서 cmd 프로필의 `%PATH%` 는 cmd 가 아니라 WT 가 채운다.
+cmd · PowerShell 프로필에는 아이콘을 지정하지 않는다 (Windows Terminal 기본 아이콘). `oxy.cmd` 는 `agent/oxy.env` 의 `OXY_GIT_BASH` 로 Git Bash 를 찾고, 없으면 `%ProgramFiles%\Git\bin\bash.exe` 를 쓴다.
+
+### oxy 의 판정 (위에서부터 처음 맞는 것)
+
+1. 첫 인자가 `mux` → 이번만 멀티플렉서로 실행한다 (`OXY_MUX` 가 `none` 이면 psmux). 실행할 수 없으면 오류로 끝낸다.
+2. 첫 인자가 `--no-mux` → 그 인자를 빼고 이번만 바로 실행한다.
+3. `OXY_MUX` 가 `none` 이거나 비어 있음 → 바로 실행.
+4. 이미 멀티플렉서 세션 안(psmux: `$TMUX`) → 바로 실행.
+5. 대화형이 아님 → 바로 실행: stdin 이나 stdout 이 TTY 가 아님, 인자에 `-p` `--print` `--mode` `--export` `--list-models` `-h` `--help` `-v` `--version` 이 있음, 첫 인자가 pi 하위 명령(`install` `remove` `uninstall` `update` `list` `config` `auth` `mcp`)임.
+6. 멀티플렉서를 실행할 수 없음(실행 파일 없음, 어댑터 없음, 알 수 없는 값) → 표준 오류에 두 줄을 남기고 바로 실행한다:
+   `[oxy] psmux가 설치되지 않아 지금 창에서 pi를 실행합니다.` / `[oxy] tweak.cmd의 PATH·바로가기에서 멀티플렉서를 변경하세요.`
+7. 그 밖 → 지금 폴더의 세션 `oxy-<폴더 이름>-<경로 해시 4자리>` 에서 실행한다 (있으면 다시 연결. 같은 폴더의 두 번째 창도 같은 세션에 붙는다).
+
+### 멀티플렉서 정의
+
+- 화면: `installer/components.mjs` 의 `MULTIPLEXERS` 표. 한 행이 `{ id, component, label, hint, detail, info }` 다. `component` 는 `CATALOG` 의 구성요소 이름이고, 그 구성요소가 없으면 선택할 수 없다.
+- 실행: `scripts/mux/<id>.sh` 어댑터. `oxy` 가 source 하며 함수 세 개를 둔다:
+  `oxy_mux_ready`(실행할 수 있는지), `oxy_mux_inside`(세션 안인지), `oxy_mux_exec <세션 이름> <Windows 경로> <명령>`. `OXY_MUX` 값은 `^[a-z0-9-]+$` 일 때만 어댑터 경로로 쓴다.
+- 멀티플렉서를 더할 때: `tools.lock` 행 + `CATALOG` 행 + `MULTIPLEXERS` 한 행 + 어댑터 파일 하나. 단위 테스트가 표의 모든 id 에 어댑터와 구성요소가 있는지 확인한다.
+- 어떤 멀티플렉서를 선택해도 pi 의 bash 도구와 `terminal-session-control` 스킬은 하네스의 psmux(`-L oxy`, pane 셸 Git Bash)를 쓴다.

@@ -336,8 +336,14 @@ pi 문서상 mintty(기본 Git Bash 창)에서는 화면에 이상한 문자가 
 
 [psmux](https://github.com/psmux/psmux) 는 Windows 네이티브 tmux 호환 멀티플렉서다 (ConPTY 직접 사용, WSL·Cygwin 불필요).
 
-- `oxy mux [pi 인자…]`: 지금 폴더 이름의 psmux 세션 안에서 pi 를 실행한다. 이미 있으면 다시 붙는다.
-  창을 닫아도 세션은 남으므로 `oxy mux` 로 이어서 쓸 수 있다. 세션 안에서는 `/jobs` 의 로그를 옆 pane 으로 연다.
+- 설치 TUI·`tweak.cmd` 의 PATH·바로가기에서 멀티플렉서를 psmux 로 정하면(`OXY_MUX=psmux`) 대화형 `oxy` 가
+  `oxy-<폴더 이름>-<경로 해시>` psmux 세션 안에서 pi 를 실행한다. 세션이 있으면 다시 붙는다 (같은 폴더의 두 번째 창도 같은 세션).
+  `oxy -p`, 파이프 입력, `--help` 같은 비대화형 실행과 이미 세션 안일 때는 바로 실행한다. 한 번만 바로 실행: `oxy --no-mux [인자…]`.
+- `oxy mux [pi 인자…]`: 설정과 관계없이 이번만 psmux 세션 안에서 실행한다.
+  창을 닫아도 세션은 남으므로 `oxy` 로 이어서 쓸 수 있다. 세션 안에서는 `/jobs` 의 로그를 옆 pane 으로 연다.
+- 실행 중인 `psmux.exe` 는 덮어쓸 수 없어서, 설치 TUI 의 업데이트·제거는 하네스 psmux 세션을 확인받고 종료한 뒤 진행한다.
+- 터미널 셸(Git Bash · 명령 프롬프트 · PowerShell)은 Windows Terminal 프로필과 바탕화면 바로가기가 여는 셸만 바꾼다.
+  pi 의 bash 도구와 psmux pane 은 항상 Git Bash 다. 명령 프롬프트·PowerShell 에서는 `oxy` 가 `oxy.cmd` 로 실행된다.
 - 모델은 `terminal-session-control` skill 로 대화형 프로그램(REPL, 질문하는 CLI, 지켜볼 서버)을 분리 세션에서 조작한다.
   pi 의 bash 도구에는 TTY 가 없어 이런 프로그램을 직접 실행할 수 없기 때문이다.
 - `wrappers/psmux` 는 하네스 전용 서버(`-L oxy`)와 `agent/psmux.conf`(configure 가 생성, pane 셸 = Git Bash)를 쓴다.

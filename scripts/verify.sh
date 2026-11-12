@@ -70,6 +70,13 @@ opt_tool "obscura"       bin/obscura.exe       web-page-reading     obscura --ve
 opt_tool "usql"          bin/usql.exe          sql-querying         usql --version
 opt_tool "psmux"         bin/psmux.exe         terminal-session-control psmux -V
 opt_tool "ast-grep"      bin/ast-grep.exe      structural-code-search ast-grep --version
+# 멀티플렉서 (oxy.env 의 OXY_MUX): 실행할 수 없으면 oxy 가 지금 창에서 실행하므로 WARN
+if [[ -n "${OXY_MUX:-}" && "$OXY_MUX" != none ]]; then
+  adapter="$OXY_HOME/scripts/mux/$OXY_MUX.sh"
+  if [[ ! "$OXY_MUX" =~ ^[a-z0-9-]+$ || ! -f "$adapter" ]]; then wrn "멀티플렉서: 알 수 없는 값 OXY_MUX=$OXY_MUX (oxy 는 지금 창에서 실행)"
+  elif ( source "$adapter"; oxy_mux_ready ); then pass "멀티플렉서: $OXY_MUX (oxy 를 폴더별 세션에서 실행)"
+  else wrn "멀티플렉서: $OXY_MUX 가 설치되지 않음 (oxy 는 지금 창에서 실행 · tweak.cmd 의 PATH·바로가기에서 변경)"; fi
+fi
 if [[ -f "$OXY_HOME/vendor/dbhub/node_modules/@bytebase/dbhub/dist/index.js" ]]; then
   # mcp.json 이 없거나 dbhub 항목이 없으면 0 (set -e/pipefail 에서 멈추지 않도록 || true)
   n=$( { jq -r '.mcpServers.dbhub.description // empty' "$OXY_HOME/agent/mcp.json" 2>/dev/null | grep -o '=' | wc -l; } || true)
