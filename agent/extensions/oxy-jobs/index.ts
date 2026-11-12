@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { blocked, enabled, envInt } from "../_lib/common.ts";
+import { blocked, enabled, envInt, harnessHome } from "../_lib/common.ts";
 import { inspect } from "../oxy-bash-guard.ts";
 import { clip } from "../oxy-context-budget.ts";
 import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration } from "./manager.ts";
@@ -38,7 +38,7 @@ function shellPath(agentDir: string): string {
 
 /** 하네스에 반입된 psmux.exe (없으면 null). pane 안에서는 $TMUX 로 같은 서버를 찾는다 */
 function psmuxExe(): string | null {
-  const home = process.env.OXY_HOME;
+  const home = harnessHome();
   const p = home ? join(home, "bin", "psmux.exe") : "";
   return p && existsSync(p) ? p : null;
 }

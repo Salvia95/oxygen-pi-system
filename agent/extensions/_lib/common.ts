@@ -32,6 +32,21 @@ export function pathKey(input: string, cwd: string): string {
   return process.platform === "win32" ? win32.normalize(abs).toLowerCase() : abs;
 }
 
+/**
+ * 하네스 루트(OXY_HOME)를 Node 가 쓸 수 있는 경로로. env.sh 는 Git Bash 경로(/c/Users/…)로 내보내고, 보통은 Git Bash 가
+ * node 를 실행할 때 C:/Users/… 로 바꿔 준다. 그런데 MSYS_NO_PATHCONV=1 (docker 등을 위해 켜 둔 사용자)이면 바꾸지 않아
+ * LLM 연결 · psmux 를 찾지 못한다 (2026-11-12 실측). 없으면 fallback.
+ */
+export function harnessHome(fallback?: string): string | undefined {
+  const h = process.env.OXY_HOME?.trim();
+  if (!h) return fallback;
+  if (process.platform === "win32") {
+    const m = h.match(/^\/(?:cygdrive\/)?([a-zA-Z])(\/.*)?$/);
+    if (m) return `${m[1].toUpperCase()}:${m[2] ?? "/"}`;
+  }
+  return h;
+}
+
 /** 모델에게 돌려주는 차단 사유. 소형 모델이 다음 행동을 바로 알 수 있도록 짧고 지시적으로. */
 export function blocked(rule: string, message: string): string {
   return `BLOCKED by oxy-${rule}: ${message}`;

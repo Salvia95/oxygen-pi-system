@@ -41,8 +41,14 @@ pane 관리
 - 모니터는 pi 의 pid 를 감시하다가 pi 가 끝나면 스스로 종료한다. 그래야 pi pane 이 닫힐 때 세션이 남지 않는다 (`scripts/mux/psmux.sh` 의 `oxy_mux_exec` 는 pi 가 끝나면 세션도 끝난다는 전제다).
 - `main-pane-width` 와 hook 은 이 세션에만 건다. `agent/psmux.conf` 에 넣지 않는다 (같은 서버의 terminal-session-control 세션에 영향을 주지 않도록).
 
+구현 (3단계, 2026-11-12): `agent/extensions/oxy-monitor/pane.ts` 의 `PaneManager` (psmux 를 부르는 함수를 받아 테스트에서는 별도 서버 `-L` 를 쓴다), `index.ts` 의 `/monitor jobs|flow`.
+- pi 는 pane 안에서 `$TMUX` · `$TMUX_PANE` 을 받고, `bin/psmux.exe` 는 `$TMUX` 로 같은 서버를 쓴다. 모니터 명령은 `exec '<node>' … monitor.ts <종류> --pi-pid <pid> --cwd <폴더>`.
+- pi 를 끝내면(`session_shutdown` reason quit) 모니터 pane 을 닫는다. 강제 종료되면 모니터가 1초마다 pi pid 를 보고 스스로 끝난다 (둘 다 실측: 세션이 남지 않음).
+- extension 은 `OXY_HOME` 을 `harnessHome()` 으로 읽는다. `MSYS_NO_PATHCONV=1` 이면 Git Bash 가 `/c/…` 를 바꾸지 않아 psmux 와 LLM 연결을 찾지 못했다 (실측).
+
 알려진 제약
 - 같은 창에 사용자가 직접 나눈 pane 이 있으면 그 pane 도 오른쪽 열에 들어간다.
+- `main-vertical` 의 왼쪽 큰 pane 은 index 0 이다. pi 가 index 0 이 아니면(사용자가 pi 왼쪽에 pane 을 만든 경우) 그 pane 이 왼쪽에 놓인다.
 - 80×24 에서 오른쪽 열은 23칸이다. 모니터 화면은 23칸에서도 줄이 깨지지 않아야 한다 (§5).
 - psmux 밖에서는 (`OXY_MUX=none`, `$TMUX` 없음) pane 을 열지 않는다. §2 의 대체 동작을 따른다.
 

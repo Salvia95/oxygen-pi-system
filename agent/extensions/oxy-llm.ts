@@ -12,6 +12,7 @@
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { harnessHome } from "./_lib/common.ts";
 
 export const INHERIT_ENV = "OXY_LLM_INHERIT_KEYS";
 const SHARED = Symbol.for("oxy.llm");
@@ -26,7 +27,7 @@ export interface SharedLlm {
 export const sharedLlm = (): SharedLlm | undefined => (globalThis as any)[SHARED];
 
 /** 하네스 루트: OXY_HOME, 없으면 agent 폴더의 상위 (설치 배치: <루트>/agent) */
-export const harnessRoot = (agentDir: string) => process.env.OXY_HOME || resolve(agentDir, "..");
+export const harnessRoot = (agentDir: string) => harnessHome() || resolve(agentDir, "..");
 
 export default async function (pi: ExtensionAPI) {
   // 부모가 넘긴 키는 무엇보다 먼저 지운다 (이 프로세스가 띄우는 bash · MCP 서버에 남지 않게)

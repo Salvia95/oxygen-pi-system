@@ -85,6 +85,21 @@ test("pathKey: Git Bash 경로 / 상대경로 / 대소문자", { skip: process.p
   assert.equal(pathKey("./src/../a.ts", cwd), "c:\\work\\proj\\a.ts");
 });
 
+test("harnessHome: Git Bash 경로(OXY_HOME=/c/…)도 Node 경로로 (MSYS_NO_PATHCONV=1 이면 변환되지 않음)", { skip: process.platform !== "win32" }, async () => {
+  const { harnessHome } = await import("../agent/extensions/_lib/common.ts");
+  const prev = process.env.OXY_HOME;
+  try {
+    process.env.OXY_HOME = "/c/Users/me/oxygen-pi";
+    assert.equal(harnessHome(), "C:/Users/me/oxygen-pi");
+    process.env.OXY_HOME = "/cygdrive/d/x";
+    assert.equal(harnessHome(), "D:/x");
+    process.env.OXY_HOME = "C:/Users/me/oxygen-pi";
+    assert.equal(harnessHome(), "C:/Users/me/oxygen-pi");
+    delete process.env.OXY_HOME;
+    assert.equal(harnessHome("fb"), "fb");
+  } finally { if (prev === undefined) delete process.env.OXY_HOME; else process.env.OXY_HOME = prev; }
+});
+
 test("clip: 앞/뒤 보존 + 안내", () => {
   const s = "H".repeat(100) + "M".repeat(1000) + "T".repeat(100);
   const out = clip(s, 200, "narrow it");
@@ -282,6 +297,49 @@ test("oxy-jobs subagent: 작업 수준이 agent 정의 · 부모보다 우선", 
     ["--provider", "oxy-claude", "--model", "claude-haiku-5-5", "--thinking", "high"]);
   assert.deepEqual(argsFor("cli.js", agent, "t", { target: null, parent: { provider: "oxy-x", id: "y", thinking: "low" } }).slice(5, 11),
     ["--provider", "oxy-vllm", "--model", "qwen3.6-coder-30b", "--thinking", "off"]);
+});
+
+test("oxy-monitor pane: 오른쪽 30% 열 · 호출 순서대로 위→아래 · 같은 높이 · 켜고 끄기 · 스스로 끝나도 다시 맞춤 (monitor-spec §1)",
+  { skip: !existsSyncTop(join(import.meta.dirname, "..", "bin", "psmux.exe")) }, async () => {
+  const { PaneManager, psmuxRunner, monitorCommand } = await import("../agent/extensions/oxy-monitor/pane.ts");
+  const run = psmuxRunner(join(import.meta.dirname, "..", "bin", "psmux.exe"), ["-L", `oxytest-${process.pid}`]);
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  try {
+    run(["new-session", "-d", "-s", "t", "-x", "120", "-y", "30", "sleep 120"]);
+    await sleep(1500);
+    const pi = run(["list-panes", "-t", "t", "-F", "#{pane_id}"]).stdout.trim();
+    const mgr = new PaneManager(run, pi);
+    const geo = () => Object.fromEntries(run(["list-panes", "-t", pi, "-F", "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}"]).stdout
+      .trim().split(/\r?\n/).map((l) => { const [id, x, y, w, h] = l.split(" "); return [id, { x: +x, y: +y, w: +w, h: +h }]; }));
+    const j = mgr.open("jobs", "sleep 120");
+    await sleep(300);
+    let g = geo();
+    assert.ok(g[j].x > 0 && g[j].w >= 33 && g[j].w <= 38, `오른쪽 30% 열: ${JSON.stringify(g)}`);
+    assert.equal(g[pi].x, 0);
+    const f = mgr.open("flow", "sleep 120");
+    await sleep(300);
+    g = geo();
+    assert.ok(g[j].y < g[f].y && g[j].x === g[f].x, `호출 순서대로 위→아래: ${JSON.stringify(g)}`);
+    assert.ok(Math.abs(g[j].h - g[f].h) <= 1, `같은 높이: ${g[j].h} / ${g[f].h}`);
+    assert.equal(mgr.open("jobs", "sleep 120"), j);                         // 종류마다 하나
+    assert.deepEqual(mgr.list().map((p) => p.kind), ["jobs", "flow"]);
+    assert.equal(mgr.toggle("jobs", "sleep 120"), "closed");                // 다시 누르면 닫힌다
+    await sleep(300);
+    g = geo();
+    assert.ok(!g[j] && g[f].h >= 29, `닫으면 남은 모니터가 열을 채운다: ${JSON.stringify(g)}`);
+    const s = mgr.open("short", "sleep 1");                                  // 스스로 끝나는 모니터
+    await sleep(300);
+    assert.ok(Math.abs(geo()[s].h - geo()[f].h) <= 1);
+    await sleep(2500);
+    g = geo();
+    assert.ok(!g[s] && g[f].h >= 29, `스스로 끝나도 hook 이 다시 맞춘다: ${JSON.stringify(g)}`);
+    assert.equal(mgr.closeAll(), 1);
+    await sleep(300);
+    assert.equal(geo()[pi].w, 120);                                          // 모두 닫으면 pi 가 전체 폭
+  } finally { run(["kill-server"]); }
+  // pane 의 셸(Git Bash)이 해석하는 명령: exec 로 시작하고 경로는 / · 작은따옴표
+  assert.equal(monitorCommand("C:\\a b\\node.exe", "C:\\x\\monitor.ts", "jobs", 42, "C:\\it's"),
+    "exec 'C:/a b/node.exe' --disable-warning=ExperimentalWarning 'C:/x/monitor.ts' jobs --pi-pid 42 --cwd 'C:/it'\\''s'");
 });
 
 test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결과 · 정리 규칙", async () => {
