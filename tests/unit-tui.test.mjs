@@ -1,4 +1,6 @@
-// 설치 TUI · Tweak 공용 입력(UI)을 가짜 터미널로 점검한다: 붙여넣기 · 단계 그림 · 화면 폭 · 상태 기호 · 줄 입력 문법 (docs/tui-spec.md §9)
+// 설치 TUI · Tweak 공용 입력(UI)을 점검한다. 화면은 oxy-tui.exe 가 그리므로(installer/oxy-tui, cargo test) 여기서는
+//   원격 모드: UI 가 exe 에 보내는 지시와, 받은 결과를 값으로 바꾸는 것 (가짜 연결로 exe 없이)
+//   줄 입력 모드: 번호 입력 문법 · 비밀값 · 입력이 끝났을 때
 //   node --test tests/unit-tui.test.mjs
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -7,177 +9,155 @@ import { readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { InputEnded, UI, displayWidth, stepArt, stripAnsi, truncate, truncatePath } from "../installer/tui.mjs";
+import { BACK, InputEnded, UI, displayWidth, explainError, truncate, truncatePath } from "../installer/tui.mjs";
 
-/** keypress 를 직접 내보내는 가짜 TTY. 출력은 버린다 */
-function fakeTerm() {
-  const input = new EventEmitter();
-  Object.assign(input, { isTTY: true, setRawMode() {}, resume() {}, pause() {} });
-  const output = { isTTY: true, columns: 100, write() { return true; } };
-  const ui = new UI({ input, output, tty: true });
-  const keys = (...evs) => { for (const [str, key] of evs) input.emit("keypress", str, key); };
-  const ch = (s) => [...s].map((x) => [x, { name: /[a-z]/i.test(x) ? x.toLowerCase() : undefined, sequence: x }]);
-  const enter = ["\r", { name: "return" }];
-  return { ui, keys, ch, enter, tick: () => new Promise((r) => setImmediate(r)) };
-}
-
-test("붙여넣기: 한꺼번에 들어온 글자를 모두 받는다 (예전에는 첫 글자만 남음)", async () => {
-  const t = fakeTerm();
-  const p = t.ui.input("vLLM 주소");
-  await t.tick();
-  t.keys(...t.ch("http://vllm.example.internal:8000/v1"));   // 한 번에(동기적으로) 도착
-  await t.tick();
-  t.keys(t.enter);
-  assert.equal(await p, "http://vllm.example.internal:8000/v1");
-});
-
-test("붙여넣기: 끝의 줄바꿈 · 중간 줄바꿈은 확정으로 보지 않는다", async () => {
-  const t = fakeTerm();
-  const p = t.ui.input("API 키");
-  await t.tick();
-  t.keys(...t.ch("abc"), t.enter, ["\n", { name: "enter" }], ...t.ch("def"));   // 복사한 텍스트에 줄바꿈이 섞임
-  await t.tick();
-  t.keys(t.enter);
-  assert.equal(await p, "abcdef");
-});
-
-test("bracketed paste: paste-start ~ paste-end 사이의 줄바꿈은 무시", async () => {
-  const t = fakeTerm();
-  const p = t.ui.input("호스트");
-  await t.tick();
-  t.keys([undefined, { name: "paste-start" }], ...t.ch("gitlab.local"), t.enter, [undefined, { name: "paste-end" }]);
-  await t.tick();
-  await t.tick();
-  t.keys(t.enter);
-  assert.equal(await p, "gitlab.local");
-});
-
-test("한 글자씩 입력 · 지우기 · 확정", async () => {
-  const t = fakeTerm();
-  const p = t.ui.input("이름", { initial: "x" });
-  for (const k of [...t.ch("ab"), ["\x7f", { name: "backspace" }], t.enter]) { await t.tick(); t.keys(k); }
-  assert.equal(await p, "xa");
-});
-
-test("단계 그림: 지난 단계 ✔ · 현재 굵은 상자 · 좁은 폭에서는 줄바꿈", () => {
-  const names = ["점검", "위치", "선택", "vLLM"];
-  const plain = stepArt(names, 2, 200).replace(/\x1b\[[0-9;]*m/g, "");
-  assert.match(plain, /✔ 점검/);
-  assert.match(plain, /┃ ▶ 선택 ┃/);
-  assert.equal(plain.split("\n").length, 3);
-  assert.equal(stepArt(names, 2, 30).split("\n").length, 6);
-});
-
-test("줄 입력 모드: 비밀값(mask)은 출력·로그에 되찍지 않는다", async () => {
-  const { PassThrough } = await import("node:stream");
-  const input = new PassThrough(), output = new PassThrough();
-  let out = "";
-  output.on("data", (d) => (out += d));
-  const ui = new UI({ input, output, tty: false });
-  input.write("gsk-secret-value\nplain-host\n");
-  assert.equal(await ui.input("API 키", { mask: true }), "gsk-secret-value");
-  assert.equal(await ui.input("호스트"), "plain-host");
-  assert.ok(!out.includes("gsk-secret-value"), "비밀값이 출력에 남음");
-  assert.ok(out.includes("(입력됨)") && out.includes("plain-host"));
-});
-
-// ---------------------------------------------------------------- 화면 규칙 (docs/tui-spec.md §9)
-/** 출력을 모으는 가짜 TTY (cols × rows). 마지막으로 그린 화면을 색 없이 돌려준다 */
-function screenTerm(cols = 80, rows = 24, { color = false } = {}) {
-  const input = new EventEmitter();
-  Object.assign(input, { isTTY: true, setRawMode() {}, resume() {}, pause() {} });
-  let buf = "";
-  const output = { isTTY: true, columns: cols, rows, write(s) { buf += s; return true; }, on() {} };
-  const ui = new UI({ input, output, tty: true, color });
+// ---------------------------------------------------------------- 원격 모드 (가짜 연결)
+/** exe 대신 지시를 모으고, reply(지시) 가 돌려준 답을 다음 틱에 넣어 준다 */
+function remoteUI(reply = () => null) {
+  const sent = [];
+  const link = { send(m) { sent.push(m); const r = reply(m, sent); if (r) setImmediate(() => link.onMessage({ id: m.id, ...r })); } };
+  const ui = new UI({ input: new EventEmitter(), output: { isTTY: true, columns: 80, rows: 24, write() { return true; } }, tty: true, remote: link });
   ui.version = "0.1.0";
-  const key = (str, k) => input.emit("keypress", str, k);
-  const last = () => {
-    const s = buf.slice(buf.lastIndexOf("\x1b[H") + 3).replace(/\x1b\[\d+;\d+H[\s\S]*$/, "");
-    return stripAnsi(s).replace(/\n$/, "").split("\n");
-  };
-  return { ui, key, last, raw: () => buf, tick: () => new Promise((r) => setImmediate(r)) };
+  return { ui, sent, link, ops: () => sent.map((m) => m.op), last: (op) => sent.filter((m) => m.op === op).at(-1) };
 }
-const LONG = String.raw`C:\Users\kim\AppData\Local\Programs\oxygen-pi\아주\긴\경로\이름이\이어지는\폴더`;
-const STEPS = { steps: ["점검", "폴더", "구성요소", "LLM", "모델", "GitLab", "등록", "확인"], longSteps: ["환경 점검", "설치 폴더", "구성요소", "LLM 연결", "모델", "GitLab 연결", "실행 등록", "확인"] };
-function manyRows(n = 13) {
-  const rows = [];
-  for (let g = 0; g < 4; g++) {
-    rows.push({ header: `그룹 ${g}`, desc: "설명 문구가 길게 이어집니다 · 명령 실행 · API 시험" });
-    for (let i = 0; i < Math.ceil(n / 4) && rows.filter((r) => !r.header).length < n; i++) {
-      rows.push({ label: `항목 ${g}-${i} 이름`, value: `${g}-${i}`, checked: i % 2 === 0, hint: `${LONG} · 아주 긴 설명이 붙어 잘려야 합니다`,
-        locked: g === 0 && i === 0, disabled: g === 2 && i === 1 ? "반입 안 됨" : false, why: "직접 반입해야 합니다", fix: "vendor/ 에 넣고 다시 번들링",
-        detail: [["바뀌는 것", "bin/x.exe 복사"], ["되돌리기", "tweak.cmd › 도구 사용법"]] });
-    }
+
+test("원격 select: 행을 exe 가 받는 모양으로 보내고, index 를 값으로 돌려준다", async () => {
+  const t = remoteUI((m) => (m.op === "select" ? { index: 1 } : null));
+  t.ui.setFrame({ path: ["설정", "LLM 연결"], right: "C:\\oxygen-pi" });
+  const v = await t.ui.select("어떤 설정을 변경할까요?", [
+    { label: "LLM 연결", value: "llm", hint: "api.example · m", detail: "서버 주소, API 키, 모델을 변경합니다.", info: [["서버", "http://x/v1"]] },
+    { label: "브라우저", value: "browser", gap: true, hint: "Chromium", disabled: "사용 불가", why: "agent-browser가 설치되지 않았습니다.", fix: "번들을 다시 만드세요." },
+    { label: "종료", value: "exit", lineOnly: true },
+  ], { esc: "종료", message: "\x1b[32m✔\x1b[39m GitLab 연결을 저장했습니다." });
+  assert.equal(v, "browser");
+  assert.deepEqual(t.ops(), ["frame", "select"]);
+  assert.deepEqual(t.last("frame"), { op: "frame", version: "0.1.0", title: "", steps: [], short: [], current: 0, stage: "", finished: false, path: ["설정", "LLM 연결"], right: "C:\\oxygen-pi" });
+  const s = t.last("select");
+  assert.equal(s.rows.length, 2, "lineOnly 행(종료)은 화면에 보내지 않는다");
+  assert.deepEqual(s.rows[0], { label: "LLM 연결", value: "api.example · m", status: "", desc: ["서버 주소, API 키, 모델을 변경합니다."], info: [["서버", "http://x/v1"]],
+    gap: false, disabled: false, recommended: false, current: false, danger: false, locked: false, checked: false });
+  assert.deepEqual([s.rows[1].gap, s.rows[1].disabled, s.rows[1].status, s.rows[1].desc], [true, true, "사용 불가", ["agent-browser가 설치되지 않았습니다.", "번들을 다시 만드세요."]]);
+  assert.deepEqual([s.esc, s.enter, s.multi, s.result, s.result_kind], ["종료", "선택", false, "GitLab 연결을 저장했습니다.", "ok"]);
+  // 결과 줄의 종류는 맨 앞 기호로 정한다 (! 주의 · × 실패). 기호는 exe 가 다시 그린다
+  await t.ui.select("q", [{ label: "a", value: 1 }, { label: "b", value: 2 }], { message: "\x1b[33m!\x1b[39m 상태 점검에서 문제가 발견되었습니다." });
+  assert.deepEqual([t.last("select").result, t.last("select").result_kind], ["상태 점검에서 문제가 발견되었습니다.", "warn"]);
+  // 설치 단계: 긴 이름(steps)과 짧은 이름(short)을 함께 보낸다
+  t.ui.setFrame({ steps: ["점검", "폴더"], longSteps: ["환경 점검", "설치 폴더"], current: 1, title: "설치" });
+  await t.ui.select("q", [{ label: "a", value: 1 }, { label: "b", value: 2 }]);
+  assert.deepEqual([t.last("frame").steps, t.last("frame").short], [["환경 점검", "설치 폴더"], ["점검", "폴더"]]);
+  // 단계를 모두 지난 뒤: 상태 낱말(stage)과 마쳤는지(finished)를 보낸다
+  t.ui.setFrame({ steps: ["점검", "폴더"], current: 2, title: "설치", stage: "설치 완료", finished: true });
+  await t.ui.select("q", [{ label: "a", value: 1 }, { label: "b", value: 2 }]);
+  assert.deepEqual([t.last("frame").current, t.last("frame").stage, t.last("frame").finished], [2, "설치 완료", true]);
+});
+
+test("원격 select: 예전 형식 detail([[이름, 값]])은 값만 문장으로, {header} 는 묶음 경계로, Esc 는 BACK", async () => {
+  const t = remoteUI((m) => (m.op === "select" ? { back: true } : null));
+  const v = await t.ui.select("무엇을 바꿀까요?", [
+    { header: "연결" },
+    { label: "a", value: 1, detail: [["바뀌는 것", "주소를 다시 입력합니다"], ["끄면", "확인이 없어집니다"]] },
+    { header: "이 PC" },
+    { label: "b", value: 2, recommended: true },
+  ], { note: ["\x1b[90m맥락 한 줄\x1b[39m", "  ✔ Git Bash  C:\\Git"], result: true });
+  assert.equal(v, BACK);
+  const s = t.last("select");
+  assert.deepEqual(s.rows.map((r) => [r.label, r.gap, r.desc]), [["a", false, ["주소를 다시 입력합니다", "끄면 확인이 없어집니다"]], ["b", true, []]]);
+  assert.deepEqual([s.context, s.keep, s.focus], [["맥락 한 줄", "  ✓ Git Bash  C:\\Git"], true, 1], "색 코드를 떼고 옛 기호를 바꾼다 · 처음 포커스는 추천 항목");
+});
+
+test("원격 multiselect: indices 를 값으로 (잠긴 행은 항상 포함, 선택할 수 없는 행은 제외)", async () => {
+  const t = remoteUI((m) => (m.op === "select" ? { indices: [0, 2, 3] } : null));
+  const v = await t.ui.multiselect("어떤 구성요소를 설치할까요?", [
+    { label: "기본", value: "core", locked: true }, { label: "just", value: "just", checked: true }, { label: "hurl", value: "hurl" },
+    { label: "graphin", value: "graphin", disabled: "반입 안 됨" },
+  ], { enter: "다음" });
+  assert.deepEqual(v, ["core", "hurl"]);
+  const s = t.last("select");
+  assert.deepEqual([s.multi, s.enter, s.rows.map((r) => r.checked), s.rows[3].status], [true, "다음", [true, true, false, false], "반입 안 됨"]);
+});
+
+test("원격 input: 검증에 걸리면 invalid 를 같은 id 로 보내고 다시 받는다 · 비밀값은 mask", async () => {
+  const answers = [{ value: "oxygen-pi" }, { value: "C:\\oxygen-pi" }];
+  const t = remoteUI((m) => (m.op === "input" || m.op === "invalid" ? answers.shift() : null));
+  const v = await t.ui.input("설치 폴더", { initial: "C:\\x", note: "예: C:\\oxygen-pi", enter: "다음", validate: (s) => (/^[A-Z]:\\/.test(s) ? null : "전체 경로를 입력하세요") });
+  assert.equal(v, "C:\\oxygen-pi");
+  assert.deepEqual(t.ops(), ["frame", "input", "invalid"]);
+  const [i, bad] = [t.last("input"), t.last("invalid")];
+  assert.deepEqual([i.header, i.context, i.value, i.mask, i.esc, i.enter], ["설치 폴더", ["예: C:\\oxygen-pi"], "C:\\x", false, "이전", "다음"]);
+  assert.deepEqual([bad.id, bad.message], [i.id, "전체 경로를 입력하세요"]);
+  const k = remoteUI((m) => (m.op === "input" ? { back: true } : null));
+  assert.equal(await k.ui.input("API 키", { mask: true }), BACK);
+  assert.equal(k.last("input").mask, true);
+});
+
+test("원격 confirm: 위험한 확인은 팝업(confirm), 가벼운 확인은 목록(select)", async () => {
+  const t = remoteUI((m) => (m.op === "confirm" ? { yes: false } : m.op === "select" ? { index: 0 } : null));
+  await assert.rejects(t.ui.confirm("정말 할까요?"), /yes\/no/);
+  const no = await t.ui.confirm("oxygen-pi-system을 이 PC에서 제거할까요?", { title: "제거", level: "heavy", yes: "설치 폴더 삭제", no: "제거 취소",
+    summary: [["삭제", "C:\\oxygen-pi"]], warning: "삭제하면 복구할 수 없습니다." });
+  assert.equal(no, false);
+  const c = t.last("confirm");
+  assert.deepEqual([c.title, c.yes, c.no, c.danger, c.on_yes, c.summary, c.warning], ["제거", "설치 폴더 삭제", "제거 취소", true, false, [["삭제", "C:\\oxygen-pi"]], "삭제하면 복구할 수 없습니다."]);
+  const yes = await t.ui.confirm("상태 점검(verify)을 실행할까요?", { yes: "상태 점검 실행", no: "건너뛰기", recommended: true });
+  assert.equal(yes, true);
+  const s = t.last("select");
+  assert.deepEqual([s.rows.map((r) => r.label), s.focus, s.rows[0].recommended, s.rows[0].danger], [["상태 점검 실행", "건너뛰기"], 0, true, false]);
+});
+
+test("원격 task: 시작하자마자 진행 화면을 보내고, 끝나면 done · 실패하면 fail 과 원인 · 해결 방법", async () => {
+  const t = remoteUI((m) => (m.op === "pause" ? {} : null));
+  t.ui.setFrame({ steps: ["점검", "폴더"], longSteps: ["환경 점검", "설치 폴더"], current: 2, title: "설치" });
+  t.ui.screen("  \x1b[1m설치하는 중입니다\x1b[22m\n  C:\\oxygen-pi\n");
+  let seen = null;
+  await t.ui.task("파일 복사", async (update) => { seen = structuredClone(t.last("task")); update("4,210/12,480 (34%)", 34); return "12,480개"; });
+  assert.deepEqual([seen.title, seen.lines, seen.items, seen.percent], ["설치하는 중입니다", ["C:\\oxygen-pi"], [{ label: "파일 복사", state: "run", extra: "" }], -1], "fn 을 부르기 전에 이미 보냈다");
+  assert.deepEqual(t.last("task").items, [{ label: "파일 복사", state: "done", extra: "12,480개" }]);
+  assert.deepEqual(t.last("frame").steps, ["환경 점검", "설치 폴더"]);
+  const err = Object.assign(new Error("x"), { why: "서버가 연결을 거부했습니다", fix: "포트를 확인하세요" });
+  await assert.rejects(t.ui.task("모델 목록", async () => { throw err; }), (e) => e.reported === true);
+  const items = t.last("task").items;
+  assert.deepEqual(items[1], { label: "모델 목록", state: "fail", extra: "" });
+  assert.deepEqual(items.slice(2).map((x) => [x.state, x.label.replace(/\s+/g, " ")]), [["text", " 원인 서버가 연결을 거부했습니다"], ["text", " 해결 방법 포트를 확인하세요"]]);
+  await t.ui.pause("종료");
+  assert.equal(t.last("pause").label, "종료");
+});
+
+test("원격 outside: suspend → fn → resume(Enter 를 기다릴 뜻) 순서 · end 는 quit 에 남길 줄을 실어 보낸다", async () => {
+  const t = remoteUI((m) => (m.op === "suspend" || m.op === "resume" ? {} : null));
+  const order = [];
+  const r = await t.ui.outside(() => { order.push(...t.ops()); return "passed"; }, { title: "상태 점검 (verify)" });
+  assert.equal(r, "passed");
+  assert.deepEqual(order, ["frame", "suspend"], "fn 은 suspend 의 답을 받은 뒤에 돈다");
+  assert.equal(t.last("resume").wait, "계속");
+  t.ui.screen("  ✔ 설치를 마쳤습니다  C:\\oxygen-pi\n\n  시작하기\n    실행  oxy");
+  await t.ui.end(0);
+  const q = t.last("quit");
+  assert.deepEqual([q.code, q.summary], [0, ["  ✓ 설치를 마쳤습니다  C:\\oxygen-pi", "  ", "  시작하기", "    실행  oxy"]], "마지막 진행 화면을 본 화면에 남긴다");
+});
+
+test("모드: TTY + exe 있음 → 원격 · exe 없음 → 줄 입력(한 줄로 알림) · OXY_TUI=line → 줄 입력 · TTY 아님 → 줄 입력", () => {
+  const tty = () => ({ input: Object.assign(new EventEmitter(), { isTTY: true }), output: { isTTY: true, write() { return true; } } });
+  const dir = mkdtempSync(join(tmpdir(), "oxy-tui-"));
+  const before = process.env.OXY_TUI;
+  try {
+    const exe = join(dir, "oxy-tui.exe");
+    const missing = new UI({ ...tty(), exe });
+    assert.equal(missing.mode, "line");
+    assert.match(missing.fallbackNote, /oxy-tui\.exe.*줄 입력 모드/);
+    writeFileSync(exe, "");
+    assert.equal(new UI({ ...tty(), exe }).mode, "remote");
+    process.env.OXY_TUI = "line";
+    const forced = new UI({ ...tty(), exe });
+    assert.deepEqual([forced.mode, forced.fallbackNote], ["line", ""]);
+    delete process.env.OXY_TUI;
+    assert.equal(new UI({ input: new PassThrough(), output: new PassThrough(), exe }).mode, "line");
+  } finally {
+    if (before === undefined) delete process.env.OXY_TUI; else process.env.OXY_TUI = before;
+    rmSync(dir, { recursive: true, force: true });
   }
-  return rows;
-}
-
-for (const [cols, rows] of [[80, 24], [60, 24], [100, 30]]) {
-  test(`K1·K2·K3: ${cols}×${rows} 에서 모든 줄이 폭 안, 화면은 ${rows - 1}줄 이하 (select · multiselect · input · confirm)`, async () => {
-    const screens = [
-      (ui) => ui.select("어디에 설치할까요?", [{ label: "기본 위치에 설치", value: 1, recommended: true, hint: LONG, detail: [["바뀌는 것", "약 12,480개 복사"]] }, { label: "다른 폴더 직접 입력…", value: 2 }],
-        { note: "번들(약 1GB)을 설치 폴더로 복사합니다. 이미 설치된 폴더를 고르면 설정을 유지한 채 업데이트합니다." }),
-      (ui) => ui.multiselect("어떤 구성요소를 설치할까요?", manyRows(13), { note: "반입된 구성요소만 고를 수 있습니다. 고른 구성요소의 도구 사용법이 켜집니다. 세 번째 문장도 있습니다." }),
-      (ui) => ui.input("어느 LLM 서버에 연결할까요?", { initial: "http://" + "x".repeat(120), note: ["vLLM 등 OpenAI 호환 주소입니다. /v1 이 없으면 자동으로 붙입니다.", "예: http://vllm.example.internal:8000/v1"] }),
-      (ui) => ui.confirm("tdb 연결을 삭제할까요?", { yes: "tdb 연결 삭제", no: "삭제 취소", level: "medium", note: `connections.json 의 tdb · ${LONG}` }),
-    ];
-    for (const open of screens) {
-      const t = screenTerm(cols, rows);
-      t.ui.setFrame({ ...STEPS, current: 2, right: LONG });
-      const p = open(t.ui);
-      await t.tick();
-      for (let k = 0; k < 8; k++) { t.key(undefined, { name: "down" }); await t.tick(); }
-      const lines = t.last();
-      for (const l of lines) assert.ok(displayWidth(l) <= cols, `${cols}칸 초과 (${displayWidth(l)}): ${l}`);
-      assert.ok(lines.length <= rows - 1, `${lines.length}줄 > ${rows - 1}`);
-      t.key(undefined, { name: "escape" }); await t.tick(); t.key(undefined, { name: "return" });
-      await p;
-    }
-  });
-}
-
-test("K3: 목록이 넘치면 ↑/↓ n줄 더 와 포커스 행이 보인다", async () => {
-  const t = screenTerm(80, 24);
-  const p = t.ui.multiselect("어떤 구성요소를 설치할까요?", manyRows(13), { note: "한 줄\n두 줄\n세 줄" });
-  await t.tick();
-  for (let k = 0; k < 12; k++) { t.key(undefined, { name: "down" }); await t.tick(); }
-  const s = t.last().join("\n");
-  assert.match(s, /↑ 위에 \d+줄 더/);
-  assert.match(s, /❯ 13 /);
-  t.key("\r", { name: "return" });
-  await p;
 });
 
-test("K4·K5: NO_COLOR 면 색 코드가 없고, 상태가 기호·문구로 구분된다", async () => {
-  const before = process.env.NO_COLOR;
-  process.env.NO_COLOR = "1";
-  try {
-    const input = new EventEmitter();
-    Object.assign(input, { isTTY: true, setRawMode() {}, resume() {}, pause() {} });
-    let buf = "";
-    const ui = new UI({ input, output: { isTTY: true, columns: 80, rows: 40, write(s) { buf += s; return true; }, on() {} }, tty: true });
-    const p = ui.multiselect("무엇을 켤까요?", [
-      { label: "잠금", value: 1, locked: true }, { label: "선택됨", value: 2, checked: true }, { label: "안 됨", value: 3 },
-      { label: "비활성", value: 4, disabled: "반입 안 됨" }, { label: "권장", value: 5, recommended: true }, { label: "위험", value: 6, danger: true },
-    ]);
-    await new Promise((r) => setImmediate(r));
-    assert.ok(!/\x1b\[(3\d|9\d)m/.test(buf), "색 코드가 남음");
-    const s = stripAnsi(buf);
-    for (const mark of ["❯", "[■]", "[✔]", "[ ]", "[·]", "(추천)", "! 위험", "필수", "반입 안 됨"]) assert.ok(s.includes(mark), mark);
-    input.emit("keypress", "\r", { name: "return" });
-    await p;
-  } finally { if (before === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = before; }
-});
-
-test("K4: TERM=dumb 이면 줄 입력 모드", () => {
-  const before = process.env.TERM;
-  process.env.TERM = "dumb";
-  try {
-    const input = Object.assign(new EventEmitter(), { isTTY: true });
-    assert.equal(new UI({ input, output: { isTTY: true, write() {} } }).tty, false);
-  } finally { process.env.TERM = before; }
-});
-
+// ---------------------------------------------------------------- 줄 입력 모드
 /** 줄 입력 모드 UI: 답을 넣고 출력을 모은다 */
 function lineUI(answers) {
   const input = new PassThrough(), output = new PassThrough();
@@ -191,89 +171,120 @@ function lineUI(answers) {
 const MS = [{ label: "필수", value: "a", locked: true }, { label: "B", value: "b", checked: true }, { label: "C", value: "c" },
   { label: "D", value: "d", disabled: "반입 안 됨" }, { label: "E", value: "e", checked: true }];
 
-test("K6: 줄 입력 multiselect — 빈칸 · 정확히 · +N -N · 섞으면 오류 · - · <", async () => {
+test("줄 입력: 비밀값(mask)은 출력·로그에 되찍지 않는다", async () => {
+  const t = lineUI(["gsk-secret-value", "plain-host"]);
+  assert.equal(await t.ui.input("API 키", { mask: true }), "gsk-secret-value");
+  assert.equal(await t.ui.input("호스트"), "plain-host");
+  assert.ok(!t.out().includes("gsk-secret-value"), "비밀값이 출력에 남음");
+  assert.ok(t.out().includes("(입력됨)") && t.out().includes("plain-host"));
+});
+
+test("줄 입력 multiselect: 빈칸 · 정확히 · +N -N · 섞으면 오류 · - · <", async () => {
   const cases = [["", ["a", "b", "e"]], ["2,3", ["a", "b", "c"]], ["+3 -5", ["a", "b", "c"]], ["-", ["a"]]];
   for (const [ans, want] of cases) assert.deepEqual(await lineUI([ans]).ui.multiselect("무엇을?", MS), want, ans);
   const mixed = lineUI(["2 +3", "4", "-1", "+3"]);
   assert.deepEqual(await mixed.ui.multiselect("무엇을?", MS), ["a", "b", "c", "e"]);
   const o = mixed.out();
-  assert.match(o, /한 가지로 입력하세요/);
-  assert.match(o, /4번 D은\(는\) 고를 수 없습니다/);
-  assert.match(o, /1번 필수은\(는\) 필수라 해제할 수 없습니다/);
-  assert.equal(await lineUI(["<"]).ui.multiselect("무엇을?", MS), (await import("../installer/tui.mjs")).BACK);
-  assert.match(lineUI([]).out() + o, /\[■\] 필수 · \[✔\] B|\[■\] 필수/);
+  assert.match(o, /형식 중 하나로 입력하세요/);
+  assert.match(o, /선택할 수 없습니다: 4번 D \(반입 안 됨\)/);
+  assert.match(o, /필수 항목은 해제할 수 없습니다: 1번 필수/);
+  assert.match(o, /1\) \[■\] 필수 {2}필수\n {2}2\) \[✓\] B\n {2}3\) \[ \] C\n {2}4\) \[·\] D {5}반입 안 됨/);
+  assert.equal(await lineUI(["<"]).ui.multiselect("무엇을?", MS), BACK);
 });
 
-test("줄 입력 모드: 입력이 끝나면 기다리던 질문을 알린다 (스택 없음)", async () => {
+test("줄 입력 select: lineOnly 행(종료)이 번호를 갖고, 질문 앞뒤와 목록 뒤에 빈 줄이 있다", async () => {
+  const t = lineUI(["3"]);
+  t.ui.setFrame({ path: "설정" });
+  const rows = [{ label: "LLM 연결", value: "llm", hint: "api.example" }, { label: "브라우저", value: "b", gap: true, disabled: "사용 불가", why: "agent-browser가 없습니다" },
+    { label: "종료", value: "exit", lineOnly: true }];
+  assert.equal(await t.ui.select("어떤 설정을 변경할까요?", rows, { esc: "종료" }), "exit");
+  assert.ok(t.out().includes("\n── 설정\n\n어떤 설정을 변경할까요?\n\n  1) LLM 연결  api.example\n  2) 브라우저  사용 불가\n  3) 종료\n\n번호 (Enter=1, <=종료, ?=설명): 3\n"), t.out());
+  const blocked = lineUI(["2", ""]);
+  assert.equal(await blocked.ui.select("무엇을?", rows), "llm");
+  assert.match(blocked.out(), /선택할 수 없습니다: 2번 브라우저 \(agent-browser가 없습니다\)/);
+});
+
+test("줄 입력 confirm: 1 = 진행 · 2 = 안 함, 위험한 확인은 처음 값이 2 이고 요약과 경고를 보인다", async () => {
+  const t = lineUI([""]);
+  assert.equal(await t.ui.confirm("tdb 연결을 삭제할까요?", { yes: "tdb 연결 삭제", no: "삭제 취소", level: "medium", summary: [["삭제", "tdb"]], warning: "삭제하면 복구할 수 없습니다." }), false);
+  assert.match(t.out(), /삭제 {2}tdb\n\n {2}1\) ! tdb 연결 삭제\n {7}! 삭제하면 복구할 수 없습니다\.\n {2}2\) 삭제 취소\n\n번호 \(Enter=2, \?=설명\)/);
+  assert.equal(await lineUI([""]).ui.confirm("상태 점검(verify)을 실행할까요?", { yes: "상태 점검 실행", no: "건너뛰기" }), true);
+});
+
+test("줄 입력: 입력이 끝나면 기다리던 질문을 알린다 (스택 없음)", async () => {
   const { ui } = lineUI([]);
   await assert.rejects(ui.select("어디에 설치할까요?", [{ label: "a", value: 1 }]), (e) => e instanceof InputEnded && e.question === "어디에 설치할까요?");
 });
 
-test("K8: 숫자 키는 포커스만 옮긴다 (1 → 3 을 이어 누르면 13), 확정은 Enter", async () => {
-  const t = screenTerm(80, 40);
-  const opts = Array.from({ length: 14 }, (_, i) => ({ label: `항목 ${i + 1}`, value: i + 1 }));
-  const p = t.ui.select("무엇을 바꿀까요?", opts);
-  await t.tick();
-  t.key("1", { name: "1" }); t.key("3", { name: "3" });
-  await t.tick();
-  assert.match(t.last().join("\n"), /❯ 13 /);
-  t.key("\r", { name: "return" });
-  assert.equal(await p, 13);
+test("줄 입력 task: 시작 · 25% 마다 · 끝을 한 줄씩 (회귀 테스트가 grep 하는 `레이블  결과` 형식)", async () => {
+  const t = lineUI([]);
+  await t.ui.task("tdb 접속", async (update) => { update("1/4 (25%)", 25); update("2/4 (50%)", 50); return "성공"; });
+  assert.equal(t.out(), "  … tdb 접속\n  … tdb 접속  1/4 (25%)\n  … tdb 접속  2/4 (50%)\n  ✓ tdb 접속  성공\n");
 });
 
-test("K9: 비활성 항목은 번호가 있고, Enter·Space 는 이유만 보이고 값을 돌려주지 않는다", async () => {
-  const t = screenTerm(80, 24);
-  const p = t.ui.select("무엇을 바꿀까요?", [{ label: "웹 페이지 자동화", value: "b", disabled: "사용 불가", why: "agent-browser 가 설치되지 않았습니다" }, { label: "종료", value: "x" }], { initial: 0 });
-  await t.tick();
-  t.key("\r", { name: "return" });
-  await t.tick();
-  const s = t.last().join("\n");
-  assert.match(s, /1 {2}웹 페이지 자동화/);
-  assert.match(s, /고를 수 없습니다: agent-browser 가 설치되지 않았습니다/);
-  t.key(undefined, { name: "down" }); t.key("\r", { name: "return" });
-  assert.equal(await p, "x");
-});
-
-test("K11: confirm 은 yes/no 레이블이 없으면 예외, 1 = 진행 · 2 = 안 함 · medium 은 초기 2", async () => {
-  const { ui } = lineUI(["", ""]);
-  await assert.rejects(ui.confirm("정말 할까요?"), /yes\/no/);
-  assert.equal(await ui.confirm("tdb 연결을 삭제할까요?", { yes: "tdb 연결 삭제", no: "삭제 취소", level: "medium" }), false);
-  assert.equal(await lineUI([""]).ui.confirm("동작 시험(verify)을 실행할까요?", { yes: "동작 시험 실행", no: "건너뛰기" }), true);
-});
-
-test("K13: 금지 문구가 installer/*.mjs 에 남아 있지 않다", () => {
-  const dir = join(import.meta.dirname, "..", "installer");
-  for (const f of readdirSync(dir).filter((x) => x.endsWith(".mjs"))) {
-    const s = readFileSync(join(dir, f), "utf8");
-    for (const bad of ["(권장)", "← 뒤로", "Enter 선택", "Enter 확인", "Enter 를 누르면", "label: \"예\"", "label: \"아니요\""]) {
-      assert.ok(!s.includes(bad), `${f}: ${bad}`);
+// ---------------------------------------------------------------- 공용 도우미 · 문구
+/** 주석(// … · /* … *\/)을 제외한 코드 줄. 문자열 안의 // 는 주석이 아니다 */
+function codeLines(src) {
+  const out = [];
+  let inBlock = false;
+  for (const line of src.split(/\r?\n/)) {
+    let code = "";
+    let q = null;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inBlock) { if (ch === "*" && line[i + 1] === "/") { i++; inBlock = false; } continue; }
+      if (q) { code += ch; if (ch === "\\") code += line[++i] ?? ""; else if (ch === q) q = null; continue; }
+      if (ch === '"' || ch === "'" || ch === "`") { q = ch; code += ch; continue; }
+      if (ch === "/" && line[i + 1] === "/") break;
+      if (ch === "/" && line[i + 1] === "*") { inBlock = true; i++; continue; }
+      code += ch;
     }
+    out.push(code);
+  }
+  return out;
+}
+
+test("금지 문구가 installer/*.mjs 의 화면 문구에 남아 있지 않다 (주석 제외)", () => {
+  const dir = join(import.meta.dirname, "..", "installer");
+  // 속성 이름을 단 설명 · 입말 · 조사 병기 · 기호로 이은 경로 (docs/tui-spec.md 문구 규칙)
+  const banned = /\(권장\)|← 뒤로|Enter 확정|Enter 를 누르면|label: "예"|label: "아니요"|바뀌는 것|되돌리기|빠른 길|고르|고른|골라|밟|묻습니다|은\(는\)|을\(를\)|이\(가\)|시험| › | — /;
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".mjs"))) {
+    codeLines(readFileSync(join(dir, f), "utf8")).forEach((l, i) => {
+      const m = l.match(banned);
+      assert.ok(!m, `${f}:${i + 1}: ${m?.[0]} (${l.trim().slice(0, 80)})`);
+    });
   }
 });
 
-test("K15: task 는 fn 을 부르기 전에 레이블을 그리고, 폭을 넘는 경로는 가운데를 줄인다", async () => {
-  const t = screenTerm(60, 24);
-  let seen = "";
-  await t.ui.task("파일 복사", async () => { seen = stripAnsi(t.raw()); }, { target: LONG });
-  assert.match(seen, /파일 복사/);
-  const line = stripAnsi(t.raw()).split("\r").at(-1).replace(/\x1b\[2K/g, "").split("\n")[0];
-  assert.ok(displayWidth(line) < 60, line);
-  assert.match(line, /…/);
+test("Enter 의 뜻: 기본은 선택/확인, enterLabel 을 두면 그 값, 화면에서 지정하면 지정한 값", async () => {
+  const t = remoteUI((m) => (m.op === "select" ? (m.multi ? { indices: [] } : { index: 0 }) : m.op === "input" ? { value: "x" } : null));
+  const rows = [{ label: "a", value: 1 }];
+  await t.ui.select("q", rows);
+  await t.ui.multiselect("q", rows);
+  await t.ui.input("이름");
+  assert.deepEqual(t.sent.filter((m) => m.enter).map((m) => m.enter), ["선택", "확인", "확인"]);
+  t.ui.enterLabel = "다음";
+  await t.ui.select("q", rows);
+  await t.ui.input("이름");
+  await t.ui.select("q", rows, { enter: "선택" });
+  await t.ui.input("이름", { enter: "저장" });
+  await t.ui.confirm("계속할까요?", { yes: "계속", no: "취소" });
+  assert.deepEqual(t.sent.filter((m) => m.enter).slice(3).map((m) => m.enter), ["다음", "다음", "선택", "저장", "선택"]);
 });
 
-test("K16: Ctrl+C 는 반쯤 된 상태를 한 줄로 알리고 130 으로 끝낸다", async () => {
-  const t = screenTerm(80, 24);
-  const exit = process.exit;
-  let code = null;
-  process.exit = (c) => { code = c; throw new Error("exit"); };
-  try {
-    t.ui.interruptNote = () => "중단했습니다. 아무것도 바꾸지 않았습니다.";
-    t.ui.select("어디에 설치할까요?", [{ label: "a", value: 1 }]).catch(() => {});
-    await t.tick();
-    assert.throws(() => t.key("\x03", { name: "c", ctrl: true }), /exit/);
-  } finally { process.exit = exit; }
-  assert.equal(code, 130);
-  assert.match(t.raw(), /중단했습니다\. 아무것도 바꾸지 않았습니다\./);
+test("busy: 지금 화면을 둔 채 알린다 (원격은 busy 지시, 줄 입력은 한 줄)", async () => {
+  const t = remoteUI();
+  await t.ui.busy("삭제할 파일을 세는 중입니다");
+  assert.deepEqual(t.sent, [{ op: "busy", label: "삭제할 파일을 세는 중입니다" }]);
+  const l = lineUI([]);
+  await l.ui.busy("삭제할 파일을 세는 중입니다");
+  assert.equal(l.out(), "  … 삭제할 파일을 세는 중입니다\n");
+});
+
+test("오류 설명: 원인과 해결 방법을 사람 말로", () => {
+  assert.deepEqual(explainError(Object.assign(new Error("x"), { cause: { code: "ECONNREFUSED" } })), { cause: "서버가 연결을 거부했습니다 (ECONNREFUSED)", fix: "포트가 맞는지, vLLM이 실행 중인지 확인하세요" });
+  assert.match(explainError(new Error("HTTP 401 Unauthorized")).cause, /API 키가 올바르지 않습니다/);
+  assert.deepEqual(explainError(Object.assign(new Error("x"), { why: "모델이 없습니다", fix: "확인하세요" })), { cause: "모델이 없습니다", fix: "확인하세요" });
 });
 
 test("말줄임: 설명 끝 · 경로 가운데 · 2칸 글자 중간은 자르지 않음", () => {
@@ -283,7 +294,7 @@ test("말줄임: 설명 끝 · 경로 가운데 · 2칸 글자 중간은 자르�
   assert.ok(displayWidth(truncate("가나다라마바사", 6)) <= 6);
 });
 
-test("K17: 복사 전에 쓴 설치 표시(partial)가 있으면 같은 폴더를 우리 설치로 보고 이어서 설치한다", async () => {
+test("복사 전에 쓴 설치 표시(partial)가 있으면 같은 폴더를 우리 설치로 보고 이어서 설치한다", async () => {
   const { createSystem } = await import("../installer/system.mjs");
   const dir = mkdtempSync(join(tmpdir(), "oxy-partial-"));
   try {

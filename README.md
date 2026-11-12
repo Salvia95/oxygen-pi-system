@@ -63,7 +63,7 @@ npm 패키지(pi, dbhub)는 `manifest/<이름>-package-lock.json` 으로 고정�
 ## 1) 인터넷 PC: 직접 받아서 번들링
 
 ```bash
-bash scripts/fetch-bundle.sh      # 선택 화면: 필수 항목은 체크된 채 고정, 나머지는 골라서 (이전 선택 기억)
+bash scripts/fetch-bundle.sh      # 선택 화면: 필수 항목은 체크된 채 고정, 나머지는 선택 (이전 선택 기억)
 source env.sh
 just package                      # 필수 구성요소 검사 → dist/oxygen-pi-YYYYMMDD.zip (+ .sha256)
 ```
@@ -79,6 +79,7 @@ bash scripts/package-bundle.sh --check                          # 번들링 전 
 
 - 선택에서 뺀 구성요소가 이전에 받아져 있으면 지운다 (번들에 원치 않는 파일이 들어가지 않도록).
 - 버전을 올릴 때는 `manifest/tools.lock.tsv` 의 version/url 을 수정하고 `--update-lock` 을 붙여 실행한다.
+- 설치·설정 TUI 의 화면 프로그램 `oxy-tui.exe` 는 선택과 상관없이 함께 받는다 (아래 [화면 프로그램](#화면-프로그램-oxy-tuiexe) 참고).
 - 번들에 없는 SQLcl·Chrome for Testing 은 폐쇄망 PC 에서 zip 으로 추가할 수도 있다: 받은 `sqlcl-*.zip` / `chrome-win64.zip` 을
   `Downloads` 폴더나 번들의 `optional/` 에 두면 설치 TUI 가 찾는다.
 
@@ -87,26 +88,41 @@ bash scripts/package-bundle.sh --check                          # 번들링 전 
 zip 을 푼 폴더의 **`install.cmd` 를 더블클릭**하면 설치 TUI 가 열린다 (Git Bash 에서는 `./install.sh`).
 
 ```
-1. 점검    Git Bash · Java 17+ · 번들의 필수 구성요소
-2. 위치    기본 %LOCALAPPDATA%\Programs\oxygen-pi (또는 현재 폴더 그대로 / 직접 입력)
-3. 선택    SQLcl: 번들에 있으면 설치 / 직접 받은 zip 지정 (sha256 을 manifest 와 대조) / 설치 안 함
-           브라우저: Chrome for Testing (추천) / Chromium / PC 의 Edge·Chrome / 사용 안 함  (고른 것만 복사)
-4. vLLM    주소·API 키 입력 → /v1/models 로 연결 확인
-5. 모델    코딩 모델 / 범용 모델(선택) 고르기, max_model_len 으로 컨텍스트 자동 입력
-6. GitLab  사내 호스트 (선택)
-7. 등록    PATH · Windows Terminal 'Oxygen Pi' 프로필 · 바탕화면 바로가기
-8. 확인    요약 → 설치 → 자가진단(verify)
+1. 환경 점검      Git Bash · Java 17+ · 번들의 필수 구성요소
+2. 설치 폴더      기본 %LOCALAPPDATA%\Programs\oxygen-pi (또는 현재 폴더 그대로 / 직접 입력)
+3. 구성요소       번들에 있는 구성요소 선택 (선택한 것만 복사), SQLcl·Chrome for Testing 은 직접 받은 zip 으로도 설치
+                  브라우저: Chrome for Testing (추천) / Chromium / obscura / PC 의 Edge·Chrome / 사용 안 함
+4. LLM 연결       서버 주소·API 키 입력 → /v1/models 로 연결 확인, 확장 파라미터 지원 여부 확인
+5. 모델           코딩 모델 / 범용 모델(선택), 컨텍스트 길이(max_model_len 으로 자동 입력), 모델 계열
+6. GitLab 연결    사내 호스트 (선택)
+7. PATH·바로가기  PATH · Windows Terminal 'Oxygen Pi' 프로필 · 바탕화면 바로가기
+8. 확인           요약 → 설치 → 상태 점검(verify)
 ```
 
-- 방향키·Enter·Space 로 조작하고, **Esc 는 이전 단계**로 돌아간다.
-- 설치 후 다시 실행하면 **설정 변경 / 자가진단 / 업데이트 / 제거** 메뉴가 나온다.
+- 방향키·Enter·Space 로 조작하고, **Esc 는 이전 단계**로 돌아간다. `?` 는 지금 화면의 도움말이다.
+- 설치 후 다시 실행하면 **다시 설정 / 상태 점검 / 업데이트 / 제거** 메뉴가 나온다.
   - 업데이트할 때 `agent/oxy.env` 는 유지된다.
   - 제거할 때 `oxy.env` 는 `%APPDATA%\oxygen-pi\oxy.env.bak` 으로 백업된다.
-- 선택 구성요소를 설치하지 않으면 verify 는 FAIL 이 아니라 WARN 으로 표시한다. 나중에 "설정 변경"에서 추가할 수 있다.
+- 선택 구성요소를 설치하지 않으면 verify 는 FAIL 이 아니라 WARN 으로 표시한다. 나중에 `tweak.cmd` 에서 추가할 수 있다.
 - 설치 기록은 `%APPDATA%\oxygen-pi\install.json` 에 남는다.
-- 진짜 콘솔이 아닌 환경(파이프 입력, winpty 없는 mintty)에서는 번호를 입력하는 줄 입력 모드로 동작한다.
+- 화면은 `bin/oxy-tui.exe` 가 그린다. 진짜 콘솔이 아닌 환경(파이프 입력, winpty 없는 mintty)이거나 `oxy-tui.exe` 가 없으면
+  번호를 입력하는 **줄 입력 모드**로 동작한다. 할 수 있는 일은 같다 (`OXY_TUI=line` 으로 강제할 수 있다).
 - `--sandbox <폴더>` 를 주면 레지스트리(PATH)·바탕화면·AppData 대신 그 폴더에만 기록한다 (체험·테스트용).
   `just install-demo` 는 mock vLLM 과 sandbox 로 설치 TUI 를 체험하는 명령이다.
+
+### 화면 프로그램 (`oxy-tui.exe`)
+
+설치 TUI 와 Tweak 의 화면은 `bin/oxy-tui.exe` 가 그린다 (소스는 `installer/oxy-tui`, Rust + Ratatui). 무엇을 묻고 저장할지는 Node 쪽(`installer/*.mjs`)이 정한다.
+다른 구성요소와 마찬가지로 저장소에는 exe 가 없다.
+
+- **받기**: `bash scripts/fetch-bundle.sh` 가 GitHub Release 의 exe 를 받아 sha256 을 확인하고 `bin/oxy-tui.exe` 에 둔다 (`manifest/tools.lock.tsv` 의 `oxy-tui` 행).
+  아직 릴리스가 없는 동안(sha256 이 `-`)에는 받지 않고 알려 준다.
+- **직접 빌드**: Rust(stable, msvc)가 있는 PC 에서 `just tui-build`. Rust 는 빌드할 때만 필요하고 폐쇄망 PC 에는 필요 없다.
+- **없을 때**: 번들링과 설치는 그대로 되고, 설치·설정 TUI 가 줄 입력 모드로 동작한다.
+- **릴리스**: `installer/oxy-tui/Cargo.toml` 의 version 과 같은 태그 `oxy-tui-v<version>` 을 push 하면 `.github/workflows/oxy-tui-release.yml` 이 빌드해 Release 에 올린다.
+  그 뒤 `bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock` 으로 sha256 을 manifest 에 고정한다.
+
+화면 배치와 문구 규칙, 실제 터미널에서 캡처해 확인하는 방법은 [docs/tui-spec.md](docs/tui-spec.md) 에 있다.
 
 수동 설치도 가능하다:
 
@@ -119,19 +135,19 @@ bash scripts/verify.sh            # 오프라인 자가진단 (PASS/WARN/FAIL)
 ## 3) 종합 설정 (Tweak TUI)
 
 설치 폴더의 **`tweak.cmd`** (Git Bash 에서는 `./tweak.sh`, `just tweak`) 로 이미 설치된 항목을 **순서와 상관없이 하나씩** 바꾼다.
-메인 메뉴에 항목마다 현재 값이 보이고, 고른 항목만 바꿔 바로 저장한 뒤 메뉴로 돌아온다 (Esc 는 바꾸지 않고 복귀).
+메인 메뉴에 항목마다 현재 값이 보이고, 선택한 항목만 변경해 바로 저장한 뒤 메뉴로 돌아온다 (Esc 는 변경하지 않고 복귀).
 
 | 항목 | 내용 |
 |---|---|
-| vLLM 주소 · API 키 | 연결 확인 후 저장. 지금 모델이 새 서버에 없으면 이어서 모델을 고른다 |
-| 모델 · 계열 · 컨텍스트 | vLLM 의 모델 목록에서 코딩·범용 모델, 각 모델의 계열(id 로 추정한 값이 기본), 컨텍스트 길이 (연결이 안 되면 직접 입력) |
-| 엔드포인트 세부 설정 | 요청에서 뺄 확장 파라미터, 거부됐을 때 재시도 횟수, 응답 최대 토큰 — 값 하나씩 |
-| GitLab 호스트 · 브라우저 (agent-browser) · Oracle SQLcl · 시스템 등록 | 각각 단독으로 변경 (브라우저는 agent-browser 를 반입한 경우만) |
-| DB 연결 | PostgreSQL · MySQL · MariaDB · SQL Server · Oracle · SQLite 연결 추가·편집·연결 시험·삭제. 연결마다 **usql**(CLI) / **dbhub**(pi MCP 도구) 중 쓸 도구와 읽기 전용 여부를 고른다 |
-| extension 켜기/끄기 | 안전장치·작업 기록·백그라운드 작업 등 |
-| 한도 · 동시 실행 | 출력 상한, 반복 차단 횟수, 세션 넘기기 기준, subagent·bash 동시 실행 수 — 값 하나씩 |
-| 설치된 구성요소 보기 | 계층별 설치 여부·버전과 켜진 skill |
-| 자가진단 | verify 실행 |
+| LLM 연결 | **서버 주소·API 키**(연결 확인 후 저장. 지금 모델이 새 서버에 없으면 이어서 모델 선택) · **모델**(코딩·범용 모델, 컨텍스트 길이, 모델 계열) · **요청 설정**(요청에서 제외할 확장 파라미터, 재시도 횟수, 응답 최대 길이) |
+| DB 연결 | PostgreSQL · MySQL · MariaDB · SQL Server · Oracle · SQLite 연결 추가·편집·연결 테스트·삭제. 연결마다 **usql**(CLI) / **dbhub**(pi MCP 도구) 중 등록할 곳과 읽기 전용 여부를 정한다. SQLcl 을 zip 으로 설치·교체 |
+| GitLab 연결 | 사내 GitLab 호스트 |
+| 브라우저 | agent-browser 가 사용할 브라우저 (agent-browser 를 반입한 경우만) |
+| 확장 기능 | 위험 명령 차단 · 작업 기록 · 백그라운드 작업 등 extension 켜기/끄기 |
+| 스킬 | 설치된 구성요소의 skill 켜기/끄기 |
+| 실행 제한 | 출력 최대 길이, 반복 호출 허용 횟수, 세션 자동 전환 기준, subagent·백그라운드 작업 동시 실행 수 — 값 하나씩 |
+| PATH·바로가기 | PATH · Windows Terminal 프로필 · 바탕화면 바로가기 등록/해제 |
+| 상태 점검 | verify 실행 (결과는 터미널에 남는다) |
 
 입력 칸에서는 붙여넣기(우클릭 · Ctrl+V · Windows Terminal 의 bracketed paste)를 그대로 받는다. 붙여넣은 내용의 줄바꿈은 입력 확정으로 보지 않는다.
 
@@ -161,9 +177,9 @@ pi 는 OpenAI Chat Completions 의 tool calling 을 사용한다. vLLM 서버에
 
 **앞단 게이트웨이 · 다른 OpenAI 호환 엔드포인트**: vLLM 확장 파라미터(`top_k`, `repetition_penalty`, `min_p`,
 thinking 제어용 `chat_template_kwargs`·`reasoning_effort`)를 400 `property '…' is unsupported` 로 거부하는 곳이 있다.
-설치 TUI·Tweak 의 vLLM 단계가 1토큰 요청으로 하나씩 시험해서 거부된 것만 `OXY_VLLM_DROP_PARAMS` 에 적고 요청에서 뺀다.
+설치 TUI·Tweak 의 LLM 연결 단계가 1토큰 요청으로 하나씩 확인해서 거부된 것만 `OXY_VLLM_DROP_PARAMS` 에 적고 요청에서 제외한다.
 
-**모델 계열**: 모델마다 thinking(추론) 제어 방식과 권장 샘플링 값이 다르다. 설치 TUI·Tweak 의 모델 단계에서 고르고(id 로 추정한 값이 기본),
+**모델 계열**: 모델마다 thinking(추론) 제어 방식과 권장 샘플링 값이 다르다. 설치 TUI·Tweak 의 모델 단계에서 선택하고(id 로 추정한 값이 기본),
 `OXY_MODEL_CODER_FAMILY` · `OXY_MODEL_GENERAL_FAMILY` 에 기록된다. 모델 설정은 `scripts/render-config.mjs` 의 `MODEL_FAMILIES` 프리셋 하나에서 나온다.
 
 | 계열 | thinking 제어 | 샘플링 |
@@ -175,7 +191,7 @@ thinking 제어용 `chat_template_kwargs`·`reasoning_effort`)를 400 `property 
 
 서버가 그 계열의 thinking 제어 파라미터를 거부하면 thinking 제어 없이 쓴다 (모델 이름에 "thinking 제어 없음" 표시).
 
-**사용량 제한이 있는 엔드포인트** (외부망 시험용 Groq 등): vLLM 단계가 응답 헤더(`x-ratelimit-limit-tokens`)로 분당 토큰 한도를 보고,
+**사용량 제한이 있는 엔드포인트** (외부망 테스트용 Groq 등): LLM 연결 단계가 응답 헤더(`x-ratelimit-limit-tokens`)로 분당 토큰 한도를 보고,
 30,000 이하이면 맞춤 설정(재시도 · 응답 상한 · subagent 동시 실행 1)을 제안한다. 직접 맞출 때는 Tweak 의 "엔드포인트 세부 설정" 또는 `agent/oxy.env`:
 Groq 무료 등급은 분당 입력 7,000 · 출력 1,000 토큰이라, 하네스 요청(약 5,000토큰) 기준으로 1분에 한 번 정도만 보낼 수 있다.
 
@@ -198,6 +214,8 @@ Groq 무료 등급은 분당 입력 7,000 · 출력 1,000 토큰이라, 하네�
 ```
 install.cmd, install.sh 설치 TUI 실행 (installer/)
 tweak.cmd, tweak.sh     종합 설정 TUI (installer/tweak.mjs)
+installer/oxy-tui/      설치·설정 TUI 의 화면 프로그램 소스 (Rust). 빌드한 exe 는 bin/oxy-tui.exe (저장소에는 없다)
+docs/tui-spec.md        설치·설정 TUI 의 배치 · 문구 규칙과 검증 방법
 oxy, oxy.cmd, env.sh   런처 / 환경
 VERSION                하네스 버전 (설치 TUI 배너에 표시)
 wrappers/              Git Bash 보정 래퍼 (sql, jq, usql, agent-browser)
@@ -226,7 +244,7 @@ pi 는 권한 시스템이 없고 기본 동작이 대형 모델 기준이므로
 | `oxy-prompt-trim` | 매 요청에 실리는 pi 문서 안내(`<docs>`, 약 1,400자)를 한 문단으로 줄임. 문서 경로는 그대로 남아 pi 자체를 물을 때는 읽을 수 있다 | `OXY_PROMPT_TRIM=off` |
 
 컨텍스트 관리(작업 기록 · 세션 넘기기 · compaction 교체)는 아래 oxy-flow 참고.
-테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox).
+테스트: `just test` (단위 테스트 + mock vLLM E2E 9개 시나리오), `just test-installer` (설치 TUI 전체 흐름, sandbox), `just tui-test` (화면 프로그램 단위 테스트, Rust 필요).
 `just demo` 는 mock vLLM 으로 pi TUI 를 직접 써 보는 명령이다 (프롬프트에 `scenario:git-push` 등 입력).
 
 ## 작업 흐름 기록 · 컨텍스트 관리 (`agent/extensions/oxy-flow/`)
@@ -265,13 +283,13 @@ LLM 요약(compaction)에 기대지 않고, **작업 기록 파일**로 컨텍�
   `/jobs` (로그 보기 · psmux 안이면 옆 pane, Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/*.log` (최근 50개 보관).
 - **비대화형(`-p`)**: 대화가 끝나기 전에 남은 작업을 기다렸다가 결과를 모아 넘기고 이어서 진행한다 (`OXY_JOBS_WAIT_MS`, 기본 30분).
 - pi 를 종료하면 실행 중인 작업은 프로세스 트리째 정리한다. 자가진단이 남은 subagent 프로세스를 찾아 알린다.
-- 켜기/끄기·혼잡 감지·동시 실행 수는 Tweak TUI 의 extension 메뉴에서 바꾼다 (`OXY_JOBS=off` 로 끔).
+- 켜기/끄기·혼잡 감지·동시 실행 수는 Tweak 의 확장 기능 · 실행 제한에서 변경한다 (`OXY_JOBS=off` 로 끔).
 
 ## 도구별 skill (`agent/skill-library/` → `agent/skills/`)
 
 skill 이름은 도구가 아니라 **용도** 기준이고, description 은 "무엇을 · 언제 쓰는지"를 구체적으로 적는다.
 원본은 `agent/skill-library/` 에 있고, configure 와 설치 TUI 가 **설치된 구성요소의 skill 만** `agent/skills/` 로 켠다
-(브라우저를 "사용 안 함"으로 고르면 `web-page-automation` 도 끈다). `agent/skills/` 에 직접 넣은 사용자 skill 은 건드리지 않는다.
+(브라우저를 "사용 안 함"으로 선택하면 `web-page-automation` 도 끈다). `agent/skills/` 에 직접 넣은 사용자 skill 은 건드리지 않는다.
 시스템 프롬프트에는 켜진 skill 의 이름과 설명만 들어가고, 모델이 필요할 때 SKILL.md 를 read 로 읽는다.
 명령과 옵션은 번들 버전의 `--help` 와 실제 실행으로 확인한 것만 넣었다.
 

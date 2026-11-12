@@ -13,13 +13,15 @@ NODE="$OXY_HOME/runtime/node/node.exe"
 [[ -x "$NODE" ]] || die "필수 구성요소 node 가 없습니다 → bash scripts/fetch-bundle.sh"
 
 # ---- 구성요소 검사 ----
-missing=() included=() proprietary=() skipped=()
+missing=() included=() proprietary=() skipped=() harness_missing=()
 while IFS=$'\t' read -r name role installed prop version; do
   if [[ $installed == 1 ]]; then
     included+=("$name $version")
     [[ $prop == 1 ]] && proprietary+=("$name")
   elif [[ $role == required ]]; then
     missing+=("$name")
+  elif [[ $role == harness ]]; then
+    harness_missing+=("$name")
   else
     skipped+=("$name")
   fi
@@ -27,6 +29,8 @@ done < <("$NODE" "$(winpath "$OXY_HOME/installer/components.mjs")" status --root
 
 log "포함: ${included[*]/%/,}"
 (( ${#skipped[@]} )) && log "미포함 (선택 항목): ${skipped[*]}"
+# 화면 프로그램이 없어도 번들은 만든다: 폐쇄망 PC 에서 설치·설정 TUI 가 줄 입력 모드(번호 입력)로 동작한다
+(( ${#harness_missing[@]} )) && warn "화면 프로그램 없음: ${harness_missing[*]} → 설치·설정 TUI 가 줄 입력 모드로 동작합니다. 받으려면 bash scripts/fetch-bundle.sh --only=${harness_missing[0]}, 직접 빌드하려면 just tui-build"
 if (( ${#missing[@]} )); then
   die "필수 구성요소 누락: ${missing[*]} → bash scripts/fetch-bundle.sh 로 받은 뒤 다시 실행하세요"
 fi
@@ -50,6 +54,7 @@ log "압축 중: $out"
   "$TAR" -a -c -f "$(winpath "$out")" \
     --exclude="$base/.cache" --exclude="$base/dist" --exclude="$base/.git" --exclude="$base/optional" \
     --exclude="$base/.oxy-selection" \
+    --exclude="$base/installer/oxy-tui/target" --exclude="$base/tests/tui-capture/.state" \
     --exclude="$base/agent/oxy.env" --exclude="$base/agent/sessions" \
     --exclude="$base/agent/settings.json" --exclude="$base/agent/models.json" \
     --exclude="$base/agent/auth.json" --exclude="$base/agent/models-store.json" --exclude="$base/agent/skills" \

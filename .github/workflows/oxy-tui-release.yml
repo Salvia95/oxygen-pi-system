@@ -1,0 +1,80 @@
+# 설치·설정 TUI 의 화면 프로그램(installer/oxy-tui → oxy-tui.exe)을 빌드해 GitHub Release 에 올린다.
+# 저장소에는 exe 를 넣지 않는다. 사용자는 scripts/fetch-bundle.sh 로 이 Release 의 exe 를 받는다 (manifest/tools.lock.tsv 의 oxy-tui 행).
+#
+# 릴리스하는 법
+#   1. installer/oxy-tui/Cargo.toml 의 version 을 올리고 manifest/tools.lock.tsv 의 oxy-tui 행(version · url)을 같은 값으로 맞춘다
+#   2. 태그 oxy-tui-v<version> 을 push 하거나, Actions 에서 이 워크플로를 수동 실행하며 같은 태그 이름을 넣는다
+#   3. Release 가 생기면: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock  (sha256 을 manifest 에 고정) 후 커밋
+name: oxy-tui release
+
+on:
+  push:
+    tags:
+      - "oxy-tui-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "릴리스 태그 (예: oxy-tui-v0.1.0). Cargo.toml 의 version 과 같아야 한다"
+        required: true
+        type: string
+
+# Release 를 만들고 자산을 올리는 데 필요한 권한만
+permissions:
+  contents: write
+
+concurrency:
+  group: oxy-tui-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: installer/oxy-tui
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      # 액션은 커밋 SHA 로 고정한다 (v4.2.2)
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: 태그와 Cargo.toml 의 version 이 같은지 확인
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ "$TAG" != "oxy-tui-v$version" ]]; then
+            echo "::error::태그 $TAG 가 Cargo.toml 의 version($version)과 다릅니다. 태그는 oxy-tui-v$version 이어야 합니다"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # windows-latest 에는 rustup 이 들어 있다. 별도 액션 없이 stable (msvc) 을 쓴다
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version && cargo --version
+
+      - name: 테스트
+        run: cargo test --release --locked
+
+      # C 런타임을 exe 안에 넣는 설정(+crt-static)은 installer/oxy-tui/.cargo/config.toml 에 있다
+      - name: 빌드
+        run: cargo build --release --locked
+
+      - name: sha256
+        run: |
+          mkdir -p dist
+          cp target/release/oxy-tui.exe dist/oxy-tui.exe
+          (cd dist && sha256sum oxy-tui.exe > oxy-tui.exe.sha256 && cat oxy-tui.exe.sha256)
+          ./dist/oxy-tui.exe --version
+
+      # gh 는 실행기에 들어 있다. 같은 태그의 Release 가 이미 있으면 덮어쓰지 않고 실패한다
+      - name: Release 에 올리기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" dist/oxy-tui.exe dist/oxy-tui.exe.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "oxy-tui $VERSION" \
+            --notes "설치·설정 TUI 의 화면 프로그램 (Windows x64, C 런타임 포함). sha256: $(cut -d' ' -f1 dist/oxy-tui.exe.sha256)"

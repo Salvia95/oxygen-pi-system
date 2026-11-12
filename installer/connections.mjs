@@ -102,7 +102,7 @@ export function saveConnections(root, agentDir, conns) {
   if (dbhubConns.length && existsSync(entry)) {
     const env = {};
     for (const c of dbhubConns.filter(withPw)) {
-      // pi 가 서버를 띄울 때 Git Bash 로 실행해 복호화한다 (전역 환경변수에 비밀번호를 두지 않음)
+      // pi 가 서버를 시작할 때 Git Bash 로 실행해 복호화한다 (전역 환경변수에 비밀번호를 두지 않음)
       env[passwordVar(c.id)] = `!"${node}" "${fwd(join(root, "installer", "secrets.mjs"))}" get ${secretKey(c.id)} --agent "${fwd(agentDir)}"`;
     }
     mcp.mcpServers.dbhub = {
@@ -125,7 +125,7 @@ export function writeUsqlConfigWithSecrets(agentDir, outFile) {
   writeFileSync(outFile, usqlYaml(conns, passwords) || "connections: {}\n");
 }
 
-/** usql 로 연결 시험: {ok, output} */
+/** usql 로 연결 테스트: {ok, output} */
 export function probeConnection(root, agentDir, c, password) {
   const tmp = join(tmpdir(), `oxy-usql-${process.pid}-${Date.now()}.yaml`);
   try {

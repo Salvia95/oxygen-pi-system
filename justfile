@@ -61,6 +61,15 @@ install-demo:
 test-installer:
     bash tests/installer-sandbox.sh
 
+# 설치·설정 TUI 의 화면 프로그램(Ratatui) 빌드 → bin/oxy-tui.exe (Rust 필요. 없으면 TUI 는 줄 입력 모드로 동작한다)
+tui-build:
+    cd installer/oxy-tui && PATH="$HOME/.cargo/bin:$PATH" cargo build --release
+    cp installer/oxy-tui/target/release/oxy-tui.exe bin/oxy-tui.exe
+
+# 화면 프로그램 단위 테스트 (글자 폭 · 배너 · 통신 규약)
+tui-test:
+    cd installer/oxy-tui && PATH="$HOME/.cargo/bin:$PATH" cargo test --release
+
 # 종합 설정 TUI (모델·DB 연결·extension 등)
 tweak *args:
     ./runtime/node/node.exe installer/tweak.mjs {{args}}

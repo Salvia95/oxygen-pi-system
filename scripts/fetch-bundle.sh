@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # [인터넷 연결 PC 전용]
-# 반입할 구성요소를 골라 공식 배포처에서 직접 내려받고, sha256 을 검증해 하네스 디렉터리에 배치한다.
+# 반입할 구성요소를 선택해 공식 배포처에서 직접 내려받고, sha256 을 검증해 하네스 디렉터리에 배치한다.
 # 저장소에는 바이너리가 없다. 받은 것을 scripts/package-bundle.sh 로 묶어 본인이 반입한다.
 #
 #   bash scripts/fetch-bundle.sh                         # 선택 화면 (필수 항목은 기본 체크·해제 불가)
@@ -10,6 +10,8 @@
 #   bash scripts/fetch-bundle.sh --only=fd,rg            # 지정한 항목만 다시 받기 (다른 항목은 건드리지 않음)
 #   bash scripts/fetch-bundle.sh --update-lock ...       # 버전 갱신 시: 내려받은 파일의 sha256 으로 lock 갱신
 #
+# 화면 프로그램(oxy-tui.exe, role=harness)은 선택과 상관없이 함께 받는다. 아직 릴리스가 없으면(sha256 "-") 받지 않고 알린다:
+# 그때는 이 PC 에서 빌드한 bin/oxy-tui.exe (just tui-build) 를 쓰거나, 없으면 설치·설정 TUI 가 줄 입력 모드로 동작한다.
 # 선택에서 빠진 구성요소가 이전에 받아져 있으면 지운다 (번들에 원치 않는 파일이 들어가지 않도록).
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -25,7 +27,7 @@ for a in "$@"; do
     --select=*) MODE=select; LIST="${a#--select=}" ;;
     --only=*) MODE=only; LIST="${a#--only=}" ;;
     --accept-license) ACCEPT=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) die "알 수 없는 인자: $a" ;;
   esac
 done
@@ -171,6 +173,33 @@ process_row() { # <name> <version> <url> <sha>
   log "✓ $name $version"
 }
 
+# 하네스 자체의 프로그램 (oxy-tui.exe). 받지 못해도 fetch 를 멈추지 않는다: 없으면 설치·설정 TUI 가 줄 입력 모드로 동작한다
+fetch_harness() { # <name> <version> <url> <sha>. 갱신된 sha 를 NEW_SHA 로 돌려준다
+  local name="$1" version="$2" url="$3" sha="$4" file actual
+  NEW_SHA="$sha"
+  if [[ "$sha" == "-" && $UPDATE_LOCK == 0 ]]; then
+    if [[ -f "$BIN/$name.exe" ]]; then log "· $name: 아직 릴리스가 없습니다. 이 PC 에서 빌드한 bin/$name.exe 를 그대로 씁니다"
+    else warn "$name $version: 아직 릴리스가 없어 받지 않습니다 (manifest 의 sha256 이 '-'). 설치·설정 TUI 는 줄 입력 모드로 동작합니다. Rust 가 있으면 just tui-build 로 빌드할 수 있습니다"; fi
+    return 0
+  fi
+  file="$CACHE/$name-$version.download"
+  if ! (download "$url" "$file"); then
+    rm -f "$file.part"
+    warn "$name $version: 내려받지 못했습니다 ($url). 설치·설정 TUI 는 줄 입력 모드로 동작합니다"
+    return 0
+  fi
+  actual=$(sha256 "$file")
+  if [[ $UPDATE_LOCK == 1 ]]; then
+    [[ "$sha" != "-" && "$sha" != "$actual" ]] && warn "$name: sha256 변경됨 ($sha → $actual)"
+    NEW_SHA="$actual"
+  elif [[ "$sha" != "$actual" ]]; then
+    rm -f "$file"
+    die "$name: sha256 불일치 (기대 $sha, 실제 $actual)"
+  fi
+  cp -f "$file" "$BIN/$name.exe"
+  log "✓ $name $version"
+}
+
 lock_rows() { grep -v '^#' "$LOCK" | grep -v '^$'; }
 REQUIRED=",$(lock_rows | awk -F'\t' '$6=="required"{print $1}' | paste -sd, -),"
 ALLNAMES=",$(lock_rows | cut -f1 | paste -sd, -),"
@@ -205,7 +234,7 @@ else
   for n in $(tr ',' ' ' <<< "$PROPRIETARY"); do
     [[ "$SELECTED" == *",$n,"* ]] || continue
     if [[ $ACCEPT == 1 ]]; then ACCEPTED+="$n,"
-    else die "$n 은(는) 오픈소스가 아닙니다 ($(lock_rows | awk -F'\t' -v n="$n" '$1==n{print $5}')). 약관을 확인한 뒤 --accept-license 를 붙이세요: $(comp license-url "$n")"; fi
+    else die "$n: 오픈소스가 아닙니다 ($(lock_rows | awk -F'\t' -v n="$n" '$1==n{print $5}')). 약관을 확인한 뒤 --accept-license 를 붙이세요: $(comp license-url "$n")"; fi
   done
   if [[ "$MODE" != only ]]; then printf '%s\n' $(tr ',' ' ' <<< "$SELECTED") > "$OXY_HOME/.oxy-selection"; fi
 fi
@@ -216,6 +245,13 @@ new_lock="$(mktemp)"
 while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ -z "$line" || "$line" == \#* ]]; then printf '%s\n' "$line" >> "$new_lock"; continue; fi
   IFS=$'\t' read -r name version url sha license role group <<< "$line"
+  if [[ "$role" == harness ]]; then
+    # 선택과 상관없이 함께 받는다 (--only 는 지정했을 때만)
+    NEW_SHA="$sha"
+    if [[ "$MODE" != only || "$SELECTED" == *",$name,"* ]]; then fetch_harness "$name" "$version" "$url" "$sha"; fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$url" "$NEW_SHA" "$license" "$role" "$group" >> "$new_lock"
+    continue
+  fi
   if [[ "$SELECTED" == *",$name,"* ]]; then
     if [[ "$PROPRIETARY" == *",$name,"* && "$ACCEPTED" != *",$name,"* ]]; then die "$name: 약관 동의 없이 받을 수 없음"; fi
     if [[ "$name" == node && -x "$NODE" && $UPDATE_LOCK == 0 && "$MODE" != only ]]; then

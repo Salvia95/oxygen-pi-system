@@ -15,7 +15,9 @@ const WT_GUID = "{6f1d3c2a-8b4e-4c7d-9a2f-0e5b7c3d1a90}";
 const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "agent/oxy.env", "agent/settings.json",
   "agent/models.json", "agent/auth.json", "agent/models-store.json", "agent/sessions", "agent/skills",
   "agent/usql.yaml", "agent/dbhub.toml", "agent/connections.json", "agent/secrets.json", "agent/mcp.json",
-  "agent/mcp.log", "agent/mcp.log.1", "agent/mcp-auth.json", "agent/jobs", "agent/psmux.conf"];
+  "agent/mcp.log", "agent/mcp.log.1", "agent/mcp-auth.json", "agent/jobs", "agent/psmux.conf",
+  // 화면 프로그램(oxy-tui)의 빌드 산출물과 캡처 도구의 상태 파일 (개발 PC 에만 있다)
+  "installer/oxy-tui/target", "tests/tui-capture/.state"];
 
 /** 하네스 자체 파일 (구성요소 바이너리 외) */
 const HARNESS_FILES = [
@@ -61,7 +63,7 @@ export function createSystem({ root, sandbox = null }) {
       const r = spawnSync("java", ["-version"], { encoding: "utf8" });
       const text = `${r.stderr ?? ""}${r.stdout ?? ""}`;
       const m = text.match(/version "(\d+)(?:\.(\d+))?/);
-      if (!m) return { ok: false, detail: "java 를 찾지 못함" };
+      if (!m) return { ok: false, detail: "찾을 수 없음" };
       const major = m[1] === "1" ? Number(m[2]) : Number(m[1]);
       return { ok: major >= 17, major, detail: text.split(/\r?\n/)[0] };
     },
@@ -84,7 +86,7 @@ export function createSystem({ root, sandbox = null }) {
     },
     isSameDir(a, b) { return resolve(a).toLowerCase() === resolve(b).toLowerCase(); },
 
-    /** extraExclude: 사용자가 고르지 않은 번들 구성요소 (예: runtime/sqlcl, vendor/browsers/chromium) */
+    /** extraExclude: 사용자가 선택하지 않은 번들 구성요소 (예: runtime/sqlcl, vendor/browsers/chromium) */
     async copyBundle(dest, onProgress, extraExclude = []) {
       const skip = [...COPY_EXCLUDE, ...extraExclude.map((e) => e.toLowerCase())];
       const excluded = (src) => {
@@ -237,7 +239,7 @@ export function createSystem({ root, sandbox = null }) {
 
     /** 설치 폴더 삭제. 지금 실행 중인 node.exe 가 그 안에 있으면 종료 후 지우도록 예약한다. */
     removeInstallDir(dir) {
-      if (!existsSync(join(dir, MARKER))) throw new Error(`${dir} 에 설치 표시 파일이 없어 삭제하지 않음`);
+      if (!existsSync(join(dir, MARKER))) throw new Error(`설치 정보 파일이 없는 폴더라서 삭제하지 않았습니다: ${dir}`);
       const running = resolve(process.execPath).toLowerCase().startsWith(resolve(dir).toLowerCase() + sep);
       if (!running) { rmSync(dir, { recursive: true, force: true }); return "deleted"; }
       process.chdir(tmpdir());
