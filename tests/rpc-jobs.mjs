@@ -66,6 +66,16 @@ result.stopReported = Boolean(await waitFor((e) => JSON.stringify(e).includes("M
 const bad = sendControl(runDir, "stop", "job-2");   // 이미 끝난 작업: 실패 결과
 result.monitorStopRejected = Boolean(await poll(() => { const c = readState(runDir)?.control; return c?.seq === bad && !c.ok ? c : null; }, 5000));
 
+// ---------------------------------------------------------------- 실시간 활동 live.json (docs/monitor-tui-spec.md §2)
+const readLive = () => { try { return JSON.parse(readFileSync(join(runDir, "live.json"), "utf8")); } catch { return null; } };
+send({ id: "p4", type: "prompt", message: "scenario:live-tool" });
+const during = await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.tools?.[0]?.summary === "sleep 3; echo live-tool-done" ? l : null; }, 15000);
+result.liveTool = Boolean(during && during.tools[0].name === "bash" && during.agent.running === true && during.pid === pi.pid);
+const after = await poll(() => { const l = readLive(); return l?.agent?.state === "idle" && l.events?.some((e) => e.kind === "tool" && e.text === "bash sleep 3; echo live-tool-done") ? l : null; }, 20000);
+const texts = (after?.events ?? []).map((e) => `${e.kind}:${e.text}`);
+result.liveIdle = Boolean(after && after.tools.length === 0 && texts.includes("user:scenario:live-tool")
+  && texts.some((t) => t.startsWith("job:job-2 시작")) && texts.includes("job:job-2 중지"));
+
 console.log(JSON.stringify(result));
 pi.kill();
 process.exit(Object.values(result).every(Boolean) ? 0 : 1);

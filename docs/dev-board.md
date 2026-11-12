@@ -13,6 +13,7 @@
 | `llm-conn` | `docs/tui-spec.md` §11 LLM 연결 · 작업 수준 | 구현 | – | `llm-conn/3` 회귀 테스트 먼저 (부모) | 기록 없음 | a78dcae b2b1033 | 2026-11-12 (연결 편집으로 `dropParams` 보정) |
 | `anthropic-ws` | `docs/tui-spec.md` §11 "Anthropic 워크스페이스" | 검증 | 사용자: 실제 조직 키 · 설치본 반영 승인 | 키가 생기면 `anthropic-ws/1` `anthropic-ws/2` 실측 (부모) | 2026-11-12 | c424194 | 안 됨 |
 | `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 검증 | 사용자: 설치본 반영 승인 (`flow-session/2`) · 유효한 Claude 키 (`flow-session/3`) | 설치본 반영 요청이 오면 `/2` (부모) | 2026-11-12 | acd4aac | 안 됨 |
+| `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 구현 | 사용자: 2단계 진행 요청 | `monitor-tui/2` 보기 모델 (부모) | 2026-11-12 | 안 됨 | 안 됨 |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -37,6 +38,12 @@
 | `flow-session/2` | 설치본 반영 | 예정 | – | 승인 필요: 실제 설치본, 반영 후 `verify.sh` | – |
 | `flow-session/3` | 실제 Claude Haiku 로 compaction (D4 로 `monitor` 에서 옮김) | 예정 | E2E (mock compaction) | 안 함: 유효한 Claude 키 필요 (저장소의 키는 401), 과금 | – |
 | `flow-session/4` | 보관 기록 최근 50개만 유지 (§1, F1) | 완료 | 단위 `# tests 60` `# pass 60` `# fail 0` (기준 `HEAD 4b3fb08 + 미커밋`, 2026-11-12 부모) | 자동 검증으로 대신 (명세 §2 4) | `docs/flow-spec.md` §1 |
+| `monitor-tui/1` | 실시간 활동 내보내기 `live.json` (§2) | 완료 | 단위 `# tests 62` `# pass 62` `# fail 0` · E2E `E2E 통과` (`liveTool` · `liveIdle`), 기준 `HEAD fba92fc + 미커밋` (2026-11-13 부모) | 대화형 pi 1.5.0 + mock, psmux 100×30: tool → thinking → idle, 최근 이벤트 · `closed` (2026-11-13) | `docs/monitor-tui-spec.md` §2 |
+| `monitor-tui/2` | 보기 모델 (§3) | 예정 | – | – | – |
+| `monitor-tui/3` | `oxy-tui` 모니터 모드 (§3 §4, tui-implementer) | 예정 | – | – | – |
+| `monitor-tui/4` | `monitor.ts` 연결 · 예전 화면 대체 (§4) | 예정 | – | – | – |
+| `monitor-tui/5` | 실제 LLM 실측 (Groq) | 예정 | – | – | – |
+| `monitor-tui/6` | `oxy-tui` 릴리스 · 번들 · 설치본 (승인 필요) | 예정 | – | – | – |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |

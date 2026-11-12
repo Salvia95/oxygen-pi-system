@@ -98,6 +98,10 @@ export default async function (pi: ExtensionAPI) {
         recent: list.filter((j) => j.state !== "running" && j.state !== "queued" && j.endedAt && now - j.endedAt < 120000).length };
     },
     onChange: (fn: () => void) => mgr.onChange(fn),
+    /** 이 실행의 폴더 (state.json · logs/ · oxy-monitor 의 live.json) */
+    runDir: () => mgr.runDir,
+    /** 작업 목록 (oxy-monitor 가 시작 · 끝을 실시간 활동으로 알린다) */
+    jobs: () => mgr.list().map((j) => ({ id: j.id, state: j.state, label: j.label, exitCode: j.exitCode ?? null })),
   };
   const remember = (ctx: any) => { if (ctx?.hasUI) { uiCtx = ctx; interactive = true; } };
   const defaultAgents = envInt("OXY_LLM_MAX_CONCURRENT", 2);

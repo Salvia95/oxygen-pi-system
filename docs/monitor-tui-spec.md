@@ -1,0 +1,169 @@
+# 모니터 화면 개편 명세 (Ratatui)
+
+psmux 오른쪽 열의 jobs · flow 모니터를 화면 프로그램 `oxy-tui`(Ratatui)로 다시 그리고, pi 본 대화가 **지금 무엇을 하고 있는지**를 실시간으로 보인다.
+pane 배치 · 하단 바 · 데이터 형식(jobs `state.json`, flow `flow.json`)은 `docs/monitor-spec.md` 를 그대로 따르고, 이 문서는 그 §5(모니터 프로그램)를 바꾸는 것과 새로 내보낼 실시간 활동만 정한다.
+진행 상태: [진행판](dev-board.md) 의 `monitor-tui` 행.
+
+요청 (사용자, 2026-11-12): flow · todo 모니터가 UI 적으로 정돈되어 있지 않고, 실시간으로 실행되고 있는 flow 가 무엇인지 잘 표시되지 않는다. Ratatui 로 구현하는 명세를 쓴다.
+결정된 사항 (사용자, 2026-11-12)
+- 화면은 Ratatui 로 그린다 (Ink · OpenTUI 는 쓰지 않는다). 설치 · 설정 화면에 쓰는 `oxy-tui` 에 모니터 모드를 더한다.
+- (2026-11-12: "M1~M5 권장안대로 승인하고 1단계 진행해줘") 이 명세를 승인했다. M1 ~ M5 는 모두 (a): Node 가 보기 모델을 보내고 exe 는 그리기만,
+  jobs · flow 두 종류(지금은 flow 맨 위 · jobs 맨 아래), 오른쪽 열 30% 그대로, 최근 구역에 모델 응답은 넣지 않음, 예전 pi-tui 화면은 대체 화면으로 남김.
+
+## 1. 지금의 문제
+
+| 문제 | 원인 |
+| --- | --- |
+| 지금 하는 일이 보이지 않는다 | 모니터가 읽는 상태 파일에 본 대화의 활동이 없다. jobs 는 백그라운드 작업만, flow 는 목표 · 계획 · 커밋만 있다. 응답 생성 중인지, 어떤 도구를 실행 중인지, 얼마나 걸렸는지는 pi 메모리에만 있다 |
+| 진행 중인 할 일이 눈에 띄지 않는다 | 계획 트리에서 `doing` 은 아이콘 하나로만 다르다. 화면이 길면 진행 중인 항목이 아래로 밀려 보이지 않는다 |
+| 화면이 정돈되어 보이지 않는다 | `view.ts` 가 글자 줄을 직접 이어 붙인다. 구역 구분 · 오른쪽 정렬 · 강조가 화면마다 제각각이다 |
+| 화면 규칙 위반 | `⏳`(그림 글자, 2칸) · `✗` 를 쓴다. `docs/tui-spec.md` §6 은 1칸 글자만 허용한다 (`✓ × ! · …`, 진행 중은 점자 `⠋⠙⠹…`) |
+
+좁은 폭이 전제다: 오른쪽 열은 80×24 에서 23칸, 120×30 에서 35칸이다 (`main-pane-width 70%`, `docs/monitor-spec.md` §1).
+
+## 2. 실시간 활동 내보내기 (pi extension)
+
+모니터는 별도 프로세스라 pi 메모리를 볼 수 없다. oxy-monitor extension 이 pi 이벤트를 받아 파일로 내보낸다.
+
+- 파일: `agent/jobs/run-<pid>-<시작 시각 ms>/live.json` — oxy-jobs 의 `state.json` 과 같은 실행 폴더. 대화형 모드에서만 쓴다 (`-p` 는 쓰지 않는다).
+- 쓰는 방식은 `state.json` 과 같다: 원자적 쓰기, 1초에 4번 이하, 변화가 없어도 5초마다 `updatedAt`, pi 를 끝낼 때 `closed: true`.
+
+```jsonc
+{
+  "version": 1, "pid": 12345, "updatedAt": 1763000000000, "closed": false,
+  "agent": { "state": "tool", "since": 1762999990000, "turn": 3, "running": true },   // idle · thinking · tool · compacting. running: agent_start ~ agent_settled
+  "tools": [ { "id": "call_1", "name": "bash", "summary": "npm test", "startedAt": 1762999995000 } ],   // 실행 중인 도구 (병렬이면 여러 개)
+  "model": "oxy-vllm/qwen/qwen3.8-27b",
+  "context": { "percent": 41 },
+  "events": [ { "at": 1762999990000, "kind": "tool", "ok": true, "text": "edit src/login.ts" } ]   // 최근 20개, 오래된 것부터
+}
+```
+
+| pi 이벤트 | 바뀌는 값 |
+| --- | --- |
+| `agent_start` | `agent.state = thinking`, `since` = 지금, `turn` 0 |
+| `turn_start` | `agent.turn` = `turnIndex + 1`, 실행 중인 도구가 없으면 `thinking` |
+| `tool_execution_start` | `tools` 에 더하고 `agent.state = tool` (`since` 는 첫 도구가 시작한 시각) |
+| `tool_execution_end` | `tools` 에서 빼고 `events` 에 `kind: tool` (`ok` = 오류가 아님). 남은 도구가 없으면 `thinking` |
+| `session_before_compact` / `session_compact` · `session_compact_failed` | `compacting` / 앞 상태로 |
+| `agent_settled` | `agent.state = idle`, `tools` 비움 |
+| 사용자 요청 (`before_agent_start`, `messageType` 이 `user`) | `events` 에 `kind: user` (앞 60자) |
+| oxy-flow 변화 (`globalThis[Symbol.for("oxy.flow")]` 의 `onChange`) | 새 커밋 노드 → `kind: commit` (`커밋 n3 feat: …`), 할 일 상태 변화 → `kind: plan` (`p1.2 → done 테스트 작성`) |
+| oxy-jobs 변화 (`oxy.jobs` 의 `onChange`) | 작업 시작 · 끝 → `kind: job` (`job-2 시작`, `job-2 완료 (exit 0)`) |
+
+- 도구 요약(`summary`): `bash` 는 명령 첫 줄, `read` · `edit` · `write` 는 경로, `grep` 은 찾는 말, `subagent` 는 `<agent>: <일 앞부분>`, `flow_plan` 은 `동작 id 상태`, `flow_note` 는 `종류 글`, 그 밖은 비운다(이벤트에는 도구 이름만). 120자에서 자른다.
+- 도구 출력 · 파일 내용 · 모델 응답은 쓰지 않는다. 명령줄은 `state.json` 이 이미 쓰는 것과 같은 수준이다.
+- 컨텍스트 사용률은 pi 상태줄과 같은 값(`ctx.getContextUsage()`)이다.
+- 구현 (1단계, 2026-11-13): `agent/extensions/oxy-monitor/live.ts` (이벤트 → 상태 · 작업/계획 변화 → 이벤트, 순수 함수), `index.ts` 가 pi 이벤트를 받아 `StateWriter`(`fileName: "live.json"`)로 쓴다.
+  oxy-jobs 는 `runDir()` · `jobs()`, oxy-flow 는 `summary()` 에 `items` · `lastNode` 를 더해 내보낸다.
+- 실측 (2026-11-13, 대화형 pi 1.5.0 · mock LLM · psmux 100×30): 계획 · 커밋 시나리오와 3초 걸리는 bash 를 실행하는 동안 `live.json` 이 `tool`(도구 요약 `sleep 3; echo live-tool-done`) → `thinking` → `idle` 로 바뀌고,
+  최근 이벤트에 사용자 요청 · `flow_plan` · `p1 → doing` · `커밋 n1 feat: add g` · `p1 → done` · 도구가 순서대로 남았다. pi 를 끝내면 `closed: true`. 실제 LLM 으로는 5단계에서 본다.
+
+## 3. 화면
+
+화면은 `oxy-tui` 의 모니터 모드가 그린다 (구조는 §4). 기호 · 색 · 말줄임은 `docs/tui-spec.md` §6 을 따른다: 1칸 글자만, 한글 문구에 회색(dim)을 쓰지 않는다, 경로는 가운데를 줄인다.
+
+상태 기호 (jobs · flow 공통): 진행 중 = 점자 스피너(1초에 10번 바뀐다), `·` 예정 · 대기, `✓` 완료, `×` 실패, `!` 막힘, `■` 중지, `-` 뺌.
+
+### flow 화면
+
+위에서 아래로 세 구역. 구역 사이는 가로줄 한 줄.
+
+```
+flow           할 일 2/5        ← 제목 · 진행 (오른쪽 정렬)
+⠹ 도구 실행 중      0:12        ← 지금: 상태 · 경과
+  bash npm test                 ← 지금: 실행 중인 도구 (여러 개면 줄마다)
+⠹ p1.2 테스트 작성               ← 지금: 진행 중인 할 일
+─────────────────────────
+✓ p1 로그인 API        n1        ← 계획 트리
+  ✓ p1.1 라우트        n1
+  ⠹ p1.2 테스트 작성
+· p2 문서
+─────────────────────────
+✓ edit src/login.ts              ← 최근 (새 것이 아래)
+× bash npm test
+✓ 커밋 n1 feat: 라우트
+↑↓ 이동  Enter 펼치기  q 닫기
+```
+
+- **지금** (항상 맨 위, 최대 4줄)
+  - 상태 문구: `대기 중`(입력을 기다림) · `응답 생성 중` · `도구 실행 중` · `compaction 중`. 대기가 아니면 스피너와 경과(`m:ss`, 오른쪽 정렬).
+  - 실행 중인 도구: 한 줄에 하나, `도구 이름 + 요약`. 넘치면 마지막 줄을 `외 2개` 로.
+  - 진행 중인 할 일: 첫 번째 `doing` 할 일(없으면 항목). 계획이 없으면 이 줄을 두지 않는다.
+  - `live.json` 이 없거나 5초 넘게 갱신되지 않으면 `pi 상태를 알 수 없습니다` 한 줄.
+- **계획** (남는 높이를 차지, 스크롤)
+  - 진행 중인 항목 · 할 일은 강조색과 스피너. 화면에 늘 보이도록 스크롤을 맞춘다 (사용자가 `↑↓` 로 움직인 뒤 10초 동안은 사용자 위치를 둔다).
+  - 연결된 커밋은 오른쪽 정렬(`n2 n3`), 폭이 모자라면 뺀다.
+  - 계획이 없고 목표만 있으면 목표 한두 줄, 기록이 없으면 `작업 기록이 없습니다.`
+- **최근** (높이 16줄 이상일 때만, 3~5줄)
+  - `live.json` 의 `events` 를 새 것이 아래로. 실패는 `×` 와 오류색.
+- 펼치기(`Enter`): 할 일 · 커밋을 고르면 그 아래에 결정 · 변경 파일을 들여 쓴다 (지금과 같다).
+
+### jobs 화면
+
+```
+jobs        실행 중 2 · 완료 1
+⠹ bg   npm run build     0:41
+⠹ sub  scout: 로그 찾기   0:12
+✓ bg   npm test          1:03
+─────────────────────────
+⠹ 응답 생성 중            0:05    ← 지금 (한 줄): 본 대화가 무엇을 하는지
+↑↓ 이동  Enter 로그  s 중지  q 닫기
+```
+
+- 목록: 상태 기호 · 종류(`bg` · `sub`) · 이름 · 경과(오른쪽 정렬). 23칸이면 종류를 빼고, 그래도 모자라면 이름을 줄인다.
+- 맨 아래 한 줄에 본 대화의 지금 상태 (flow 를 열지 않아도 보이게).
+- 로그 보기 · 중지 확인(`s` 두 번)은 지금과 같다.
+
+### 폭과 높이
+
+| 창 | 오른쪽 열 | 규칙 |
+| --- | --- | --- |
+| 80×24 | 23칸 | 키 안내는 두 줄로 줄여 쓴다. 커밋 번호 · 종류 열을 뺀다. 최근 구역은 높이 16줄 미만이면 두지 않는다 (모니터 둘이면 한 pane 이 11~12줄) |
+| 120×30 | 35칸 | 모든 열을 보인다 |
+
+모든 줄은 열 폭 안에 들어간다 (넘치면 `…`). 줄이 넘쳐 다음 줄로 밀리는 일이 없어야 한다.
+
+## 4. 프로그램 구조
+
+권장안 (§7 M1 (a)) 기준. 설치 화면과 같은 원칙(로직은 Node, 화면은 Rust)을 따른다.
+
+- `monitor.ts` (Node, 지금 파일): 상태 파일(`state.json` · `flow.json` · `live.json`)을 읽고 보기 모델을 만든다. 형식 해석은 TS 한 곳에만 있다.
+- `oxy-tui.exe --pipe <이름> --mode monitor`: 보기 모델을 받아 그리고, 키를 이벤트로 돌려준다. 스피너 · 경과 시간은 exe 가 시계로 갱신한다 (Node 가 1초마다 보내지 않는다).
+- 통신 규약 (`protocol.rs` 머리말에 더한다)
+  - `{"op":"monitor", kind, title, right, now:[행], sections:[{title, rows:[{key, marker, text, right, indent, emphasis, error, since}]}], keys, selected}` — 보기 전체. 답 없음. 상태가 바뀔 때마다 다시 보낸다.
+  - `marker` 는 `spinner` · `todo` · `done` · `failed` · `blocked` · `stopped` · `dropped` (기호는 exe 가 정한다). `since` 가 있으면 exe 가 경과를 그린다.
+  - 이벤트 `{"event":"key","key":"up|down|enter|esc|s|q"}`, `{"event":"select","key":"<행 key>"}` (선택이 바뀔 때).
+- 예전 화면(pi-tui)은 남긴다: `oxy-tui.exe` 가 없거나 모니터 모드를 모르면(`--mode monitor` 에 오류) 지금의 pi-tui 화면으로 그린다 (§7 M5).
+
+## 5. 확인된 사실
+
+- 오른쪽 열 폭: 80×24 에서 23칸, 120×30 에서 35칸 (`docs/monitor-spec.md` §1 실측).
+- pi 1.5.0 extension 이벤트에 `agent_start` · `agent_settled` · `turn_start` · `tool_execution_start` / `_end` · `session_before_compact` / `session_compact` 가 있다 (`vendor/pi/.../docs/extensions.md`). 실제 순서와 병렬 도구에서의 짝은 1단계에서 실측한다.
+- 점자 스피너는 WT 와 mintty 에서 1칸으로 그려진다 (pi 의 `⠦ Working`, WT 캡처 2026-11-12. mintty 는 1단계 캡처에서 다시 본다).
+
+## 6. 구현 순서와 확인 방법
+
+1. 실시간 활동 내보내기 (§2) — 담당: 부모. 자동 검증: 단위(이벤트 → `live.json` 을 만드는 순수 함수, 병렬 도구 · compaction · 실패 포함) + E2E(`tests/rpc-jobs.mjs` 에 bash 도구 실행 중 `agent.state = tool`, 끝난 뒤 `idle` 과 `events`) / 실측: 대화형 pi + mock 에서 `live.json` 을 보며 상태가 바뀌는지
+2. 보기 모델 (§3) — 담당: 부모. 자동 검증: 단위(`view.ts` 를 보기 모델 함수로: 23 · 35칸 × 높이 11 · 24줄에서 구역 · 줄 수 · 진행 중 항목이 보이는지)
+3. `oxy-tui` 모니터 모드 (§3 §4) — 담당: tui-implementer. 자동 검증: `just tui-test`(23×12 · 35×28 버퍼에 그린 결과), 단위(`unit-tui` 의 통신 규약) / 실측: `tuicap` 으로 pi + mock 이 긴 bash 와 계획을 실행하는 동안 mintty 80×24 · 120×30 캡처 (flow · jobs, 두 모니터를 함께 연 경우), WT 캡처 한 장
+4. `monitor.ts` 연결과 예전 화면 대체 (§4) — 담당: 부모. 자동 검증: 단위(모니터 모드가 없는 exe 에서 pi-tui 화면으로) + E2E / 실측: 3단계 캡처와 같은 조건에서 전환이 보이지 않는지
+5. 실제 LLM 실측 — 담당: 부모. 실측: Groq 연결로 여러 단계 작업(계획 · 편집 · 테스트 · 커밋)을 시키며 모니터가 따라가는지 `tuicap` 으로 확인 (사용자 화면은 쓰지 않는다)
+6. `oxy-tui` 릴리스 · `manifest/tools.lock.tsv` sha, 번들 · 설치본 반영 — 담당: 부모 [승인 필요: push · 릴리스 · 실제 설치본]
+
+완료 조건: 1~6 과, 사용자가 3 · 5 의 캡처를 확인한 것 (확인한 캡처가 이 화면의 명세가 된다).
+
+## 7. 정할 것
+
+- 없음 (M1 ~ M5 는 2026-11-12 사용자가 (a) 로 정했다. 아래는 그때의 선택지와 이유다)
+
+- M1 프로그램 구조 — (a) Node 가 상태 파일을 읽어 보기 모델을 보내고 exe 는 그리기만 (b) exe 가 상태 파일을 직접 읽는다.
+  권장 (a): 상태 파일 형식이 TS 한 곳에서만 해석되어, 형식을 바꿔도 Rust 를 다시 릴리스하지 않아도 된다. 설치 화면과 같은 구조다. 대가는 pane 하나에 프로세스 두 개(Node + exe).
+- M2 모니터 구성 — (a) 지금처럼 jobs · flow 두 종류, "지금"은 flow 맨 위와 jobs 맨 아래 (b) 하나로 합친 `활동` 모니터 (지금 · 계획 · 작업 · 최근).
+  권장 (a): 하단 바와 켜고 끄기(2026-11-12 사용자 결정)를 그대로 쓴다. 23칸에서 네 구역은 너무 좁다.
+- M3 오른쪽 열 폭 — (a) 30% 그대로, 23칸 기준으로 줄여 그린다 (b) 모니터가 열려 있을 때 35%.
+  권장 (a): 사용자가 정한 배치다. 23칸 규칙(§3 폭과 높이)으로 충분한지는 3단계 캡처로 본다.
+- M4 최근 구역에 넣을 것 — (a) 도구 · 커밋 · 작업 · 할 일 변화 · 사용자 요청 (b) (a) + 모델 응답 첫 줄.
+  권장 (a): 응답 내용은 pi 화면에 있고, 모니터는 무엇을 했는지만 보인다.
+- M5 예전 화면(pi-tui) — (a) exe 에 모니터 모드가 없을 때 쓰는 대체 화면으로 남긴다 (b) 지운다.
+  권장 (a): 새 exe 가 들어간 번들이 퍼지기 전까지 예전 번들의 exe 와 섞여 쓰인다.

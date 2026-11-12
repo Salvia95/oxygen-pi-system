@@ -942,3 +942,55 @@ test("oxy-flow: 보관 기록은 최근 50개만 남긴다 (flow-spec F1)", asyn
     assert.equal(pruneArchive(join(dir, "nope"), 50), 0);               // 폴더가 없어도 오류 없음
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("oxy-monitor 실시간 활동: 이벤트 → live 상태 (도구 · 병렬 · compaction · 대기 · 최근 이벤트)", async () => {
+  const L = await import("../agent/extensions/oxy-monitor/live.ts");
+  let t = 1000;
+  let s = L.emptyLive(42, t);
+  const step = (ev: any) => { t += 100; s = L.reduceLive(s, ev, t); };
+  assert.equal(s.agent.state, "idle");
+  step({ type: "user", text: "로그인 API 를\n만들어줘" });
+  step({ type: "agent_start" });
+  assert.deepEqual([s.agent.state, s.agent.running], ["thinking", true]);
+  step({ type: "turn_start", turnIndex: 0 });
+  step({ type: "tool_start", id: "a", name: "bash", input: { command: "\nnpm test\nnpm run lint" } });
+  const toolSince = s.agent.since;
+  step({ type: "tool_start", id: "b", name: "read", input: { path: "src/a.ts" } });   // 병렬
+  assert.equal(s.agent.state, "tool");
+  assert.equal(s.agent.since, toolSince);                                             // 첫 도구가 시작한 시각
+  assert.deepEqual(s.tools.map((x) => `${x.name}:${x.summary}`), ["bash:npm test", "read:src/a.ts"]);
+  step({ type: "tool_end", id: "b", name: "read", ok: true });
+  assert.equal(s.agent.state, "tool");                                               // 아직 bash 가 실행 중
+  step({ type: "compact_start" });
+  assert.equal(s.agent.state, "compacting");
+  step({ type: "compact_end" });
+  assert.equal(s.agent.state, "tool");
+  step({ type: "tool_end", id: "a", name: "bash", ok: false });
+  assert.equal(s.agent.state, "thinking");
+  step({ type: "event", kind: "commit", ok: true, text: "커밋 n1 feat: login" });
+  step({ type: "settled" });
+  assert.deepEqual([s.agent.state, s.agent.running, s.tools.length], ["idle", false, 0]);
+  assert.deepEqual(s.events.map((e) => `${e.kind}:${e.ok ? "ok" : "fail"}:${e.text}`),
+    ["user:ok:로그인 API 를 만들어줘", "tool:ok:read src/a.ts", "tool:fail:bash npm test", "commit:ok:커밋 n1 feat: login"]);
+  for (let i = 0; i < 30; i++) step({ type: "event", kind: "job", ok: true, text: `e${i}` });
+  assert.equal(s.events.length, L.LIVE_EVENTS_MAX);
+  assert.equal(s.events.at(-1)?.text, "e29");
+  step({ type: "context", percent: 41.6 }); assert.equal(s.context.percent, 42);
+  // 요약: 120자에서 자르고, 출력 · 내용은 담지 않는다
+  assert.equal(L.toolSummary("bash", { command: "x".repeat(300) }).length, 120);
+  assert.equal(L.toolSummary("subagent", { agent: "scout", task: "로그 찾기" }), "scout: 로그 찾기");
+  assert.equal(L.toolSummary("write", { path: "a.txt", content: "SECRET" }), "a.txt");
+  assert.equal(L.toolSummary("flow_plan", { action: "update", id: "p1.2", status: "done" }), "update p1.2 done");
+});
+
+test("oxy-monitor 실시간 활동: 작업 · 할 일 · 커밋 변화 → 이벤트", async () => {
+  const L = await import("../agent/extensions/oxy-monitor/live.ts");
+  let r = L.jobEvents(new Map([["job-1", "done"]]), [{ id: "job-1", state: "done", label: "a" }, { id: "job-2", state: "running", label: "npm test" }]);
+  assert.deepEqual(r.events.map((e) => e.text), ["job-2 시작 npm test"]);
+  r = L.jobEvents(r.seen, [{ id: "job-1", state: "done", label: "a" }, { id: "job-2", state: "failed", label: "npm test", exitCode: 1 }, { id: "job-3", state: "stopped", label: "x" }]);
+  assert.deepEqual(r.events.map((e) => `${e.ok}:${e.text}`), ["false:job-2 실패 (exit 1)"]);   // 처음 본 job-3 은 이미 끝나 있어 알리지 않는다
+  let f = L.flowEvents(null, [{ id: "p1", status: "doing", text: "API" }], { id: "n1", title: "base" });
+  assert.equal(f.events.length, 0);                                                  // 처음은 기준만
+  f = L.flowEvents(f.seen, [{ id: "p1", status: "done", text: "API" }, { id: "p2", status: "todo", text: "문서" }], { id: "n2", title: "feat: api" });
+  assert.deepEqual(f.events.map((e) => `${e.kind}:${e.text}`), ["plan:p1 → done API", "commit:커밋 n2 feat: api"]);
+});

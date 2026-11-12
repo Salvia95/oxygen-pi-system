@@ -96,12 +96,13 @@ export class StateWriter {
   private beat: ReturnType<typeof setInterval> | null = null;
   private lastWrite = 0;
   private stopped = false;
-  private snapshot: () => JobsState;
+  private snapshot: () => any;
   private minGapMs: number;
 
-  constructor(runDir: string, snapshot: () => JobsState, opts: { minGapMs?: number; heartbeatMs?: number } = {}) {
+  /** fileName: 같은 실행 폴더에 다른 상태 파일을 쓸 때 (oxy-monitor 의 live.json) */
+  constructor(runDir: string, snapshot: () => any, opts: { minGapMs?: number; heartbeatMs?: number; fileName?: string } = {}) {
     mkdirSync(runDir, { recursive: true });
-    this.file = join(runDir, "state.json");
+    this.file = join(runDir, opts.fileName ?? "state.json");
     this.snapshot = snapshot;
     this.minGapMs = opts.minGapMs ?? 250;
     const hb = opts.heartbeatMs ?? 5000;

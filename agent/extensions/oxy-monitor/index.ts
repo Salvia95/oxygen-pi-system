@@ -16,6 +16,8 @@ import { enabled, harnessHome } from "../_lib/common.ts";
 import { type BarKind, type BarRange, type FlowSummary, type JobsSummary, barItems, barLine, itemAt } from "./bar.ts";
 import { PaneManager, monitorCommand, psmuxRunner } from "./pane.ts";
 import { reassertMouseWhenReady } from "./mouse.ts";
+import { type LiveInput, type LiveState, emptyLive, flowEvents, jobEvents, reduceLive } from "./live.ts";
+import { StateWriter } from "../oxy-jobs/state.ts";
 
 export const MONITOR_KINDS = ["jobs", "flow"] as const;
 export type MonitorKind = (typeof MONITOR_KINDS)[number];
@@ -151,8 +153,70 @@ export default function (pi: ExtensionAPI) {
     return { consume: true };
   };
 
+  // ---------------------------------------------------------------- 실시간 활동 live.json (docs/monitor-tui-spec.md §2)
+  // 본 대화가 지금 무엇을 하는지(상태 · 실행 중인 도구 · 최근 이벤트)를 oxy-jobs 실행 폴더에 쓴다. 대화형만 (hasUI)
+  let live: LiveState | null = null;
+  let liveWriter: StateWriter | null = null;
+  const feed = (ev: LiveInput) => {
+    if (!live) return;
+    live = reduceLive(live, ev, Date.now());
+    liveWriter?.changed();
+  };
+  const modelName = (m: any): string | null => (m?.id ? (m.provider ? `${m.provider}/${m.id}` : String(m.id)) : null);
+  const feedContext = (ctx: any) => {
+    try { feed({ type: "context", percent: ctx?.getContextUsage?.()?.percent ?? null }); } catch { /* 사용률 없음 */ }
+  };
+  const startLive = (ctx: any) => {
+    if (liveWriter || !ctx?.hasUI) return;
+    const jobs = shared<any>("oxy.jobs");
+    const dir: string | undefined = jobs?.runDir?.();
+    if (!dir) return;                       // oxy-jobs 가 꺼져 있으면 모니터도 없다
+    live = emptyLive(process.pid, Date.now());
+    live.model = modelName(ctx.model);
+    liveWriter = new StateWriter(dir, () => live, { fileName: "live.json" });
+    feedContext(ctx);
+    // 작업 시작 · 끝, 할 일 변화 · 새 커밋: 처음 본 상태를 기준으로 그 뒤의 변화만 알린다
+    let jobsSeen = new Map<string, string>((jobs.jobs?.() ?? []).map((j: any) => [j.id, j.state]));
+    let flowSeen: Parameters<typeof flowEvents>[0] = null;
+    const onJobs = () => {
+      const r = jobEvents(jobsSeen, jobs.jobs?.() ?? []);
+      jobsSeen = r.seen;
+      for (const e of r.events) feed({ type: "event", ...e });
+    };
+    const onFlow = () => {
+      const f = shared<any>("oxy.flow")?.summary?.();
+      if (!f) return;
+      const r = flowEvents(flowSeen, f.items ?? [], f.lastNode ?? null);
+      flowSeen = r.seen;
+      for (const e of r.events) feed({ type: "event", ...e });
+    };
+    onFlow();
+    for (const [name, fn] of [["oxy.jobs", onJobs], ["oxy.flow", onFlow]] as const) {
+      const off = shared<{ onChange(fn: () => void): unknown }>(name)?.onChange(fn);
+      if (typeof off === "function") cleanup.push(off as () => void);
+    }
+    cleanup.push(() => { liveWriter?.close(); liveWriter = null; live = null; });
+  };
+  pi.on("agent_start", async () => { feed({ type: "agent_start" }); });
+  pi.on("turn_start", async (e: any) => { feed({ type: "turn_start", turnIndex: Number(e?.turnIndex ?? 0) }); });
+  pi.on("tool_execution_start", async (e: any) => { feed({ type: "tool_start", id: String(e?.toolCallId ?? ""), name: String(e?.toolName ?? ""), input: e?.args }); });
+  pi.on("tool_execution_end", async (e: any) => {
+    feed({ type: "tool_end", id: String(e?.toolCallId ?? ""), name: String(e?.toolName ?? ""), ok: !e?.isError, input: e?.args });
+  });
+  pi.on("session_before_compact", async () => { feed({ type: "compact_start" }); return undefined; });
+  pi.on("session_compact", async () => { feed({ type: "compact_end" }); });
+  pi.on("session_compact_failed", async () => { feed({ type: "compact_end" }); });
+  pi.on("turn_end", async (_e: any, ctx: any) => { feedContext(ctx); });
+  pi.on("agent_settled", async (_e: any, ctx: any) => { feed({ type: "settled" }); feedContext(ctx); });
+  pi.on("model_select", async (e: any) => { feed({ type: "model", model: modelName(e?.model) }); });
+  pi.on("before_agent_start", async (e: any) => {
+    if (e?.messageType === "user") feed({ type: "user", text: String(e?.prompt ?? "") });
+    return undefined;
+  });
+
   pi.on("session_start", async (_e: any, ctx: any) => {
     cwd = ctx.cwd ?? cwd;
+    startLive(ctx);
     if (!ctx.hasUI || (ctx.mode && ctx.mode !== "tui")) return;
     uiCtx = ctx;
     refreshOpen();

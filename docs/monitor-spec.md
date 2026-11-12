@@ -176,6 +176,8 @@ agent/jobs/run-<pid>-<시작 시각 ms>/
 
 ## 5. 모니터 프로그램 (Node 스크립트)
 
+개편 중: 화면을 `oxy-tui`(Ratatui)로 다시 그리고 실시간 활동을 보이는 명세는 `docs/monitor-tui-spec.md` (진행판 `monitor-tui`). 그 명세가 완료되기 전까지는 이 절이 기준이다.
+
 - 위치: `agent/extensions/oxy-monitor/monitor.ts` (같은 폴더의 `index.ts` 가 하단 바와 pane 관리를 맡는 extension).
 - 실행: 번들 Node 로 `.ts` 를 바로 실행한다 (Node 22.23.4 에서 확인, `oxy-flow/store.ts` 를 읽기 전용 `FileFlowEngine` 으로 그대로 불러온다). 화면은 번들의 pi-tui (`TuiAltScreen`, `ProcessTerminal`, `ScrollView`, `SelectList`). 새 바이너리는 없다.
 - 인자: `monitor.ts <jobs|flow> --pi-pid <pid> --cwd <폴더>`

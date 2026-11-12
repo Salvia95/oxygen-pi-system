@@ -62,7 +62,11 @@ export default function (pi: ExtensionAPI) {
       if (!engine) return null;
       const f = engine.load();
       const pg = progress(f.plan);
-      return { hasContent: engine.hasContent(), done: pg.done, total: pg.total, node: f.nodes.at(-1)?.id ?? "" };
+      const last = f.nodes.at(-1);
+      return { hasContent: engine.hasContent(), done: pg.done, total: pg.total, node: last?.id ?? "",
+        // oxy-monitor 의 실시간 활동: 할 일 상태 변화 · 새 커밋을 알린다
+        items: f.plan.flatMap((p) => [p, ...p.children]).map((i) => ({ id: i.id, status: i.status, text: i.text })),
+        lastNode: last ? { id: last.id, title: last.title } : null };
     },
     onChange: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); },
   };
