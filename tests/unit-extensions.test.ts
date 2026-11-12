@@ -424,6 +424,19 @@ test("oxy-monitor 하단 바: 보일 항목 · 한 줄 · 클릭 범위 (monitor
   assert.equal(barLine(items, 0, 30, st).ranges.length, 1);             // 좁으면 들어가는 항목까지만
 });
 
+test("oxy-jobs 중지: ps -W 에서 트리 안 MSYS 프로세스의 그룹 찾기", async () => {
+  const { msysGroupsOf } = await import("../agent/extensions/oxy-jobs/manager.ts");
+  const ps = [
+    "      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND",
+    "  4194308       0       0          4  ?              0   Nov 11 System",
+    "    20889       1   20889      28124  ?         197609 13:48:17 /usr/bin/bash",
+    "    20891   20889   20889      27980  ?         197609 13:48:17 /usr/bin/sleep",
+    "I   30001       1   30001      11111  ?         197609 13:48:17 /usr/bin/bash",
+    "    40000       1   40000      22222  ?         197609 13:48:17 /usr/bin/bash",
+  ].join("\n");
+  assert.deepEqual(msysGroupsOf(ps, new Set([28124, 11111, 4, 99])), ["20889", "30001"]);   // 트리 밖(22222)과 Windows 프로세스(PGID 0)는 빼고, 상태 글자가 붙은 줄도 읽는다
+});
+
 test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결과 · 정리 규칙", async () => {
   const { ControlInbox, sendControl, findRun, pruneRuns, runDirName } = await import("../agent/extensions/oxy-jobs/state.ts");
   const { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync, existsSync } = await import("node:fs");

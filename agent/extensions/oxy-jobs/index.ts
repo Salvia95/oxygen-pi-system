@@ -278,7 +278,7 @@ export default async function (pi: ExtensionAPI) {
           const runs = jobs.map((j, i) => {
             const conn = connectionOf(j.target?.provider);
             return runSubagent(mgr, j, defs[i], items[i].task, ctx.cwd, {
-              parent, target: targets[i], childEnv,
+              parent, target: targets[i], childEnv, shell: shellPath(agentDir),
               slots: mgr.slotsFor(conn?.id, conn ? (conn.maxConcurrent || llmLib.LLM_KINDS[conn.kind]?.maxConcurrent || defaultAgents) : defaultAgents),
               metricsBaseUrl: conn?.kind === "vllm" ? conn.baseUrl : undefined,
               signal: wait ? signal : undefined,

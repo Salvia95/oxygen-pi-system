@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Job, JobManager, Semaphore } from "./manager.ts";
-import { parseVllmMetrics } from "./manager.ts";
+import { killTreeWithMsys, parseVllmMetrics } from "./manager.ts";
 
 /**
  * agent/agents/*.md 하나. provider · model · thinking 은 선택: frontmatter 에 적으면 그 값, 없으면 부모 pi 의 현재 값을 물려받는다
@@ -95,6 +95,7 @@ export interface RunOptions {
   slots?: Semaphore;         // 동시 실행 제한 (연결마다). 없으면 mgr.agentSlots
   metricsBaseUrl?: string;   // 혼잡 감지할 vLLM 주소 (vLLM 연결일 때만)
   childEnv?: Record<string, string>; // 자식에게만 넘기는 환경변수 (LLM 키 · oxy-llm 이 받자마자 지운다)
+  shell?: string;            // Git Bash (멈출 때 손자 MSYS 프로세스를 찾는 데 쓴다)
 }
 
 /** 자식 pi 의 인자: 작업 수준 대상이 있으면 그것, 없으면 agent 정의 → 부모 */
@@ -137,6 +138,8 @@ export async function runSubagent(mgr: JobManager, job: Job, agent: AgentDef, ta
       env: { ...process.env, ...opts.childEnv, OXY_SUBAGENT_DEPTH: String(depth) },
     });
     job.proc = proc;
+    // 멈출 때 자식 pi 의 bash 도구가 띄운 손자 프로세스(MSYS)까지 끝낸다
+    if (opts.shell) { const sh = opts.shell; job.kill = () => killTreeWithMsys(sh, proc); }
     job.usage = { turns: 0, input: 0, output: 0 };
     let buf = "";
     let lastText = "";

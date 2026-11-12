@@ -84,6 +84,49 @@ export function killTree(proc: ChildProcess | undefined) {
 
 const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** Windows 프로세스 root 의 하위 프로세스 pid (root 포함). 실패하면 [root] */
+export function windowsDescendants(root: number): number[] {
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  const kids = new Map<number, number[]>();
+  for (const line of (r.stdout ?? "").split(/\r?\n/)) {
+    const [p, pp] = line.trim().split(/\s+/).map(Number);
+    if (Number.isInteger(p) && Number.isInteger(pp)) kids.set(pp, [...(kids.get(pp) ?? []), p]);
+  }
+  const out = [root];
+  for (let i = 0; i < out.length; i++) for (const c of kids.get(out[i]) ?? []) if (!out.includes(c)) out.push(c);
+  return out;
+}
+
+/** `ps -W` 출력에서 Windows pid 가 winPids 에 든 MSYS 프로세스의 프로세스 그룹 (0 · 비 MSYS 제외) */
+export function msysGroupsOf(psOutput: string, winPids: Set<number>): string[] {
+  const groups = new Set<string>();
+  for (const line of psOutput.split(/\r?\n/).slice(1)) {
+    const c = line.trim().split(/\s+/);
+    if (c.length && !/^\d+$/.test(c[0])) c.shift();   // 상태 표시 글자(I · S 등)가 앞에 붙는 줄
+    const [, , pgid, winpid] = c;
+    if (pgid && pgid !== "0" && /^\d+$/.test(pgid) && winPids.has(Number(winpid))) groups.add(pgid);
+  }
+  return [...groups];
+}
+
+/**
+ * 자식 pi(subagent) 같은 Windows 프로세스 트리를 끝낸다. 그 안의 Git Bash 가 띄운 손자 프로세스는 Windows 부모가 끊겨 있어
+ * taskkill /T 로는 남는다 (2026-11-12 실측: subagent 를 멈춰도 sleep 이 남음). 그래서 트리 안 MSYS 프로세스의 그룹을 먼저 끝낸다.
+ */
+export function killTreeWithMsys(shell: string, proc: ChildProcess | undefined) {
+  if (!proc?.pid || proc.exitCode !== null) return;
+  if (process.platform === "win32") {
+    try {
+      const tree = new Set(windowsDescendants(proc.pid));
+      const ps = spawnSync(shell, ["-c", "ps -W"], { encoding: "utf8", windowsHide: true, timeout: 10000 }).stdout ?? "";
+      const groups = msysGroupsOf(ps, tree);
+      if (groups.length) spawnSync(shell, ["-c", groups.map((g) => `kill -9 -- -${g} 2>/dev/null`).join("; ")], { windowsHide: true, timeout: 10000 });
+    } catch { /* 아래 taskkill 로 */ }
+  }
+  killTree(proc);
+}
+
 /**
  * bash 작업 명령: 먼저 bash 의 MSYS pid 를 pidFile 에 적고 나서 명령을 실행한다.
  * Git Bash(MSYS)는 fork/exec 를 흉내 내느라 손자 프로세스의 Windows 부모가 사라져 있어 taskkill /T 로는 끝나지 않는다

@@ -62,6 +62,14 @@ const SCENARIOS = {
   "sub-level": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env deep check", level: "deep" } }],
   // 자식 pi 의 bash 에 부모가 넘긴 LLM 키(OXY_LLM_INHERIT_KEYS)가 남지 않는지
   "env-keys": [bash("echo inherit=${OXY_LLM_INHERIT_KEYS:-none}"), { text: "checked" }],
+  // subagent 중지: 자식이 오래 걸리는 bash 를 실행하는 중에 부모가 그 작업을 멈춘다 (손자 프로세스가 남지 않아야 한다)
+  "env-sleep": [bash("echo child-sleep-start; sleep 41; echo child-sleep-never"), { text: "slept" }],
+  "sub-stop": [
+    { tool: "subagent", args: { agent: "scout", task: "scenario:env-sleep long", level: "light", wait: false } },
+    bash("sleep 6"),
+    { tool: "background", args: { action: "stop", id: "job-1" } },
+    { text: "stopped-subagent" },
+  ],
   "sub-keys": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env-keys look", level: "light" } }],
   // 여러 연결: deep 은 Claude 연결로 (E2E 가 llm.json 에 연결 claude 를 더한 뒤)
   "sub-claude": [{ tool: "subagent", args: { tasks: [{ agent: "scout", task: "claude-task review", level: "deep" }, { agent: "scout", task: "scenario:env vllm-task", level: "light" }] } }],

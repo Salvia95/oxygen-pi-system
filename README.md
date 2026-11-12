@@ -306,7 +306,8 @@ LLM 요약(compaction)에 기대지 않고, **작업 기록 파일**로 컨텍�
 - **가시성**: 입력창 위 작업 패널(`⏳ job-3 bash  npm test  1m12s  마지막 출력`), 상태줄(`jobs 2 · agents 1/2`),
   `/jobs` (로그 보기 · psmux 안이면 옆 pane, Windows Terminal 이면 옆 창에 `tail -f` 로 로그 열기 · 중지). 로그는 `agent/jobs/run-<pid>-<시작 시각>/logs/` (끝난 실행은 최근 20개 보관).
 - **비대화형(`-p`)**: 대화가 끝나기 전에 남은 작업을 기다렸다가 결과를 모아 넘기고 이어서 진행한다 (`OXY_JOBS_WAIT_MS`, 기본 30분).
-- pi 를 종료하면 실행 중인 작업은 프로세스 트리째 정리한다. 자가진단이 남은 subagent 프로세스를 찾아 알린다.
+- pi 를 종료하거나 작업을 멈추면 프로세스 트리째 정리한다. Git Bash(MSYS)가 띄운 손자 프로세스는 Windows 부모 관계가 끊겨 `taskkill /T` 로 남으므로,
+  bash 작업은 시작할 때 적어 둔 MSYS 프로세스 그룹을, subagent 는 자식 pi 트리 안의 MSYS 프로세스 그룹(`ps -W`)을 먼저 끝낸다. 자가진단이 남은 subagent 프로세스를 찾아 알린다.
 - 켜기/끄기·혼잡 감지·동시 실행 수는 Tweak 의 확장 기능 · 실행 제한에서 변경한다 (`OXY_JOBS=off` 로 끔).
 
 ## 도구별 skill (`agent/skill-library/` → `agent/skills/`)

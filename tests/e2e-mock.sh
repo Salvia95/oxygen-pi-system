@@ -139,6 +139,14 @@ chk "동시 실행 제한 1: 자식이 하나씩 순서대로 ($o1)"    '[[ "$o1
 conc 3; run sub-par; o3=$(order); conc 2
 chk "동시 실행 제한 3: 자식 3개가 함께 시작 ($o3)"      '[[ ${#o3} -eq 6 && $(printf %s "${o3:0:3}" | fold -w1 | sort -u | wc -l) -eq 3 ]]'
 
+# subagent 를 멈추면 자식 pi 의 bash 도구가 띄운 손자 프로세스(MSYS)도 끝난다 (예전: taskkill /T 로는 sleep 이 남음)
+sleeps() { powershell.exe -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='sleep.exe'\" | Where-Object { \$_.CommandLine -like '*sleep* 41*' -or \$_.CommandLine -like '*sleep.exe 41*' }).Count" | tr -d '\r'; }
+s0=$(sleeps)
+run sub-stop
+sleep 2; s1=$(sleeps)
+chk "subagent 중지: 손자 프로세스까지 끝남 (sleep 41: $s0 → $s1)" '[[ "$out" == *"(scout: scenario:env-sleep long) stopped"* && "$s1" == "$s0" ]]'
+powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='sleep.exe'\" | Where-Object { \$_.CommandLine -like '*41*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1 || true
+
 # ---- LLM 연결 여러 개 · 작업 수준 (docs/tui-spec.md §11) ----
 # 자식 pi 의 bash 에 부모가 넘긴 키가 남지 않는다 (oxy-llm 이 받자마자 process.env 에서 지운다)
 run sub-keys
