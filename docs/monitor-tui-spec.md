@@ -170,6 +170,8 @@ jobs        실행 중 2 · 완료 1
 - 실측에서 찾아 고친 것 (5단계, 2026-11-13): 모니터가 `flow.json` 을 1초마다 읽는 동안 oxy-flow 가 그 파일을 쓰면 Windows 의 이름 바꾸기가 EPERM 으로 실패해, `flow_plan` 도구가 두 번 실패했다 (모델이 다시 호출해 반영).
   oxy-flow 의 `writeAtomic` 은 다시 시도하지 않았고, oxy-jobs 는 바로 한 번만 다시 시도했다. 두 곳 모두 `_lib/common.ts` 의 `writeAtomic` (EPERM · EACCES · EBUSY 면 5 ~ 100ms 쉬며 최대 20번, 합쳐 약 1초) 으로 바꿨다.
   재현: 다른 프로세스가 쉬지 않고 읽는 동안 이름 바꾸기 2257번 중 756번 실패. 단위 시험(읽는 프로세스를 띄우고 300번 쓰기)은 예전 방식에서 FAIL, 고친 뒤 PASS. 고친 뒤 두 번째 실측에서 실패한 도구 0개.
+- 반영 (6단계, 2026-11-13, 사용자 승인): 릴리스 `oxy-tui-v0.2.0` (GitHub Actions, sha256 `ef141d11…547d47` 를 `manifest/tools.lock.tsv` 에 고정), 번들 `oxygen-pi-20261113.zip`,
+  설치본 업데이트 (실행 중이던 설치본 psmux 세션은 사용자 승인 후 종료). 설치본 `verify.sh` `PASS 47 / WARN 1 / FAIL 0`, 설치본 pi 에서 `/monitor flow` 가 oxy-tui 0.2.0 모니터로 열린다.
 
 ## 5. 확인된 사실
 

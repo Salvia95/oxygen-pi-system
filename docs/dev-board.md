@@ -11,9 +11,9 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `monitor` | `docs/monitor-spec.md` 모니터 pane · 하단 바 | 검증 | 부모: `monitor/4` 캡처 기록 | 기록이 있으면 §5 에 적고 `완료`, 없으면 tuicap 캡처 (tui-implementer) | 2026-11-12 | fc5fee7 b141f3c a3a689b ca8dd05 3a8d810 e6d8475 46a5128 b2b1033 f2b2878 | 기록 없음 |
 | `llm-conn` | `docs/tui-spec.md` §11 LLM 연결 · 작업 수준 | 구현 | – | `llm-conn/3` 회귀 테스트 먼저 (부모) | 기록 없음 | a78dcae b2b1033 | 2026-11-12 (연결 편집으로 `dropParams` 보정) |
-| `anthropic-ws` | `docs/tui-spec.md` §11 "Anthropic 워크스페이스" | 검증 | 사용자: 실제 조직 키 · 설치본 반영 승인 | 키가 생기면 `anthropic-ws/1` `anthropic-ws/2` 실측 (부모) | 2026-11-12 | c424194 | 안 됨 |
-| `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 검증 | 사용자: 설치본 반영 승인 (`flow-session/2`) · 유효한 Claude 키 (`flow-session/3`) | 설치본 반영 요청이 오면 `/2` (부모) | 2026-11-12 | acd4aac | 안 됨 |
-| `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 구현 | 사용자: 3 · 4 · 5단계 캡처 확인 | `monitor-tui/6` 릴리스 · 번들 · 설치본 (승인 필요) | 2026-11-12 | 96de47e d5e23e7 2de77ce d096c67 | 안 됨 |
+| `anthropic-ws` | `docs/tui-spec.md` §11 "Anthropic 워크스페이스" | 검증 | 사용자: 실제 조직 키 · 설치본 반영 승인 | 키가 생기면 `anthropic-ws/1` `anthropic-ws/2` 실측 (부모) | 2026-11-12 | c424194 | 2026-11-13 (`oxygen-pi-20261113.zip`) |
+| `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 검증 | 사용자: 과금 실측 요청 (`flow-session/3`) | 요청이 오면 `/3` 설치본의 하이쿠 키로 (부모) | 2026-11-12 | acd4aac | 2026-11-13 (`oxygen-pi-20261113.zip`) |
+| `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 검증 | 사용자: 3 · 4 · 5단계 캡처 확인 | 확인되면 `완료` (부모) | 2026-11-12 | 96de47e d5e23e7 2de77ce d096c67 f9ce774 5271186 | 2026-11-13 (`oxygen-pi-20261113.zip`) |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -35,15 +35,15 @@
 | `anthropic-ws/2` | 상태 점검 PASS · FAIL 줄 | 검증 | E2E (커밋 당시, 부모 보고) | 안 함: 실제 조직 키 (대기) | c424194 |
 | `anthropic-ws/3` | 화면: 설치 LLM 단계 · Tweak 추가 · 편집 (결정 2건 반영) | 완료 | 단위 59 · Rust 18 · 설치 흐름 59 (tui-implementer 보고) | 캡처 `01-install-ws-list` · `14-install-review-summary` 를 부모가 확인 (2026-11-12) | c424194 `docs/tui-spec.md` §11 |
 | `flow-session/1` | 작업 기록을 세션 단위로 (§1) | 검증 | 단위 · E2E (커밋 당시). 2026-11-12 harness-engineer 가 `just test` 로 다시 실행: 통과 (`dev-process/1` 행) | 대화형 pi 1.5.0 + mock LLM: 새로 시작 → 빈 기록, `/resume` → 되살림. 실제 LLM 아님 | acd4aac `docs/flow-spec.md` §1 |
-| `flow-session/2` | 설치본 반영 | 예정 | – | 승인 필요: 실제 설치본, 반영 후 `verify.sh` | – |
-| `flow-session/3` | 실제 Claude Haiku 로 compaction (D4 로 `monitor` 에서 옮김) | 예정 | E2E (mock compaction) | 안 함: 유효한 Claude 키 필요 (저장소의 키는 401), 과금 | – |
+| `flow-session/2` | 설치본 반영 | 완료 | 해당 없음 (실측만) | 2026-11-13 `oxygen-pi-20261113.zip` 으로 업데이트 (사용자 승인), `verify.sh` `FAIL 0` (`monitor-tui/6` 과 같은 업데이트) | acd4aac 5271186 |
+| `flow-session/3` | 실제 Claude Haiku 로 compaction (D4 로 `monitor` 에서 옮김) | 예정 | E2E (mock compaction) | 안 함: 과금. 설치본의 하이쿠 키는 유효 (2026-11-13 `llm-check` PASS, 저장소의 키는 401) | – |
 | `flow-session/4` | 보관 기록 최근 50개만 유지 (§1, F1) | 완료 | 단위 `# tests 60` `# pass 60` `# fail 0` (기준 `HEAD 4b3fb08 + 미커밋`, 2026-11-12 부모) | 자동 검증으로 대신 (명세 §2 4) | `docs/flow-spec.md` §1 |
 | `monitor-tui/1` | 실시간 활동 내보내기 `live.json` (§2) | 완료 | 단위 `# tests 62` `# pass 62` `# fail 0` · E2E `E2E 통과` (`liveTool` · `liveIdle`), 기준 `HEAD fba92fc + 미커밋` (2026-11-13 부모) | 대화형 pi 1.5.0 + mock, psmux 100×30: tool → thinking → idle, 최근 이벤트 · `closed` (2026-11-13) | `docs/monitor-tui-spec.md` §2 |
 | `monitor-tui/2` | 보기 모델 (§3) | 완료 | 단위 `# tests 64` `# pass 64` `# fail 0` (23 · 35칸 × 11 · 24줄), 기준 `HEAD 96de47e + 미커밋` (2026-11-13 부모) | 자동 검증으로 대신 (명세 §6 2) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/3` | `oxy-tui` 모니터 모드 (§3 §4, tui-implementer) | 완료 | `just tui-test` `33 passed; 0 failed` · 단위 `# pass 66` `# fail 0` (부모가 다시 실행, 기준 `HEAD d5e23e7 + 미커밋`, 2026-11-13) | mintty 80×24 · 120×30 · WT 캡처, 설치 화면 경로 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/4` | `monitor.ts` 연결 · 예전 화면 대체 (§4) | 완료 | 단위 `# tests 67` `# pass 67` `# fail 0` · E2E `E2E 통과` (새 검사 `liveHeartbeat`: 고치기 전 FAIL · 고친 뒤 PASS), 기준 `HEAD 2de77ce + 미커밋` (2026-11-13 부모) | 대화형 pi + mock, mintty 120×30 · 80×24 실시간 갱신, pi-tui 대체 화면 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/5` | 실제 LLM 실측 (하이쿠, 사용자 요청) | 완료 | 단위 `# pass 68` `# fail 0` (새 시험 `writeAtomic` 동시 읽기: 고치기 전 FAIL · 고친 뒤 PASS) · E2E `E2E 통과`, 기준 `HEAD d096c67 + 미커밋` (2026-11-13 부모) | 대화형 pi + claude-haiku-5-5, mintty 120×30 · 80×24: 계획 · 편집 · background · 커밋을 모니터가 따라감, 고친 뒤 실패 도구 0 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
-| `monitor-tui/6` | `oxy-tui` 릴리스 · 번들 · 설치본 (승인 필요) | 예정 | – | – | – |
+| `monitor-tui/6` | `oxy-tui` 릴리스 · 번들 · 설치본 (승인 필요) | 완료 | 릴리스 워크플로 `oxy-tui-v0.2.0` 성공 (cargo test 33 통과), sha256 `ef141d11…547d47` 를 `manifest/tools.lock.tsv` 에 고정, 받은 exe 로 단위 `# pass 68` `# fail 0` (2026-11-13 부모) | 설치본 업데이트 후 `verify.sh` `PASS 47 / WARN 1 / FAIL 0` (WARN 은 SQLcl 미설치), 설치본 pi 에서 `/monitor flow` 가 oxy-tui 0.2.0 으로 열림 (2026-11-13) | 5271186 `docs/monitor-tui-spec.md` |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |
