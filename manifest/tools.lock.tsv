@@ -26,4 +26,4 @@ sqlcl	26.3.1.301.1413	https://download.oracle.com/otn_software/java/sqldeveloper
 dbhub	1.5.0	@bytebase/dbhub@1.5.0	npm-lock	MIT	optional	database
 # 화면 프로그램: 이 저장소의 installer/oxy-tui 를 GitHub Actions(.github/workflows/oxy-tui-release.yml)가 빌드해 Release 에 올린 것.
 # 새 버전을 릴리스하면 version · url 을 올리고 sha256 을 다시 고정한다: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock
-oxy-tui	0.1.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.1.0/oxy-tui.exe	4e347ec7fde9bfd448afcede521b1e36422d26a19240061141aea0e3a246fbb4	Apache-2.0	harness	core
+oxy-tui	0.2.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.2.0/oxy-tui.exe	ef141d11679a4d3ec2cfd2ab76a94aaed7a597886409a6d17e3e0a1549547d47	Apache-2.0	harness	core
