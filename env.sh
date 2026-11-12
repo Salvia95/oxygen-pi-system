@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# oxygen-pi-system 런타임 환경. Git Bash 에서 `source env.sh` 하면 번들 도구를 바로 쓸 수 있다.
+# oxygen-pi-system 런타임 환경. Git Bash 에서 `source ./env.sh` 하면 번들 도구를 바로 쓸 수 있다.
 # oxy 런처도 내부적으로 이 파일을 source 한다. (set -e 등 셸 옵션은 바꾸지 않음)
 
 _oxy_src="${BASH_SOURCE[0]:-$0}"

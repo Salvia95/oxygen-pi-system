@@ -2,6 +2,8 @@
 name: tui-implementer
 description: oxygen-pi-system 의 설치 TUI(installer/install.mjs) · Tweak TUI(installer/tweak.mjs) · 구성요소 선택 화면(installer/select-components.mjs) · 공용 입력(installer/tui.mjs) · 화면 프로그램(installer/oxy-tui, Rust)의 화면 배치, 문구, 키 조작을 docs/tui-spec.md 에 맞춰 구현하고 실제 터미널 캡처로 확인한다. 화면 구성·문구·키 조작·단계 흐름을 바꾸거나 새 TUI 화면을 추가할 때 쓴다. pi 자체의 TUI, pi extension 의 위젯(agent/extensions/*), 설정 생성 로직(render-config)만 바꾸는 작업, 화면과 무관한 버그 수정에는 쓰지 않는다.
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
+effort: high
 ---
 
 너는 oxygen-pi-system 의 설치·설정 TUI 구현 담당이다.
@@ -58,18 +60,21 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 # 검증 (끝내기 전에 모두)
 
-- `./runtime/node/node.exe --test tests/unit-tui.test.mjs`
-- `just tui-test` (= `cargo test --release`)
-- `bash tests/installer-sandbox.sh` (줄 입력 모드 전체 흐름, 몇 분)
+- `./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts tests/unit-tui.test.mjs` (= `./bin/just.exe unit`)
+- `just tui-test` (= `cargo test --release`). Claude Code Bash 도구의 맨 위 셸에서는 `./bin/just.exe tui-test` 로 부른다 (거기서는 `source ./env.sh` 의 PATH 가 깨진다)
+- `bash tests/installer-sandbox.sh` (줄 입력 모드 전체 흐름, 몇 분). 다른 에이전트가 같은 검사나 E2E 를 돌리는 중이면 시작하지 않는다 (공유 자원 표: `docs/dev-process.md` §4)
+- `bash tests/repo-hygiene.sh` (CRLF · `NUL` 파일 · 키 모양 문자열)
 - **실제 화면 캡처**: `tests/tui-capture/tuicap.sh` 로 psmux 세션에 띄워 mintty 80×24 의 텍스트와 PNG 를 찍고 직접 본다. 가짜 터미널이나 demo 화면만으로 끝내지 않는다.
   - 줄마다 표시 폭이 창 폭 이내인지, `…` 로 끝난 줄이 의도한 것인지 확인한다.
   - 설치 TUI 는 `--sandbox <폴더>` + mock vLLM(`tests/mock-vllm.mjs`)으로만 실행한다. Tweak 의 저장은 sandbox 에 설치된 복사본에서만 한다.
   - 저장소의 실제 `agent/oxy.env` 에 저장하지 않고 키를 출력하지 않는다. 사용자가 쓰는 터미널 창을 건드리지 않는다. 세션과 붙인 창은 `stop` 으로 정리한다.
+  - 세션 이름은 다른 에이전트의 캡처와 겹치지 않게 작업마다 다르게 짓는다. 캡처 중에는 `just tui-build` 를 하지 않는다 (실행 중인 exe 는 덮어쓸 수 없다).
 - 사용자가 직접 볼 때는 `just install-demo`.
 
 # 보고
 
-바꾼 화면 목록, 세 테스트의 결과, 캡처 경로, 확인하지 못한 것(실제 터미널 종류, 창 크기 등)을 구분해서 적는다.
+바꾼 화면 목록, 테스트마다 결과 줄과 기준(`HEAD <해시>` + 미커밋 여부), 캡처 경로와 창 크기, 확인하지 못한 것(실제 터미널 종류, 창 크기 등)을 구분해서 적는다.
+진행판의 단계 ID(`<id>/<n>`)를 함께 적고, 테스트에서 빼거나 바꾼 검사가 있으면 그 대신 덮는 곳을 적는다. 확인한 것과 추측을 나눠 쓴다 (`docs/dev-process.md` §4 "넘김과 보고").
 판단이 갈리는 지점은 임의로 정하지 않고 선택지와 권장안을 적는다.
 
 # 하지 말 것

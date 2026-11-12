@@ -42,8 +42,13 @@ e2e:
 unit:
     ./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts tests/unit-tui.test.mjs
 
-# 전체 테스트 (단위 + E2E)
-test: unit e2e
+# 전체 테스트 (위생 · 진행판 + 단위 + E2E)
+test: hygiene unit e2e
+
+# 저장소 위생 검사(tests/repo-hygiene.sh) + 진행판 검사(docs/dev-board.md 의 상태 · 증거)
+hygiene:
+    bash tests/repo-hygiene.sh
+    ./runtime/node/node.exe tests/board-check.mjs
 
 # 실제 vLLM 없이 mock 서버로 TUI 체험 (프롬프트에 scenario:git-push 등 입력)
 demo *args:

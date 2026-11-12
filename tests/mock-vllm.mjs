@@ -63,7 +63,8 @@ const SCENARIOS = {
   // 자식 pi 의 bash 에 부모가 넘긴 LLM 키(OXY_LLM_INHERIT_KEYS)가 남지 않는지
   "env-keys": [bash("echo inherit=${OXY_LLM_INHERIT_KEYS:-none}"), { text: "checked" }],
   // subagent 중지: 자식이 오래 걸리는 bash 를 실행하는 중에 부모가 그 작업을 멈춘다 (손자 프로세스가 남지 않아야 한다)
-  "env-sleep": [bash("echo child-sleep-start; sleep 41; echo child-sleep-never"), { text: "slept" }],
+  // MOCK_SLEEP: 실행마다 다른 표식 (예 41.12345). E2E 가 이 표식의 sleep 만 세고 정리해서 다른 실행에 간섭하지 않는다
+  "env-sleep": [bash(`echo child-sleep-start; sleep ${process.env.MOCK_SLEEP ?? "41"}; echo child-sleep-never`), { text: "slept" }],
   "sub-stop": [
     { tool: "subagent", args: { agent: "scout", task: "scenario:env-sleep long", level: "light", wait: false } },
     bash("sleep 6"),

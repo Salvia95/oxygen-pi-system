@@ -225,6 +225,8 @@ cmd · PowerShell 프로필에는 아이콘을 지정하지 않는다 (Windows T
 
 ## 11. LLM 연결과 작업 수준
 
+진행 상태: [진행판](dev-board.md) 의 `llm-conn` 행.
+
 LLM 연결은 여러 개를 함께 등록해 쓴다 (사내 vLLM 여러 대, 외부망 개발·테스트용 OpenAI 호환 서비스, Anthropic Claude).
 연결마다 등록한 모델을 **기본 모델**(대화하는 pi)과 **작업 수준**(subagent 에게 맡기는 일의 수준)에 배정한다.
 본 모델은 일을 맡길 때 agent 와 작업 수준을 함께 정하고, 작업 수준이 연결 · 모델 · thinking(effort)을 정한다.
@@ -338,6 +340,13 @@ LLM 연결 하위 메뉴는 DB 연결과 같은 구성이다. 한 항목을 선�
 
 ### Anthropic 워크스페이스 (조직 API 키)
 
+진행 상태: [진행판](dev-board.md) 의 `anthropic-ws` 행.
+
+요청 (사용자, 2026-11-12): 조직 API 키는 `anthropic-workspace-id` 헤더가 필요하다.
+결정된 사항 (사용자, 2026-11-12: "워크스페이스 결정은 권장안대로 반영하고 커밋해줘")
+- 설치 확인 단계 요약의 워크스페이스는 `LLM 연결` 행 끝이 아니라 따로 한 행으로 둔다.
+- 워크스페이스 선택 화면의 설명은 74칸 안에 들어가게 두 문장으로 나눈다.
+
 공식 문서([인증 · 워크스페이스 선택](https://platform.claude.com/docs/ko/manage-claude/authentication#select-a-workspace), 2026-11-12 확인):
 특정 워크스페이스용으로 만든 키는 워크스페이스 ID 없이 쓰고, **워크스페이스가 지정되지 않은 키는 모든 요청에 `anthropic-workspace-id` 헤더**가 있어야 한다.
 헤더가 없으면 HTTP 400 `This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header …`,
@@ -361,6 +370,16 @@ ID 는 Claude Console 의 Settings → Workspaces 화면 **ID** 열에 있고 `w
   `LLM 연결` 행 끝에 붙이면 80칸에서 줄이 넘어가고 ` · ` 를 세 번 잇게 되어 따로 둔다 (2026-11-12 캡처로 확인).
 - 상태 점검: 묶음 제목 아래 첫 줄에 워크스페이스가 있으면 `PASS 워크스페이스 wrkspc_…`. 400(미지정)으로 실패하면
   FAIL `이 API 키는 워크스페이스가 지정되지 않았습니다` + `→ tweak.cmd의 LLM 연결에서 이 연결을 편집해 워크스페이스를 선택하세요`.
+
+구현 순서와 확인 방법
+1. `workspaceId` · 모든 요청의 헤더 · 오류 판정 (`scripts/llm-connections.mjs`, oxy-llm) — 자동 검증: 단위 + E2E / 실측: 실제 조직 키 [승인 필요: 과금 LLM]
+2. 상태 점검의 PASS · FAIL 줄 (`scripts/llm-check.mjs`) — 자동 검증: E2E / 실측: 실제 조직 키로 `verify.sh`
+3. 화면: 설치 LLM 단계 · Tweak 추가 · 편집 — 자동 검증: 단위 + `just tui-test` + `tests/installer-sandbox.sh` / 실측: `tests/tui-capture/tuicap.sh` mintty 80×24 캡처
+
+완료 조건: 모든 단계 + 실제 조직 키로 모델 목록 · 대화 · 상태 점검, 설치본 반영 뒤 `verify.sh` [승인 필요: 실제 설치본].
+
+정할 것
+- 없음.
 
 ### 상태 점검 (`verify.sh` 의 LLM 절)
 

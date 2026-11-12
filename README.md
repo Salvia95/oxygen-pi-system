@@ -5,6 +5,7 @@
 
 이 저장소는 **하네스(pi 설정·extension·skill·스크립트·설치 TUI)만** 제공하고 바이너리는 배포하지 않는다.
 필요한 바이너리는 각 사용자가 인터넷 PC 에서 공식 배포처로부터 **직접 내려받아 번들로 묶은 뒤, 본인이 반입**한다.
+개발 과정은 `docs/dev-process.md`, 진행 상태는 `docs/dev-board.md`, 명세는 `docs/tui-spec.md` · `docs/monitor-spec.md` · `docs/flow-spec.md` 에 있다.
 
 ```
 [인터넷 PC]  fetch (구성요소 선택 → 직접 다운로드·검증)  →  package (필수 구성요소 검사 → zip)

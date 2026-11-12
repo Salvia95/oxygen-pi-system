@@ -9,14 +9,16 @@ pi 가 만든 첫 요청 본문을 그대로 쓰고 사용자 메시지만 28개
 - `apply-desc.mjs` — `candidates.json` 의 description 을 skill 폴더의 SKILL.md 에 적용
 - 문장 종류: P = 그 skill 을 읽어야 함 · N = 그 skill 을 읽으면 안 됨(alt 가 있으면 그쪽을 읽어야 함) · G = 아무 skill 도 필요 없음
 
-## 진행 상황 (2026-11-10 중단)
+## 진행 상황 (2026-11-12 중단)
 
-시험 모델 Groq `qwen/qwen3.8-27b` 의 긴 주기 사용량 제한(429 대기 15~40분)과
-Claude Code 의 메모리 부족 정리로 중단. 이어서 하면 before #12 부터 시작한다.
+진행 상태는 [진행판](../../docs/dev-board.md) 의 `skill-eval` 행이 기준이다. 이 표는 `results.json` 을 옮긴 것이다 (2026-11-12 기준 before 13개).
+
+시험 모델 Groq `qwen/qwen3.8-27b` 의 사용량 제한(429)으로 중단. 이어서 하면 before #14 부터 시작한다.
+`results.json` 에는 모델이 적혀 있지 않다. 같은 모델로 이어서 재야 비교할 수 있다 (재기 전에 `jq .main agent/llm.json` 으로 확인).
 
 | variant | 완료 | 통과 |
 |---|---|---|
-| before (현재 description) | 11 / 28 | 10 |
+| before (현재 description) | 13 / 28 | 13 (#6 은 모델 오류로 판정, ※) |
 | after (후보) | 0 / 28 | – |
 
 before 결과:
@@ -28,15 +30,17 @@ before 결과:
 | 3 | P | structural-code-search | 읽음 | ✓ |
 | 4 | N | structural-code-search 아님 | bash | ✓ |
 | 5 | P | terminal-session-control | 읽음 | ✓ |
-| 6 | N | terminal-session-control 아님 | 답변 | ✓ |
+| 6 | N | terminal-session-control 아님 | Groq 400 tool call 검증 실패 (read 인자) | ✓ ※ |
 | 7 | P | project-task-running | 읽음 | ✓ |
 | 8 | N | project-task-running 아님 | ls | ✓ |
-| 9 | P | json-querying | Groq 400 `tool_use_failed` (read 에 path 없음) | ✗ ※ |
+| 9 | P | json-querying | 읽음 (2026-11-12 다시 잼) | ✓ |
 | 10 | N | json-querying 아님 | read | ✓ |
 | 11 | P | gitlab-workflow | 읽음 | ✓ |
+| 12 | N | gitlab-workflow · github-workflow 아님 | bash | ✓ |
+| 13 | P | github-workflow | 읽음 | ✓ |
 
-※ #9 는 skill 선택 실패가 아니라 모델이 잘못된 tool call 을 만든 경우. 다시 판정하려면
-`results.json` 에서 `before` #9 항목을 지우고 실행한다.
+※ #6 은 skill 을 읽지 않았으므로 N 기준으로는 통과지만, 모델이 깨진 tool call 을 만들어 선택을 본 것이 아니다.
+다시 판정하려면 `results.json` 에서 `before` #6 항목을 지우고 실행한다 (지운 사실을 보고한다).
 
 ## 이어서 실행
 

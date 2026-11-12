@@ -35,7 +35,9 @@ if (( HAS_DBHUB )); then
 fi
 
 REQLOG="$TMP/requests.jsonl"
-MOCK_CHILD_DELAY_MS=300 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$PORT" "$(winpath "$REQLOG")" >/dev/null & MOCK_PID=$!
+# subagent 중지 검사의 손자 프로세스 표식: 실행마다 달라야 다른 E2E · 테스트의 sleep 을 세거나 죽이지 않는다
+SLEEP_MARK="${OXY_E2E_SLEEP_MARK:-41.$$${RANDOM}}"
+MOCK_SLEEP="$SLEEP_MARK" MOCK_CHILD_DELAY_MS=300 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/mock-vllm.mjs")" "$PORT" "$(winpath "$REQLOG")" >/dev/null & MOCK_PID=$!
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && break; sleep 0.1; done
 
 F=0
@@ -50,6 +52,8 @@ run() {
   printf '\n\033[1m[%s]\033[0m %s\n' "$1" "$(head -c 160 <<< "$out" | tr '\n' ' ')"
 }
 first() { head -n1 "$REQ" | jq -r "$1"; }
+# 대화 메시지(시스템 프롬프트 제외)를 합친 글. 문구 검사는 이것으로 한다 (AGENTS.md 에 같은 문구가 있으면 오탐하므로)
+CONV='[.body.messages[] | select(.role != "system") | .content | tostring] | join(" ")'
 nreq() { wc -l < "$REQ" | tr -d ' '; }
 
 run env
@@ -140,12 +144,13 @@ conc 3; run sub-par; o3=$(order); conc 2
 chk "동시 실행 제한 3: 자식 3개가 함께 시작 ($o3)"      '[[ ${#o3} -eq 6 && $(printf %s "${o3:0:3}" | fold -w1 | sort -u | wc -l) -eq 3 ]]'
 
 # subagent 를 멈추면 자식 pi 의 bash 도구가 띄운 손자 프로세스(MSYS)도 끝난다 (예전: taskkill /T 로는 sleep 이 남음)
-sleeps() { powershell.exe -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='sleep.exe'\" | Where-Object { \$_.CommandLine -like '*sleep* 41*' -or \$_.CommandLine -like '*sleep.exe 41*' }).Count" | tr -d '\r'; }
+# 이 실행의 표식($SLEEP_MARK)을 인자로 받은 sleep 만 센다 (예전: 시스템 전체의 sleep 41 을 세고 끝나면 모두 죽였다)
+sleeps() { powershell.exe -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='sleep.exe'\" | Where-Object { (\$_.CommandLine -split '\s+') -contains '$SLEEP_MARK' }).Count" | tr -d '\r'; }
 s0=$(sleeps)
 run sub-stop
 sleep 2; s1=$(sleeps)
-chk "subagent 중지: 손자 프로세스까지 끝남 (sleep 41: $s0 → $s1)" '[[ "$out" == *"(scout: scenario:env-sleep long) stopped"* && "$s1" == "$s0" ]]'
-powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='sleep.exe'\" | Where-Object { \$_.CommandLine -like '*41*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1 || true
+chk "subagent 중지: 손자 프로세스까지 끝남 (sleep $SLEEP_MARK: $s0 → $s1)" '[[ "$out" == *"(scout: scenario:env-sleep long) stopped"* && "$s0" == 0 && "$s1" == 0 ]]'
+powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='sleep.exe'\" | Where-Object { (\$_.CommandLine -split '\s+') -contains '$SLEEP_MARK' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1 || true
 
 # ---- LLM 연결 여러 개 · 작업 수준 (docs/tui-spec.md §11) ----
 # 자식 pi 의 bash 에 부모가 넘긴 키가 남지 않는다 (oxy-llm 이 받자마자 process.env 에서 지운다)
@@ -191,7 +196,7 @@ FW="$TMP/flowwork"; mkdir -p "$FW"; (cd "$FW" && git init -q)
 frun() {
   : > "$REQLOG"
   local s=(--no-session); [[ -n ${FSID:-} ]] && s=(--session-id "$FSID")
-  out=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" "${s[@]}" -p "$1" < /dev/null 2>&1) || true
+  out=$(cd "${FWD:-$FW}" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" "${s[@]}" -p "$1" < /dev/null 2>&1) || true
   REQ="$REQLOG"
   printf '\n\033[1m[%s]\033[0m %s\n' "${1%% *}" "$(head -c 160 <<< "$out" | tr '\n' ' ')"
 }
@@ -201,18 +206,25 @@ chk "flow: 커밋 → 노드 n1 + 결정 + 커밋 파일"       '[[ $(jq -r ".no
 chk "flow: 커밋 결과에 기록 안내"                 '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Recorded step n1"* ]]'
 chk "flow: .oxy 는 사용자 git 에 안 잡힘"          '[[ -z "$(cd "$FW" && git status --porcelain)" ]]'
 FSID=flowb frun "scenario:env another task"
-chk "flow: 새 세션은 빈 기록으로 시작 (이전 작업은 보관, 첫 요청에 넣지 않음)" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") != *"Store sessions in SQLite"* && $(jq -r ".goal + \" \" + (.nodes|length|tostring)" "$FW/.oxy/flow/flow.json") == "scenario:env another task 0" && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:flow-commit add the f file") -ge 1 ]]'
+chk "flow: 새 세션은 빈 기록으로 시작 (이전 작업은 보관, 첫 요청에 넣지 않음)" '[[ $(first "$CONV") != *"Store sessions in SQLite"* && $(jq -r ".goal + \" \" + (.nodes|length|tostring)" "$FW/.oxy/flow/flow.json") == "scenario:env another task 0" && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:flow-commit add the f file") -ge 1 ]]'
 FSID=flowa frun "scenario:flow-plan add g with a plan"
-chk "flow: 이전 세션을 다시 열면 그 작업 기록을 되살려 첫 요청에 넣음" '[[ $(first "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"scenario:flow-commit add the f file"*"Store sessions in SQLite"* && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:env another task") -ge 1 ]]'
+chk "flow: 이전 세션을 다시 열면 그 작업 기록을 되살려 첫 요청에 넣음" '[[ $(first "$CONV") == *"[oxy-flow] Task state"*"scenario:flow-commit add the f file"*"Store sessions in SQLite"* && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:env another task") -ge 1 ]]'
 chk "flow 계획: 항목·할 일 저장, 커밋이 진행 중인 할 일에 연결" '[[ $(jq -r "[.plan[0].id, .plan[0].status, .plan[0].children[0].nodes[0], .plan[0].children[1].status, .plan[1].status] | join(\" \")" "$FW/.oxy/flow/flow.json") == "p1 done n2 done todo" ]]'
 chk "flow 계획: 도구 결과에 계획과 다음 할 일"     '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Updated p1 [done]."*"p2 [todo] Report"*"Next: p2 Report"* ]]'
 chk "flow 계획: 커밋 결과에 연결된 할 일과 done 안내" '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Linked to plan item p1.1 "*"write g"*"If this commit finishes it, call flow_plan(action="* ]]'
 chk "flow 계획: FLOW.md 에 계획"                 '[[ $(cat "$FW/.oxy/flow/FLOW.md") == *"## 계획"*"✓ p1 Add g file"*"· p2 Report"* ]]'
+# 계획이 있는 세션을 다시 열면 첫 요청에 계획과 다음 할 일이 들어간다. 작업 상태는 세션마다 한 번만 넣으므로(flowa 는 이미 넣었다)
+# 별도 작업 폴더에서 새 세션 flowc 에 계획을 만들고, 다른 세션 flowd 로 바꿨다가 flowc 를 다시 연다
+FW2="$TMP/flowwork2"; mkdir -p "$FW2"; (cd "$FW2" && git init -q)
+FWD="$FW2" FSID=flowc frun "scenario:flow-plan add g with a plan"
+FWD="$FW2" FSID=flowd frun "scenario:env switch to another task"
+FWD="$FW2" FSID=flowc frun "scenario:env plan check"
+chk "flow 계획: 다시 연 세션의 첫 요청에 계획과 다음 할 일" '[[ $(first "$CONV") == *"Next: p2 Report"*"Plan (update it with flow_plan):"*"- p1 [done] Add g file"*"(2/2 sub-tasks done)"*"- p2 [todo] Report"* ]]'
 cp "$TMP/agent/settings.json" "$TMP/settings.bak"
 jq '.compaction.keepRecentTokens = 50' "$TMP/settings.bak" > "$TMP/agent/settings.json"   # 작은 대화로도 compaction 이 일어나게
 FSID=flowa frun "scenario:flow-big refactor the parser"
 chk "flow: 작업 도중 compaction → LLM 요약 요청 없음" '[[ "$out" == *after-compaction* && $(grep -c "context summarization" "$REQ") -eq 0 ]]'
-chk "flow: compaction 요약 = 작업 상태 + 최근 요청"  '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | .content | tostring] | join(\" \")") == *"[oxy-flow] Task state"*"Latest user request: scenario:flow-big"* ]]'
+chk "flow: compaction 요약 = 작업 상태 + 최근 요청"  '[[ $(tail -1 "$REQ" | jq -r "$CONV") == *"[oxy-flow] Task state"*"Latest user request: scenario:flow-big"* ]]'
 cp "$TMP/settings.bak" "$TMP/agent/settings.json"
 : > "$REQLOG"
 rf=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-flow.mjs")" "$OXY_PI_CLI" "$(winpath "$FW")" "$(winpath "$REQLOG")" 2>&1 | tail -1) || true
