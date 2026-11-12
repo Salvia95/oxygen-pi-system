@@ -191,6 +191,7 @@ chk "모니터: 중지 요청 → 작업 중지·알림·모델에 전달" '[[ "
 chk "모니터: 이미 끝난 작업 중지 요청은 실패로 기록" '[[ "$rpc" == *"\"monitorStopRejected\":true"* ]]'
 chk "실시간 활동: 도구 실행 중 live.json 에 상태 · 도구 요약" '[[ "$rpc" == *"\"liveTool\":true"* ]]'
 chk "실시간 활동: 끝나면 대기 · 최근 이벤트(요청 · 도구 · 작업)" '[[ "$rpc" == *"\"liveIdle\":true"* ]]'
+chk "실시간 활동: 긴 도구 동안에도 live.json 이 5초마다 갱신" '[[ "$rpc" == *"\"liveHeartbeat\":true"* ]]'
 
 # oxy-flow: 별도 git 작업 폴더 (위 시나리오들은 OXY_FLOW=off 로 실행해 서로 영향을 주지 않게 한다)
 FW="$TMP/flowwork"; mkdir -p "$FW"; (cd "$FW" && git init -q)

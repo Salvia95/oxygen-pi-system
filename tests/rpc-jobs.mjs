@@ -69,9 +69,12 @@ result.monitorStopRejected = Boolean(await poll(() => { const c = readState(runD
 // ---------------------------------------------------------------- 실시간 활동 live.json (docs/monitor-tui-spec.md §2)
 const readLive = () => { try { return JSON.parse(readFileSync(join(runDir, "live.json"), "utf8")); } catch { return null; } };
 send({ id: "p4", type: "prompt", message: "scenario:live-tool" });
-const during = await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.tools?.[0]?.summary === "sleep 3; echo live-tool-done" ? l : null; }, 15000);
+const during = await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.tools?.[0]?.summary === "sleep 8; echo live-tool-done" ? l : null; }, 15000);
 result.liveTool = Boolean(during && during.tools[0].name === "bash" && during.agent.running === true && during.pid === pi.pid);
-const after = await poll(() => { const l = readLive(); return l?.agent?.state === "idle" && l.events?.some((e) => e.kind === "tool" && e.text === "bash sleep 3; echo live-tool-done") ? l : null; }, 20000);
+// 도구가 도는 동안 이벤트가 없어도 5초마다 updatedAt 이 새로워진다 (예전: 그대로라 모니터가 10초 뒤 "pi 상태를 알 수 없습니다")
+const later = during && await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.updatedAt - during.updatedAt >= 4000 ? l : null; }, 7000);
+result.liveHeartbeat = Boolean(later);
+const after = await poll(() => { const l = readLive(); return l?.agent?.state === "idle" && l.events?.some((e) => e.kind === "tool" && e.text === "bash sleep 8; echo live-tool-done") ? l : null; }, 20000);
 const texts = (after?.events ?? []).map((e) => `${e.kind}:${e.text}`);
 result.liveIdle = Boolean(after && after.tools.length === 0 && texts.includes("user:scenario:live-tool")
   && texts.some((t) => t.startsWith("job:job-2 시작")) && texts.includes("job:job-2 중지"));

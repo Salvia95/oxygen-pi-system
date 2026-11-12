@@ -363,7 +363,7 @@ test("oxy-monitor 화면: jobs · flow 가 좁은 폭(23칸)에서도 폭 · 줄
     check(ls, w, 14);
     const p = plain(ls);
     assert.match(p[0], /^jobs/);
-    assert.match(p[1], /⏳.*scout: 결제|⏳.*결제/);                     // 실행 중인 작업이 위로
+    assert.match(p[1], /⠿.*scout: 결제|⠿.*결제/);                     // 실행 중인 작업이 위로
     assert.match(p[1], /1m12s$/);
     assert.ok(p.some((l) => /deep · claude-haiku-5-5 · high/.test(l) || /deep · claude-haiku/.test(l)), "작업 수준이 보인다");
     check(jobsView(fit, state, { sel: 0, mode: "confirm", scroll: 0 }, w, 14, now), w, 14);
@@ -391,9 +391,9 @@ test("oxy-monitor 화면: jobs · flow 가 좁은 폭(23칸)에서도 폭 · 줄
   assert.match(p, /flow\s+할 일 2\/4/);
   assert.match(p, /✓ 기존 구조 파악 1\/1/);
   assert.ok(!p.includes("결제 흐름 읽기"), "끝난 항목은 접혀 있다");
-  assert.match(p, /⏳ PaymentService 분리 1\/2\n\s+✓ 인터페이스 정의\n\s+n2 bbbbbbbb refactor/);
+  assert.match(p, /⠿ PaymentService 분리 1\/2\n\s+✓ 인터페이스 정의\n\s+n2 bbbbbbbb refactor/);
   assert.match(p, /계획 밖 커밋\nn3 cccccccc chore: 사람이 한 커밋/);
-  assert.match(p, /커밋 전 작업\n· 캐시는 나중에\n변경 파일 2개\n✗ npm test/);
+  assert.match(p, /커밋 전 작업\n· 캐시는 나중에\n변경 파일 2개\n× npm test/);
   // Enter 로 펼치기: 끝난 항목은 펼치고, 커밋은 결정 · 파일을 보인다
   const keys = flowKeys(flow, new Set());
   assert.deepEqual(keys.slice(0, 4), ["p:p1", "p:p2", "p:p2.1", "n:n2"]);
@@ -1071,4 +1071,32 @@ test("oxy-monitor 보기 모델: jobs (경과는 exe 가, 좁으면 종류 열�
   const log = M.jobsModel(state, live, { sel: "job-1", mode: "log" }, 23, 11, now, w, Array.from({ length: 30 }, (_, i) => `line ${i}`));
   assert.equal(log.title, "job-1 로그"); assert.ok(M.modelHeight(log) <= 11); assert.equal(log.sections[0].rows.at(-1)?.text, "line 29");
   assert.equal(M.clock(3723000), "1:02:03");
+});
+
+test("oxy-monitor 키 처리: exe 판별 · flow 선택 이동과 펼치기 · jobs 로그 · 중지 확인", async () => {
+  const C = await import("../agent/extensions/oxy-monitor/controller.ts");
+  assert.equal(C.supportsMonitor("oxy-tui 0.2.0 monitor\n"), true);
+  assert.equal(C.supportsMonitor("oxy-tui 0.1.0\n"), false);                         // 예전 exe: pi-tui 대체 화면으로
+  assert.equal(C.supportsMonitor(""), false);
+  const item = (id: string, status: string, kids: any[] = []) => ({ id, text: id, status, at: 0, nodes: [], children: kids });
+  const flow: any = { goal: "g", plan: [item("p1", "doing", [item("p1.1", "doing"), item("p1.2", "todo")]), item("p2", "todo")], nodes: [], buffer: { decisions: [], files: [], failures: [] } };
+  let ui: any = { sel: null, open: new Set<string>(), manualAt: 0 };
+  ui = C.flowKey(ui, flow, 35, "down", 500);
+  assert.deepEqual([ui.sel, ui.manualAt], ["p:p1", 500]);                           // 선택이 없으면 첫 줄
+  ui = C.flowKey(ui, flow, 35, "down", 600); assert.equal(ui.sel, "p:p1.1");
+  ui = C.flowKey(ui, flow, 35, "up", 700); ui = C.flowKey(ui, flow, 35, "up", 700); assert.equal(ui.sel, "p:p1");   // 맨 위에서 멈춤
+  ui = C.flowKey(ui, flow, 35, "enter", 800); assert.ok(ui.open.has("p:p1"));
+  ui = C.flowKey(ui, flow, 35, "enter", 900); assert.ok(!ui.open.has("p:p1"));
+  const job = (id: string, state: string) => ({ id, kind: "bash", state, label: id, createdAt: 1 });
+  const jobs: any[] = [job("job-1", "done"), job("job-2", "running")];
+  let r = C.jobsKey({ sel: null, mode: "list" }, 0, jobs, "s");                       // 첫 줄 = 실행 중인 job-2
+  assert.deepEqual([r.ui.mode, r.ui.sel, r.stop], ["confirm", "job-2", undefined]);
+  r = C.jobsKey(r.ui, 0, jobs, "esc"); assert.deepEqual([r.ui.mode, r.stop], ["list", undefined]);   // 취소
+  r = C.jobsKey({ sel: "job-2", mode: "confirm" }, 0, jobs, "s");
+  assert.deepEqual([r.ui.mode, r.stop, r.ui.notice], ["list", "job-2", "job-2 작업의 중지를 요청했습니다."]);
+  r = C.jobsKey({ sel: "job-1", mode: "list" }, 0, jobs, "s"); assert.equal(r.ui.mode, "list");   // 끝난 작업은 중지 안 함
+  r = C.jobsKey({ sel: "job-1", mode: "list" }, 0, jobs, "enter"); assert.equal(r.ui.mode, "log");
+  r = C.jobsKey(r.ui, 0, jobs, "up"); r = C.jobsKey(r.ui, r.scroll, jobs, "up"); assert.equal(r.scroll, 2);
+  r = C.jobsKey(r.ui, r.scroll, jobs, "esc"); assert.deepEqual([r.ui.mode, r.scroll], ["list", 0]);
+  r = C.jobsKey({ sel: "job-2", mode: "list" }, 0, jobs, "down"); assert.equal(r.ui.sel, "job-1");
 });

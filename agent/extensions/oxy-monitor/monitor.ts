@@ -1,16 +1,21 @@
-// 모니터 프로그램 (모니터 pane 안에서 실행, docs/monitor-spec.md §5). pi 의 extension 으로 로드되지 않는다 (pi 는 폴더의 index.ts 만 로드).
-//   node monitor.ts <jobs|flow> --pi-pid <pid> --cwd <폴더>
-// 화면은 번들의 pi-tui(TuiAltScreen)로 그리고, 무엇을 그릴지는 view.ts 의 순수 함수가 정한다.
+// 모니터 프로그램 (모니터 pane 안에서 실행, docs/monitor-spec.md §5 · docs/monitor-tui-spec.md §4). pi 의 extension 으로 로드되지 않는다 (pi 는 폴더의 index.ts 만 로드).
+//   node monitor.ts <jobs|flow> --pi-pid <pid> --cwd <폴더> [--agent <agent 폴더>] [--root <하네스>]
+// 화면: bin/oxy-tui.exe 가 모니터 모드를 지원하면(--version 에 monitor) 보기 모델(model.ts)을 보내 exe 가 그린다.
+//   지원하지 않거나 없으면(예전 번들의 exe) 번들의 pi-tui 로 그린다 (view.ts, M5). OXY_MONITOR_TUI=pi 면 늘 pi-tui.
 //   jobs: pi 의 실행 폴더(agent/jobs/run-<pid>-*)의 state.json · 로그. 중지는 control/ 요청 (oxy-jobs/state.ts)
-//   flow: 프로젝트의 .oxy/flow/flow.json (읽기만)
+//   flow: 프로젝트의 .oxy/flow/flow.json (읽기만). 두 화면 모두 같은 실행 폴더의 live.json 으로 pi 의 지금 상태를 보인다
 // pi 가 끝나면(pid 가 사라지면) 스스로 종료한다.
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { harnessHome } from "../_lib/common.ts";
 import { type JobsState, findRun, readState, sendControl } from "../oxy-jobs/state.ts";
 import { projectRoot } from "../oxy-flow/store.ts";
-import { type Fit, type FlowLike, type FlowUi, type JobsUi, flowKeys, flowView, jobOrder, jobsView } from "./view.ts";
+import type { LiveState } from "./live.ts";
+import { type FlowUiState, type JobsUiState, flowModel, jobOrder, jobsModel } from "./model.ts";
+import { KEYS, type MonitorKey, flowKey, jobsKey, supportsMonitor } from "./controller.ts";
+import { type Fit, type FlowLike, type FlowUi, type JobsUi, flowKeys, flowView, jobsView } from "./view.ts";
 
 const args = process.argv.slice(2);
 const kind = args[0] === "flow" ? "flow" : "jobs";
@@ -27,34 +32,19 @@ export function pidAlive(pid: number): boolean {
 // pane 은 psmux 서버의 환경을 물려받으므로 pi 가 넘긴 인자를 먼저 쓴다
 const root = opt("--root") ?? harnessHome(resolve(import.meta.dirname, "..", "..", ".."))!;
 const agentDir = opt("--agent") ?? process.env.PI_CODING_AGENT_DIR ?? join(root, "agent");
-const tui: any = await import(pathToFileURL(join(root, "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
-const fit: Fit = {
-  width: (s) => tui.visibleWidth(s),
-  trunc: (s, w) => (tui.visibleWidth(s) <= w ? s : tui.truncateToWidth(s, w, "…")),
-  wrap: (s, w) => (s ? tui.wrapTextWithAnsi(s, Math.max(1, w)) : [""]),
-};
 
-// ------------------------------------------------------------------ 데이터
+// ------------------------------------------------------------------ 데이터 (두 화면 공통)
 let jobs: { runDir: string; state: JobsState } | null = null;
 let flow: FlowLike | null = null;
-let logLines: string[] = [];
-const jobsUi: JobsUi = { sel: 0, mode: "list", scroll: 0 };
-const flowUi: FlowUi = { sel: 0, open: new Set() };
-let pendingStop: { seq: string; id: string } | null = null;
+let live: LiveState | null = null;
 let flowFile: string | null = null;
 
 function loadJobs() {
   const runDir = findRun(join(agentDir, "jobs"), piPid);
   const state = runDir ? readState(runDir) : null;
   jobs = runDir && state ? { runDir, state } : null;
-  if (pendingStop && jobs?.state.control?.seq === pendingStop.seq) {
-    jobsUi.notice = jobs.state.control.ok ? `${pendingStop.id} 작업을 중지했습니다.` : `중지하지 못했습니다: ${jobs.state.control.message}`;
-    pendingStop = null;
-  }
-  const sel = currentJob();
-  if (jobsUi.mode === "log" && sel && jobs) {
-    try { logLines = readFileSync(join(jobs.runDir, sel.log), "utf8").split(/\r?\n/).slice(-500); } catch { logLines = []; }
-  }
+  live = null;
+  if (runDir) { try { live = JSON.parse(readFileSync(join(runDir, "live.json"), "utf8")); } catch { /* 아직 없음 */ } }
 }
 
 function loadFlow() {
@@ -66,93 +56,188 @@ function loadFlow() {
   } catch { flow = null; }
 }
 
-const currentJob = () => (jobs ? jobOrder(jobs.state.jobs)[jobsUi.sel] : undefined);
-const reload = () => (kind === "jobs" ? loadJobs() : loadFlow());
-
-// ------------------------------------------------------------------ 화면
-const terminal = new tui.ProcessTerminal();
-const screen = new tui.TuiAltScreen(terminal, false, undefined, { mouse: false });
-const view = {
-  render(width: number): string[] {
-    const height = Math.max(3, terminal.rows || 24);
-    return kind === "jobs" ? jobsView(fit, jobs?.state ?? null, jobsUi, width, height, Date.now(), logLines) : flowView(fit, flow, flowUi, width, height);
-  },
-  handleInput(data: string) { onKey(data); },
-  invalidate() {},
+/** 화면에 필요한 것을 다시 읽는다 (flow 화면도 지금 상태 · 실행 폴더를 위해 jobs 를 읽는다) */
+const reload = () => { loadJobs(); if (kind === "flow") loadFlow(); };
+const readLog = (id: string | null): string[] => {
+  const j = jobs?.state.jobs.find((x) => x.id === id);
+  if (!j || !jobs) return [];
+  try { return readFileSync(join(jobs.runDir, j.log), "utf8").split(/\r?\n/).slice(-500); } catch { return []; }
 };
 
-function quit() {
-  try { screen.stop(); } catch { /* 이미 멈춤 */ }
-  process.exit(0);
+// ------------------------------------------------------------------ 시작: 어느 화면으로 그릴지
+const exe = join(root, "bin", "oxy-tui.exe");
+function exeOk(): boolean {
+  if (process.env.OXY_MONITOR_TUI === "pi" || !process.stdout.isTTY || !existsSync(exe)) return false;
+  try { return supportsMonitor(spawnSync(exe, ["--version"], { encoding: "utf8", timeout: 5000, windowsHide: true }).stdout ?? ""); } catch { return false; }
 }
 
-const is = (data: string, key: string) => tui.matchesKey(data, key);
-
-function onKey(data: string) {
-  if (is(data, "q") || is(data, "ctrl+c")) return quit();
-  if (kind === "jobs") onJobsKey(data); else onFlowKey(data);
-  screen.requestRender();
-}
-
-function onJobsKey(data: string) {
-  const list = jobs ? jobOrder(jobs.state.jobs) : [];
-  const j = currentJob();
-  jobsUi.notice = undefined;
-  if (jobsUi.mode === "confirm") {
-    if (is(data, "s") && j && jobs) {
-      pendingStop = { seq: sendControl(jobs.runDir, "stop", j.id), id: j.id };
-      jobsUi.notice = `${j.id} 작업의 중지를 요청했습니다.`;
-    }
-    jobsUi.mode = "list";
-    return;
-  }
-  if (jobsUi.mode === "log") {
-    if (is(data, "escape") || is(data, "left")) { jobsUi.mode = "list"; jobsUi.scroll = 0; }
-    else if (is(data, "up")) jobsUi.scroll += 1;
-    else if (is(data, "down")) jobsUi.scroll = Math.max(0, jobsUi.scroll - 1);
-    else if (is(data, "pageUp")) jobsUi.scroll += 10;
-    else if (is(data, "pageDown")) jobsUi.scroll = Math.max(0, jobsUi.scroll - 10);
-    else if (is(data, "end")) jobsUi.scroll = 0;
-    else if (is(data, "s") && j && (j.state === "running" || j.state === "queued")) jobsUi.mode = "confirm";
-    return;
-  }
-  if (is(data, "up")) jobsUi.sel = Math.max(0, jobsUi.sel - 1);
-  else if (is(data, "down")) jobsUi.sel = Math.min(Math.max(0, list.length - 1), jobsUi.sel + 1);
-  else if ((is(data, "enter") || is(data, "right")) && j) { jobsUi.mode = "log"; jobsUi.scroll = 0; loadJobs(); }
-  else if (is(data, "s") && j && (j.state === "running" || j.state === "queued")) jobsUi.mode = "confirm";
-}
-
-function onFlowKey(data: string) {
-  if (!flow) return;
-  const keys = flowKeys(flow, flowUi.open);
-  if (is(data, "up")) flowUi.sel = Math.max(0, flowUi.sel - 1);
-  else if (is(data, "down")) flowUi.sel = Math.min(Math.max(0, keys.length - 1), flowUi.sel + 1);
-  else if (is(data, "enter") || is(data, "right") || is(data, "left") || is(data, "space")) {
-    const k = keys[flowUi.sel];
-    if (k) { if (flowUi.open.has(k)) flowUi.open.delete(k); else flowUi.open.add(k); }
-  }
-}
-
-// ------------------------------------------------------------------ 시작
 reload();
-screen.addChild(view);
-screen.setFocus(view);
-screen.start();
-// 파일이 바뀌면 바로, 그 밖에는 1초마다 다시 읽는다 (경과 시간 표시 · watch 가 놓친 변경). pi 가 끝나면 종료
-let lastStamp = "";
-const stamp = () => {
-  try {
-    const f = kind === "jobs" ? (jobs ? join(jobs.runDir, "state.json") : "") : flowFile ?? "";
-    return f && existsSync(f) ? String(statSync(f).mtimeMs) : "";
-  } catch { return ""; }
-};
-const tick = () => {
-  if (!pidAlive(piPid)) return quit();
-  reload();
-  const s = stamp();
-  if (s !== lastStamp || kind === "jobs") { lastStamp = s; screen.requestRender(); }
-};
-setInterval(tick, 1000);
-if (kind === "flow" && flowFile) {
-  try { watch(join(flowFile, ".."), () => { reload(); screen.requestRender(); }); } catch { /* 1초 폴링으로 */ }
+if (exeOk()) await runExe(); else await runPiTui();
+
+// ------------------------------------------------------------------ oxy-tui 모니터 모드
+async function runExe() {
+  const { ExeLink, displayWidth } = await import(pathToFileURL(join(root, "installer", "tui.mjs")).href);
+  let size = { width: process.stdout.columns || 30, height: process.stdout.rows || 24 };
+  let flowUi: FlowUiState = { sel: null, open: new Set(), manualAt: 0 };
+  let jobsUi: JobsUiState = { sel: null, mode: "list" };
+  let scroll = 0;
+  let pendingStop: { seq: string; id: string } | null = null;
+  let last = "";
+  let quitting = false;
+
+  const model = () => {
+    const now = Date.now();
+    if (kind === "flow") {
+      const m = flowModel(flow, live, flowUi, size.width, size.height, now, displayWidth);
+      if (!flowUi.sel && m.selected) flowUi = { ...flowUi, sel: m.selected };
+      return m;
+    }
+    if (pendingStop && jobs?.state.control?.seq === pendingStop.seq) {
+      jobsUi = { ...jobsUi, notice: jobs.state.control.ok ? `${pendingStop.id} 작업을 중지했습니다.` : `중지하지 못했습니다: ${jobs.state.control.message}` };
+      pendingStop = null;
+    }
+    const logs = jobsUi.mode === "log" ? readLog(jobsUi.sel) : [];
+    const m = jobsModel(jobs?.state ?? null, live, jobsUi, size.width, size.height, now, displayWidth, logs.slice(0, Math.max(0, logs.length - scroll)));
+    if (!jobsUi.sel && m.selected) jobsUi = { ...jobsUi, sel: m.selected };
+    return m;
+  };
+  /** 바뀐 것이 있을 때만 보낸다 (스피너 · 경과는 exe 가 혼자 그린다) */
+  const push = (force = false) => {
+    if (quitting) return;
+    const m = JSON.stringify(model());
+    if (!force && m === last) return;
+    last = m;
+    link.send(JSON.parse(m));
+  };
+  const quit = (code = 0) => {
+    if (quitting) return;
+    quitting = true;
+    link.send({ op: "quit", code });
+    setTimeout(() => { link.killAndRestore(process.stdout); process.exit(code); }, 1500).unref();
+  };
+  const onKey = (key: MonitorKey) => {
+    if (key === "q") return quit(0);
+    if (kind === "flow") flowUi = flowKey(flowUi, flow, size.width, key, Date.now());
+    else {
+      const r = jobsKey(jobsUi, scroll, jobs?.state.jobs ?? [], key);
+      jobsUi = r.ui; scroll = r.scroll;
+      if (r.stop && jobs) pendingStop = { seq: sendControl(jobs.runDir, "stop", r.stop), id: r.stop };
+    }
+    push();
+  };
+  const link = new ExeLink(exe, (m: any) => {
+    if (m.event === "resize" && m.width > 0 && m.height > 0) { size = { width: m.width, height: m.height }; push(true); }
+    else if (m.event === "key" && (KEYS as readonly string[]).includes(m.key)) onKey(m.key);
+    else if (m.event === "interrupt") quit(0);
+  }, ["--mode", "monitor"]);
+  link.exited.then((code: number | null) => process.exit(quitting ? 0 : code ?? 1));
+  push(true);
+  // 파일이 바뀌면 바로, 그 밖에는 1초마다 (live.json 이 오래됐는지 · 사용자 위치를 둔 시간이 지났는지). pi 가 끝나면 종료
+  setInterval(() => { if (!pidAlive(piPid)) return quit(0); reload(); push(); }, 1000);
+  const watchDir = (dir: string) => { try { watch(dir, () => { reload(); push(); }); } catch { /* 1초 폴링으로 */ } };
+  if (kind === "flow" && flowFile && existsSync(join(flowFile, ".."))) watchDir(join(flowFile, ".."));
+  if (jobs?.runDir) watchDir(jobs.runDir);
+}
+
+// ------------------------------------------------------------------ 대체 화면: pi-tui (exe 가 모니터 모드를 모를 때)
+async function runPiTui() {
+  const tui: any = await import(pathToFileURL(join(root, "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const fit: Fit = {
+    width: (s) => tui.visibleWidth(s),
+    trunc: (s, w) => (tui.visibleWidth(s) <= w ? s : tui.truncateToWidth(s, w, "…")),
+    wrap: (s, w) => (s ? tui.wrapTextWithAnsi(s, Math.max(1, w)) : [""]),
+  };
+  let logLines: string[] = [];
+  const jobsUi: JobsUi = { sel: 0, mode: "list", scroll: 0 };
+  const flowUi: FlowUi = { sel: 0, open: new Set() };
+  let pendingStop: { seq: string; id: string } | null = null;
+  const currentJob = () => (jobs ? jobOrder(jobs.state.jobs)[jobsUi.sel] : undefined);
+  const reloadAll = () => {
+    reload();
+    if (pendingStop && jobs?.state.control?.seq === pendingStop.seq) {
+      jobsUi.notice = jobs.state.control.ok ? `${pendingStop.id} 작업을 중지했습니다.` : `중지하지 못했습니다: ${jobs.state.control.message}`;
+      pendingStop = null;
+    }
+    if (jobsUi.mode === "log") logLines = readLog(currentJob()?.id ?? null);
+  };
+
+  const terminal = new tui.ProcessTerminal();
+  const screen = new tui.TuiAltScreen(terminal, false, undefined, { mouse: false });
+  const view = {
+    render(width: number): string[] {
+      const height = Math.max(3, terminal.rows || 24);
+      return kind === "jobs" ? jobsView(fit, jobs?.state ?? null, jobsUi, width, height, Date.now(), logLines) : flowView(fit, flow, flowUi, width, height);
+    },
+    handleInput(data: string) { onKey(data); },
+    invalidate() {},
+  };
+  const quit = () => {
+    try { screen.stop(); } catch { /* 이미 멈춤 */ }
+    process.exit(0);
+  };
+  const is = (data: string, key: string) => tui.matchesKey(data, key);
+  function onKey(data: string) {
+    if (is(data, "q") || is(data, "ctrl+c")) return quit();
+    if (kind === "jobs") onJobsKey(data); else onFlowKey(data);
+    screen.requestRender();
+  }
+  function onJobsKey(data: string) {
+    const list = jobs ? jobOrder(jobs.state.jobs) : [];
+    const j = currentJob();
+    jobsUi.notice = undefined;
+    if (jobsUi.mode === "confirm") {
+      if (is(data, "s") && j && jobs) {
+        pendingStop = { seq: sendControl(jobs.runDir, "stop", j.id), id: j.id };
+        jobsUi.notice = `${j.id} 작업의 중지를 요청했습니다.`;
+      }
+      jobsUi.mode = "list";
+      return;
+    }
+    if (jobsUi.mode === "log") {
+      if (is(data, "escape") || is(data, "left")) { jobsUi.mode = "list"; jobsUi.scroll = 0; }
+      else if (is(data, "up")) jobsUi.scroll += 1;
+      else if (is(data, "down")) jobsUi.scroll = Math.max(0, jobsUi.scroll - 1);
+      else if (is(data, "pageUp")) jobsUi.scroll += 10;
+      else if (is(data, "pageDown")) jobsUi.scroll = Math.max(0, jobsUi.scroll - 10);
+      else if (is(data, "end")) jobsUi.scroll = 0;
+      else if (is(data, "s") && j && (j.state === "running" || j.state === "queued")) jobsUi.mode = "confirm";
+      return;
+    }
+    if (is(data, "up")) jobsUi.sel = Math.max(0, jobsUi.sel - 1);
+    else if (is(data, "down")) jobsUi.sel = Math.min(Math.max(0, list.length - 1), jobsUi.sel + 1);
+    else if ((is(data, "enter") || is(data, "right")) && j) { jobsUi.mode = "log"; jobsUi.scroll = 0; reloadAll(); }
+    else if (is(data, "s") && j && (j.state === "running" || j.state === "queued")) jobsUi.mode = "confirm";
+  }
+  function onFlowKey(data: string) {
+    if (!flow) return;
+    const keys = flowKeys(flow, flowUi.open);
+    if (is(data, "up")) flowUi.sel = Math.max(0, flowUi.sel - 1);
+    else if (is(data, "down")) flowUi.sel = Math.min(Math.max(0, keys.length - 1), flowUi.sel + 1);
+    else if (is(data, "enter") || is(data, "right") || is(data, "left") || is(data, "space")) {
+      const k = keys[flowUi.sel];
+      if (k) { if (flowUi.open.has(k)) flowUi.open.delete(k); else flowUi.open.add(k); }
+    }
+  }
+
+  reloadAll();
+  screen.addChild(view);
+  screen.setFocus(view);
+  screen.start();
+  // 파일이 바뀌면 바로, 그 밖에는 1초마다 다시 읽는다 (경과 시간 표시 · watch 가 놓친 변경). pi 가 끝나면 종료
+  let lastStamp = "";
+  const stamp = () => {
+    try {
+      const f = kind === "jobs" ? (jobs ? join(jobs.runDir, "state.json") : "") : flowFile ?? "";
+      return f && existsSync(f) ? String(statSync(f).mtimeMs) : "";
+    } catch { return ""; }
+  };
+  setInterval(() => {
+    if (!pidAlive(piPid)) return quit();
+    reloadAll();
+    const s = stamp();
+    if (s !== lastStamp || kind === "jobs") { lastStamp = s; screen.requestRender(); }
+  }, 1000);
+  if (kind === "flow" && flowFile) {
+    try { watch(join(flowFile, ".."), () => { reloadAll(); screen.requestRender(); }); } catch { /* 1초 폴링으로 */ }
+  }
 }

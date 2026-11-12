@@ -216,8 +216,9 @@ const RESTORE = "\x1b[?25h\x1b[?1049l";
  * oxy-tui.exe 를 실행하고 파이프로 지시를 보낸다. exe 는 같은 이름에 두 번 접속한다 (지시용 · 결과용).
  * 지시용 연결이 붙기 전에 보낸 지시는 모아 두었다가 순서대로 보낸다.
  */
-class ExeLink {
-  constructor(exe, onMessage) {
+export class ExeLink {
+  /** args: --pipe 뒤에 붙일 인자 (oxy-monitor 의 모니터 화면은 ["--mode", "monitor"]) */
+  constructor(exe, onMessage, args = []) {
     this.onMessage = onMessage;
     this.commands = null;
     this.backlog = [];
@@ -241,7 +242,7 @@ class ExeLink {
       sock.on("error", () => { /* exe 가 끝나며 끊긴다 */ });
     });
     this.server.listen(`\\\\.\\pipe\\${name}`, () => {
-      this.child = spawn(exe, ["--pipe", name], { stdio: "inherit", windowsHide: false });
+      this.child = spawn(exe, ["--pipe", name, ...args], { stdio: "inherit", windowsHide: false });
       this.child.on("exit", (code) => { this.server.close(); this.onExit(code); });
       this.child.on("error", () => { this.server.close(); this.onExit(1); });
     });

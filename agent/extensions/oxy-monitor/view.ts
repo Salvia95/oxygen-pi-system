@@ -1,4 +1,5 @@
-// 모니터 화면 (docs/monitor-spec.md §5). 상태 → 줄 목록을 만드는 순수 함수만 둔다 (터미널 없이 단위 테스트한다).
+// 모니터 대체 화면 (docs/monitor-spec.md §5, oxy-tui 가 모니터 모드를 모를 때. docs/monitor-tui-spec.md M5). 기호는 1칸만 (tui-spec §6: ⏳ ✗ ↑↓ 대신 ⠿ × ▲▼).
+// 상태 → 줄 목록을 만드는 순수 함수만 둔다 (터미널 없이 단위 테스트한다).
 // 폭 계산은 pi-tui 의 함수를 받는다 (한글 · 기호는 2칸). 모든 줄은 width 칸 이하, 결과는 정확히 height 줄이다.
 import type { JobsState, JobSnapshot } from "../oxy-jobs/state.ts";
 import type { PlanItem } from "../oxy-flow/plan.ts";
@@ -21,7 +22,7 @@ const style = {
 };
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, "");
 
-export const JOB_ICON: Record<string, string> = { queued: "·", running: "⏳", done: "✓", failed: "✗", stopped: "■" };
+export const JOB_ICON: Record<string, string> = { queued: "·", running: "⠿", done: "✓", failed: "×", stopped: "■" };
 const jobColor = (state: string) => (state === "done" ? style.green : state === "failed" ? style.red : state === "running" ? style.yellow : style.dim);
 
 export function fmtDur(ms: number): string {
@@ -86,7 +87,7 @@ export function jobsView(f: Fit, state: JobsState | null, ui: JobsUi, width: num
     const room = Math.max(0, height - 1 - info.length - 2);
     const end = Math.max(0, body.length - ui.scroll);
     const shown = body.slice(Math.max(0, end - room), end);
-    const foot = footer(f, [ui.scroll ? "End 끝으로" : "↑↓ 스크롤", "Esc 목록", ...(j.state === "running" || j.state === "queued" ? ["s 중지"] : [])], width);
+    const foot = footer(f, [ui.scroll ? "End 끝으로" : "▲▼ 스크롤", "Esc 목록", ...(j.state === "running" || j.state === "queued" ? ["s 중지"] : [])], width);
     return frame(f, [title, ...info], shown, foot, width, height);
   }
 
@@ -110,13 +111,13 @@ export function jobsView(f: Fit, state: JobsState | null, ui: JobsUi, width: num
   }
   const keys = ui.mode === "confirm" && j
     ? [style.red(`${j.id} 작업을 중지할까요?`), "s 중지", "Esc 취소"]
-    : ["↑↓ 이동", "Enter 로그", ...(j && (j.state === "running" || j.state === "queued") ? ["s 중지"] : []), "q 닫기"];
+    : ["▲▼ 이동", "Enter 로그", ...(j && (j.state === "running" || j.state === "queued") ? ["s 중지"] : []), "q 닫기"];
   const foot = [...(ui.notice ? [f.trunc(ui.notice, width)] : []), ...detail, ...footer(f, keys, width)];
   return frame(f, head, body, foot, width, height, focus);
 }
 
 // ------------------------------------------------------------------ flow
-export const PLAN_ICON: Record<string, string> = { todo: "·", doing: "⏳", done: "✓", blocked: "!", dropped: "–" };
+export const PLAN_ICON: Record<string, string> = { todo: "·", doing: "⠿", done: "✓", blocked: "!", dropped: "–" };
 const planColor = (s: string) => (s === "done" ? style.green : s === "doing" ? style.yellow : s === "blocked" ? style.red : style.dim);
 
 /** flow 화면의 한 줄 (선택할 수 있는 줄은 key 가 있다) */
@@ -171,7 +172,7 @@ export function flowRows(flow: FlowLike, open: Set<string>): FlowRow[] {
     rows.push({ text: style.bold("커밋 전 작업"), indent: 0 });
     for (const d of b.decisions) rows.push({ text: `· ${d.text}`, indent: 0 });
     if (b.files.length) rows.push({ text: `변경 파일 ${b.files.length}개`, indent: 0 });
-    for (const x of b.failures) rows.push({ text: style.red(`✗ ${x.command}`), indent: 0 });
+    for (const x of b.failures) rows.push({ text: style.red(`× ${x.command}`), indent: 0 });
   }
   return rows;
 }
@@ -192,7 +193,7 @@ export function flowView(f: Fit, flow: FlowLike | null, ui: FlowUi, width: numbe
     const line = f.trunc(`${pad}${r.text}`, width);
     return i === selRow ? style.inv(f.trunc(stripAnsi(line), width)) : line;
   });
-  const keys = ["↑↓ 이동", "Enter 펼치기", "q 닫기"];
+  const keys = ["▲▼ 이동", "Enter 펼치기", "q 닫기"];
   return frame(f, head, body, footer(f, keys, width), width, height, selRow);
 }
 

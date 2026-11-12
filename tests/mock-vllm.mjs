@@ -62,7 +62,7 @@ const SCENARIOS = {
   "sub-level": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env deep check", level: "deep" } }],
   // 자식 pi 의 bash 에 부모가 넘긴 LLM 키(OXY_LLM_INHERIT_KEYS)가 남지 않는지
   // 실시간 활동(live.json): 본 대화의 도구가 몇 초 동안 실행되는 사이에 모니터가 상태를 읽는다
-  "live-tool": [bash("sleep 3; echo live-tool-done"), { text: "live checked" }],
+  "live-tool": [bash("sleep 8; echo live-tool-done"), { text: "live checked" }],   // 5초 넘게: 이벤트 없이도 updatedAt 이 갱신되는지
   "env-keys": [bash("echo inherit=${OXY_LLM_INHERIT_KEYS:-none}"), { text: "checked" }],
   // subagent 중지: 자식이 오래 걸리는 bash 를 실행하는 중에 부모가 그 작업을 멈춘다 (손자 프로세스가 남지 않아야 한다)
   // MOCK_SLEEP: 실행마다 다른 표식 (예 41.12345). E2E 가 이 표식의 sleep 만 세고 정리해서 다른 실행에 간섭하지 않는다

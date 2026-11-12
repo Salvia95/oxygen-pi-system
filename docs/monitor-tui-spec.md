@@ -153,6 +153,16 @@ jobs        실행 중 2 · 완료 1
 - 실측 (2026-11-13, mintty 80×24 · 120×30, psmux 오른쪽 30% pane 에 예시 모델, WT 80×24): 줄 넘침 없음, 점자 스피너 · `✓ × ■ ! ▲▼` 1칸, 선택 줄 반전, jobs 지금 줄이 맨 아래.
   설치 화면(폴더 선택)의 경로가 가운데에서 줄어드는 것도 확인. 증거: scratchpad `mtui2/a-*` · `b-*` · `i-*` (2026-11-13).
 
+- 구현 (4단계, 2026-11-13): `monitor.ts` 가 `bin/oxy-tui.exe --version` 에 `monitor` 가 있으면(`controller.ts` 의 `supportsMonitor`) `installer/tui.mjs` 의 `ExeLink` 로 exe 를 `--mode monitor` 로 띄우고,
+  상태 파일이 바뀌면 바로 · 그 밖에는 1초마다 보기 모델을 다시 만들어 바뀐 경우에만 보낸다. 키 처리는 `controller.ts` (`flowKey` · `jobsKey`, 순수 함수). `interrupt` 는 `q` 와 같다.
+  exe 가 없거나 모니터 모드를 모르면 · `OXY_MONITOR_TUI=pi` 면 예전 pi-tui 화면(`view.ts`)으로 그린다. 대체 화면의 기호도 1칸으로 고쳤다 (`⏳` → `⠿`, `✗` → `×`, `↑↓` → `▲▼`).
+  flow 화면도 지금 상태를 위해 pi 의 실행 폴더(`live.json`)를 읽는다.
+- 실측에서 찾아 고친 것 (2026-11-13): `live.json` 을 5초마다 다시 쓸 때 `updatedAt` 을 새로 넣지 않아, 긴 도구가 10초를 넘으면 모니터가 `pi 상태를 알 수 없습니다` 로 바뀌었다.
+  쓸 때마다 `updatedAt` 을 새로 넣고, E2E 에 "긴 도구 동안에도 5초마다 갱신" 검사를 더했다 (고치기 전 코드에서 FAIL, 고친 뒤 PASS 확인).
+- 실측 (2026-11-13, 대화형 pi 1.5.0 · mock LLM · psmux, mintty 120×30 · 80×24): `/monitor flow` · `/monitor jobs` 가 oxy-tui 로 열리고, 40초 bash 를 실행하는 동안 지금(`도구 실행 중` · 경과 · 명령) · 계획 · 백그라운드 작업 경과가 갱신된다.
+  pi 의 경과(24.2s)와 모니터의 경과(0:25)가 맞는다. 80×24 에서는 오른쪽 열 24칸 · 종류 열 없음 · 키 안내 두 줄. `OXY_MONITOR_TUI=pi` 로 띄우면 pi-tui 대체 화면이 열린다.
+  증거: scratchpad `m4/120x30-b.png` · `m4/80x24.png` · `m4/*.txt` (2026-11-13). mintty 에 붙인 화면은 pane 보다 한 줄 덜 보인다 (3단계와 같은 현상, 원인 미확인).
+
 ## 5. 확인된 사실
 
 - 오른쪽 열 폭: 80×24 에서 23칸, 120×30 에서 35칸 (`docs/monitor-spec.md` §1 실측).

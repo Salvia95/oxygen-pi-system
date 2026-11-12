@@ -173,7 +173,8 @@ export default function (pi: ExtensionAPI) {
     if (!dir) return;                       // oxy-jobs 가 꺼져 있으면 모니터도 없다
     live = emptyLive(process.pid, Date.now());
     live.model = modelName(ctx.model);
-    liveWriter = new StateWriter(dir, () => live, { fileName: "live.json" });
+    // 쓸 때마다 updatedAt 을 새로: 긴 도구처럼 이벤트가 없는 동안에도 5초마다 갱신되어야 모니터가 "알 수 없음"으로 보지 않는다
+    liveWriter = new StateWriter(dir, () => (live ? { ...live, updatedAt: Date.now() } : live), { fileName: "live.json" });
     feedContext(ctx);
     // 작업 시작 · 끝, 할 일 변화 · 새 커밋: 처음 본 상태를 기준으로 그 뒤의 변화만 알린다
     let jobsSeen = new Map<string, string>((jobs.jobs?.() ?? []).map((j: any) => [j.id, j.state]));
