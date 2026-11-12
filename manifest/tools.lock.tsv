@@ -25,5 +25,5 @@ usql	0.21.6	https://github.com/xo/usql/releases/download/v0.21.6/usql-0.21.6-win
 sqlcl	26.3.1.301.1413	https://download.oracle.com/otn_software/java/sqldeveloper/sqlcl-26.3.1.301.1413.zip	f3f188ae06f17eb181f77ae0be54f2ae8c165e52056a7cb7401a974cace9e5f2	Oracle-FUTC	optional	database
 dbhub	1.5.0	@bytebase/dbhub@1.5.0	npm-lock	MIT	optional	database
 # 화면 프로그램: 이 저장소의 installer/oxy-tui 를 GitHub Actions(.github/workflows/oxy-tui-release.yml)가 빌드해 Release 에 올린 것.
-# 첫 릴리스 전이라 sha256 이 "-" 다. 릴리스한 뒤 채운다: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock
-oxy-tui	0.1.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.1.0/oxy-tui.exe	-	Apache-2.0	harness	core
+# 새 버전을 릴리스하면 version · url 을 올리고 sha256 을 다시 고정한다: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock
+oxy-tui	0.1.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.1.0/oxy-tui.exe	4e347ec7fde9bfd448afcede521b1e36422d26a19240061141aea0e3a246fbb4	Apache-2.0	harness	core
