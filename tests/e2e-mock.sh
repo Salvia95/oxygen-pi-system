@@ -201,6 +201,12 @@ cp "$TMP/settings.bak" "$TMP/agent/settings.json"
 : > "$REQLOG"
 rf=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-flow.mjs")" "$OXY_PI_CLI" "$(winpath "$FW")" "$(winpath "$REQLOG")" 2>&1 | tail -1) || true
 printf '\n\033[1m[rpc-flow]\033[0m %s\n' "$rf"
+# -p(1회 실행)에서는 세션 넘기기를 하지 않고 그 메시지를 처리한다 (예전: 실행이 먼저 끝나 /oxy-rollover 가 끝난 세션을 건드려 오류, 메시지 유실)
+: > "$REQLOG"
+(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" -p "scenario:flow-half fill" < /dev/null > /dev/null 2>&1) || true
+pc=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$OXY_PI_CLI" -p -c "after half" < /dev/null 2>&1) || true
+printf '\n\033[1m[-p -c 50%% 이상]\033[0m %s\n' "$(head -c 160 <<< "$pc" | tr '\n' ' ')"
+chk "flow: -p 에서는 세션 넘기기 없이 그 메시지를 처리 (오류 없음)" '[[ "$pc" == *"MOCK-DONE"* && "$pc" != *"stale"* && "$pc" != *"Error"* && $(nreq) -ge 2 ]]'
 chk "flow: 컨텍스트가 찬 뒤 새 메시지 → 새 세션 + 작업 상태" '[[ "$rf" == *"\"newSession\":true"* && "$rf" == *"\"stateInjected\":true"* ]]'
 
 run repeat

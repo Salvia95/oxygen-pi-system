@@ -151,6 +151,9 @@ export default function (pi: ExtensionAPI) {
   // ---------------------------------------------------------------- 세션 넘기기: 컨텍스트가 찬 상태에서 새 메시지를 보내면 새 세션에서 처리
   pi.on("input", async (event: any, ctx: any) => {
     if (!rollover || event.source === "extension" || event.images?.length) return { action: "continue" as const };
+    // 1회 실행(-p · json)에서는 하지 않는다: 실행이 먼저 끝나 /oxy-rollover 가 끝난 세션을 건드리고 메시지가 사라졌다.
+    // 그 메시지는 이 세션에서 처리하고, 컨텍스트가 차면 compaction(작업 상태로 교체)이 맡는다
+    if (!ctx.hasUI) return { action: "continue" as const };
     const text = String(event.text ?? "");
     if (!text.trim() || text.startsWith("/") || text.startsWith("!") || event.streamingBehavior) return { action: "continue" as const };
     const u = ctx.getContextUsage?.();
