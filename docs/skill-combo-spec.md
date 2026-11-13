@@ -13,6 +13,10 @@
 - 이 명세를 승인했다. C0 (a) skill 이 상황에서 쓰이도록 고치는 작업은 skill-evaluator 에 맡기고 이 combo 시험으로 전후를 잰다, C0-1 (a) 측정 때 PC 의 Python 을 숨긴다,
   C1 (a) `ci.yml` 도 만든다, C2 (a) `skill-eval.yml` 은 수동 + 매일 1번 + `skill-eval` 레이블, C3 (a) 2번 중 1번 합격, C5 (a) 2주 보고만 한 뒤 필수 검사. C4(비밀 등록 · 월 한도)는 사용자가 한다.
 
+바뀐 결정 (사용자, 2026-11-13: "CI 적용은 아직 하지 않을거고, 필요 시 로컬에서만 진행할거야")
+- CI 는 보류한다. 만들어 둔 `ci.yml` · `skill-eval.yml` 은 실행되지 않는 `ci/github-workflows/` 로 옮겼다 (`ci.yml` 은 옮기기 전 GitHub 에서 한 번 통과). C2 · C4 · C5 는 CI 를 적용할 때 다시 정한다.
+- 시험은 필요할 때 로컬에서 돌린다 (`ci/github-workflows/README.md` 의 명령). `--key-env` · `--gate` · `baseline-combo.json` 은 로컬에서도 그대로 쓴다.
+
 ## 1. 지금 있는 시험과 이 시험의 차이
 
 | 시험 | 무엇을 보나 | 한계 |
