@@ -96,7 +96,7 @@ run text-toolcall
 chk "loop-guard: 텍스트 tool call 감지 → 재호출 안내" '[[ "$out" == *"[oxy-loop-guard]"* && $(nreq) -eq 2 ]]'
 
 run read-skill
-chk "skill: 프롬프트의 위치로 SKILL.md 읽기"       '[[ "$out" == *"# Oracle SQLcl"* && "$out" == *"Never use \`-e\`"* ]]'
+chk "skill: 프롬프트의 위치로 SKILL.md 읽기"       '[[ "$out" == *"# Find code and files (rg, fd)"* && "$out" == *"First: built-in tools or CLI?"* ]]'
 
 if (( HAS_DBHUB )); then
   run db-mcp

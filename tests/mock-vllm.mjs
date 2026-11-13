@@ -24,9 +24,10 @@ const SCENARIOS = {
   "big-output": [bash("seq 1 30000")],
   "text-toolcall": [{ text: 'I will run it: <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>' }],
   repeat: [bash("echo same"), bash("echo same"), bash("echo same")],
-  // 시스템 프롬프트에 노출된 skill 위치를 그대로 read 로 연다 (실제 모델의 skill 로딩 흉내)
+  // 시스템 프롬프트에 노출된 skill 위치를 그대로 read 로 연다 (실제 모델의 skill 로딩 흉내).
+  // 필수 구성요소(fd · rg)의 skill 을 쓴다: 선택 구성요소(예: SQLcl)의 skill 은 CI 처럼 그 구성요소가 없는 곳에서는 켜지지 않는다
   "read-skill": [{ tool: "read", args: (body) => ({
-    path: contentText(body.messages[0].content).match(/<location>([^<]*oracle-db-querying[^<]*SKILL\.md)<\/location>/)?.[1] ?? "missing",
+    path: contentText(body.messages[0].content).match(/<location>([^<]*find-code[^<]*SKILL\.md)<\/location>/)?.[1] ?? "missing",
   }) }],
   // pi 가 선언한 MCP 도구 중 이름이 맞는 것을 호출 (tool 이 함수면 body 로 이름을 고른다)
   "db-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__dbhub__execute_sql(_|$)/.test(n)) ?? "missing_dbhub_tool",
