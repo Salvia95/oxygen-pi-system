@@ -6,7 +6,7 @@ import { CustomEditor, type ExtensionAPI, type ExtensionContext, type Keybinding
 import { type EditorTheme, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { enabled, harnessHome } from "../_lib/common.ts";
 import { brandEnv, brandFg } from "./brand.ts";
-import { type RateWindow, rateLabel } from "./rate.ts";
+import { type RateWindow, rateFull, rateLabel, sharedStats } from "./rate.ts";
 import type { TuiConfig } from "./config.ts";
 import { bottomLeftLabel, borderLine, modelLabel, topLeftLabel, usageLabel, usageLevel, withPrompt } from "./editor.ts";
 import { footerLine, footerStatuses } from "./footer.ts";
@@ -92,9 +92,11 @@ export function installEditor(pi: ExtensionAPI, ctx: ExtensionContext, cfg: TuiC
       const th = ctx.ui.theme;
       const wc = widthClass(width);
       const u = (() => { try { return ctx.getContextUsage(); } catch { return undefined; } })();
-      const rate = state.rates && state.isVllm?.(ctx.model?.provider) ? rateLabel(state.rates.stats(Date.now()), g.sep) : undefined;
+      const prov = ctx.model?.provider;
+      const rs = state.rates && state.isVllm?.(prov) ? sharedStats(prov) ?? state.rates.stats(Date.now()) : null;
+      const rate = rs ? rateLabel(rs, g.sep) : undefined;
       const label = usageLabel({ tokens: u?.tokens, contextWindow: u?.contextWindow, percent: u?.percent, cost: state.cost, rate }, wc, g.sep);
-      const lv = usageLevel(u?.percent);
+      const lv = rs && rateFull(rs) && usageLevel(u?.percent) === "normal" ? "warning" : usageLevel(u?.percent);
       const right = th.fg(lv === "normal" ? "muted" : lv, label);
       const bl = bottomLeftLabel(hiddenLineCount);
       const left = bl ? th.fg("text", bl) : "";   // 한글은 회색으로 쓰지 않는다 (oxygen-design)

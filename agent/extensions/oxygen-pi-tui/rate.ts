@@ -32,10 +32,23 @@ export class RateWindow {
   active(now: number): boolean { this.prune(now); return this.reqs.length > 0 || this.toks.length > 0; }
 }
 
-/** 푸터 글: `3 rpm · 12.4K tpm` */
-export function rateLabel(r: { rpm: number; tpm: number }, sep = "·"): string {
-  const tpm = r.tpm < 1000 ? String(r.tpm) : r.tpm < 100_000 ? `${(r.tpm / 1000).toFixed(1).replace(/\.0$/, "")}K` : `${Math.round(r.tpm / 1000)}K`;
-  return `${r.rpm} rpm ${sep} ${tpm} tpm`;
+const kfmt = (n: number) => (n < 1000 ? String(n) : n < 100_000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K` : `${Math.round(n / 1000)}K`);
+
+/** 푸터 글: `3 rpm · 12.4K tpm`, 한도가 있으면 `3/20 rpm · 12.4K/100K tpm` (docs/rate-limit-spec.md) */
+export function rateLabel(r: { rpm: number; tpm: number; limits?: { rpm?: number; tpm?: number } }, sep = "·"): string {
+  const lr = Number(r.limits?.rpm) || 0, lt = Number(r.limits?.tpm) || 0;
+  return `${r.rpm}${lr ? `/${lr}` : ""} rpm ${sep} ${kfmt(r.tpm)}${lt ? `/${kfmt(lt)}` : ""} tpm`;
+}
+
+/** 한도가 있는 값이 한도에 닿았는가 (푸터를 경고색으로) */
+export function rateFull(r: { rpm: number; tpm: number; limits?: { rpm?: number; tpm?: number } }): boolean {
+  const lr = Number(r.limits?.rpm) || 0, lt = Number(r.limits?.tpm) || 0;
+  return (lr > 0 && r.rpm >= lr) || (lt > 0 && r.tpm >= lt);
+}
+
+/** oxy-rate 가 있으면 모든 프로세스를 더한 값 · 한도, 없으면 이 프로세스의 값 */
+export function sharedStats(provider: string | undefined): { rpm: number; tpm: number; limits?: { rpm?: number; tpm?: number } } | null {
+  try { return (globalThis as any)[Symbol.for("oxy.rate")]?.stats?.(provider) ?? null; } catch { return null; }
 }
 
 /** 응답 usage → 입력 + 출력 토큰 (캐시 읽기 · 쓰기도 입력에 든다) */

@@ -91,7 +91,7 @@ export const LLM_KINDS = {
     label: "사내 vLLM", hint: "사내 LLM 서버 (OpenAI 호환 API)",
     detail: ["vLLM 같은 OpenAI 호환 서버에 연결합니다.", "모델 계열에 맞는 샘플링 값과 thinking 제어 방식을 사용합니다."],
     api: "openai-completions", catalog: "families", families: Object.keys(MODEL_FAMILIES), baseUrl: null, listModels: "openai",
-    probe: ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs"], request: ["retries", "dropParams"],
+    probe: ["top_k", "repetition_penalty", "min_p", "chat_template_kwargs"], request: ["retries", "dropParams", "rpm", "tpm"],
     rateLimitHeader: null, thinkingDefault: "off", maxConcurrent: 2, keyRequired: false, noKey: "EMPTY", workspace: false,
     provider: { authHeader: true, compat: OPENAI_COMPAT },
     hints: { toolCall: "vLLM의 --enable-auto-tool-choice, --tool-call-parser 설정을 확인하세요", models: "vLLM의 --served-model-name을 확인하세요" },
@@ -101,7 +101,7 @@ export const LLM_KINDS = {
     label: "OpenAI 호환 서비스", hint: "외부망 테스트용",
     detail: ["Groq 같은 외부 OpenAI 호환 서비스에 연결합니다.", "vLLM 확장 파라미터는 보내지 않습니다."],
     api: "openai-completions", catalog: "families", families: ["generic", "gpt-oss"], baseUrl: null, listModels: "openai",
-    probe: [], request: ["retries"], rateLimitHeader: "x-ratelimit-limit-tokens", thinkingDefault: "off", maxConcurrent: 1,
+    probe: [], request: ["retries", "rpm", "tpm"], rateLimitHeader: "x-ratelimit-limit-tokens", thinkingDefault: "off", maxConcurrent: 1,
     keyRequired: true, workspace: false, provider: { authHeader: true, compat: OPENAI_COMPAT },
     hints: { toolCall: "서비스가 이 모델의 tool calling을 지원하는지 확인하세요", models: "서비스의 모델 이름을 확인하세요" },
     urlExample: "https://api.groq.com/openai/v1", contextNote: "사내 vLLM과 같은 조건으로 테스트하려면 사내 컨텍스트 길이를 입력하세요.",
@@ -110,7 +110,7 @@ export const LLM_KINDS = {
     label: "Anthropic Claude", hint: "외부망 테스트용",
     detail: ["Anthropic API로 Claude 모델에 연결합니다.", "thinking 수준은 effort로 보냅니다."],
     api: "anthropic-messages", catalog: "pi:anthropic", families: [], baseUrl: "https://api.anthropic.com", listModels: "anthropic",
-    probe: [], request: ["retries"], rateLimitHeader: "anthropic-ratelimit-input-tokens-limit", thinkingDefault: "low", maxConcurrent: 2,
+    probe: [], request: ["retries", "rpm", "tpm"], rateLimitHeader: "anthropic-ratelimit-input-tokens-limit", thinkingDefault: "low", maxConcurrent: 2,
     keyRequired: true, workspace: true, provider: {},
     hints: { toolCall: "API 키의 권한과 모델 이름을 확인하세요", models: "Anthropic 콘솔에서 이 키로 쓸 수 있는 모델을 확인하세요" },
     contextNote: "사내 vLLM과 같은 조건으로 테스트하려면 사내 컨텍스트 길이를 입력하세요.",
@@ -364,6 +364,11 @@ export function validateLlm(llm, root) {
     if (!kind) { errs.push(`${c.id}: 알 수 없는 연결 종류 ${c.kind}`); continue; }
     if (!c.baseUrl && !kind.baseUrl) errs.push(`${c.id}: 서버 주소가 없음`);
     if (c.workspaceId !== undefined && !kind.workspace) errs.push(`${c.id}: 이 연결 종류는 워크스페이스 ID를 쓰지 않음`);
+    // 요청 한도 (docs/rate-limit-spec.md): 0 이상의 정수, 0 · 없음 = 제한 없음
+    for (const k of ["rpm", "tpm"]) {
+      const v = c.request?.[k];
+      if (v !== undefined && !(Number.isInteger(v) && v >= 0)) errs.push(`${c.id}: request.${k} 는 0 이상의 정수여야 함: ${v}`);
+    }
     if (c.workspaceId !== undefined && kind.workspace && !WORKSPACE_RE.test(c.workspaceId)) errs.push(`${c.id}: 워크스페이스 ID 형식이 아님 (wrkspc_…): ${c.workspaceId}`);
     for (const m of c.models ?? []) {
       if (!(m.contextWindow > 0) || !(m.maxOutput > 0)) errs.push(`${c.id}/${m.id}: 컨텍스트 길이나 응답 최대 길이가 없음`);

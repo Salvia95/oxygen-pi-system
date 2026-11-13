@@ -31,5 +31,6 @@
 /agent/mcp-auth.json
 # oxy-jobs 작업 로그
 /agent/jobs/
+/agent/rate/
 # configure 가 만드는 psmux 설정 (PC 의 Git Bash 경로가 들어감)
 /agent/psmux.conf

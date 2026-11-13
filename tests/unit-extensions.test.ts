@@ -2034,6 +2034,51 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   assert.deepEqual(M.planRows(cur, new Set(["p:p2"]), 35).map((r: any) => r.text).slice(2, 4), ["[2/3] 구현", "↶ 여기까지 되돌림 (취소함)"]);
 });
 
+test("oxy-rate 한도 대기: RPM · TPM 슬라이딩 윈도우 대기 시간 · 429 대기 시각 · 프로세스 사이 공유 (rate-limit-spec)", async () => {
+  const L = await import("../agent/extensions/oxy-rate/limiter.ts");
+  const { RateStore } = await import("../agent/extensions/oxy-rate/store.ts");
+  const { mkdtempSync, rmSync, readdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const t0 = 10_000_000;
+  const ev = (sec: number, tokens = 0) => ({ at: t0 + sec * 1000, tokens });
+  // RPM 3: 세 번째까지 바로, 네 번째는 첫 요청이 윈도우를 벗어날 때까지
+  const three = [ev(0), ev(10), ev(20)];
+  assert.deepEqual(L.planWait(three.slice(0, 2), t0 + 25_000, { rpm: 3 }, 0), { waitMs: 0, reason: null });
+  assert.deepEqual(L.planWait(three, t0 + 25_000, { rpm: 3 }, 0), { waitMs: 35_000, reason: "rpm" });
+  assert.deepEqual(L.planWait(three, t0 + 61_000, { rpm: 3 }, 0), { waitMs: 0, reason: null }, "60초 지나면 빠진다");
+  // TPM 10K: 6K + 3K 가 있으면 2K 요청은 6K 가 빠질 때까지
+  const toks = [ev(0, 6000), ev(30, 3000)];
+  assert.deepEqual(L.planWait(toks, t0 + 40_000, { tpm: 10_000 }, 2000), { waitMs: 20_000, reason: "tpm" });
+  assert.deepEqual(L.planWait(toks, t0 + 40_000, { tpm: 10_000 }, 1000), { waitMs: 0, reason: null });
+  assert.deepEqual(L.planWait([], t0, { tpm: 10_000 }, 50_000), { waitMs: 0, reason: null, overLimit: true }, "요청 하나가 한도보다 크면 기다려도 소용없어 보낸다");
+  // 둘 다면 더 긴 쪽 · 429 로 막힌 시각이 먼저
+  assert.deepEqual(L.planWait([ev(0), ev(5, 9000), ev(50)], t0 + 55_000, { rpm: 3, tpm: 10_000 }, 2000), { waitMs: 10_000, reason: "tpm" });
+  assert.deepEqual(L.planWait([], t0, { rpm: 3 }, 0, t0 + 7000), { waitMs: 7000, reason: "blocked" });
+  assert.deepEqual(L.usage([ev(0, 100), ev(30, 200), ev(-70, 999)], t0 + 40_000), { rpm: 2, tpm: 300 });
+  // 429 대기 시각: Retry-After 초 · 날짜, x-ratelimit-reset-*, 없으면 기본 10초
+  assert.equal(L.retryAt({ "Retry-After": "12" }, t0), t0 + 12_000);
+  assert.equal(L.retryAt({ "retry-after": new Date(t0 + 5000).toUTCString() }, t0) >= t0 + 4000, true);
+  assert.equal(L.retryAt({ "x-ratelimit-reset-requests": "1.5s", "x-ratelimit-reset-tokens": "6m0s" }, t0), t0 + 360_000);
+  assert.equal(L.retryAt({}, t0), t0 + 10_000);
+  assert.deepEqual([L.parseDuration("250ms"), L.parseDuration("2m30s"), L.parseDuration("x")], [250, 150_000, null]);
+  // 공유: 프로세스 둘(본 대화 · subagent)의 기록을 더하고, 429 멈춤도 함께 본다
+  const dir = mkdtempSync(join(tmpdir(), "oxyrate-"));
+  try {
+    const a = new RateStore(dir, "vllm", process.pid), b = new RateStore(dir, "vllm", process.pid + 100000);
+    const now = Date.now();
+    const e1 = a.add(now - 5000, 1000); b.add(now - 4000, 500);
+    a.settle(e1, 1800, now - 3000);
+    b.block(now + 9000, now);
+    const all = a.readAll(now);
+    assert.deepEqual([all.events.length, L.usage(all.events, now).tpm, all.blockedUntil, all.processes], [2, 2300, now + 9000, 2]);
+    assert.deepEqual(readdirSync(join(dir, "rate", "vllm")).length, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  // 연결 설정: request.rpm · tpm 은 0 이상의 정수
+  const C = await import("../scripts/llm-connections.mjs");
+  const llm: any = { version: 1, connections: [{ id: "vllm", kind: "vllm", baseUrl: "http://x/v1", request: { rpm: 20, tpm: -1 }, models: [{ id: "m", contextWindow: 1, maxOutput: 1 }] }], main: { connection: "vllm", model: "m" } };
+  assert.deepEqual(C.validateLlm(llm).filter((e: string) => e.includes("request.")), ["vllm: request.tpm 는 0 이상의 정수여야 함: -1"]);
+});
+
 test("oxygen-pi-tui vLLM 요청 속도: 1분 슬라이딩 윈도우 RPM · TPM, 금액 자리에 (pi-tui-spec §6.1)", async () => {
   const R = await import("../agent/extensions/oxygen-pi-tui/rate.ts");
   const E = await import("../agent/extensions/oxygen-pi-tui/editor.ts");
@@ -2047,6 +2092,9 @@ test("oxygen-pi-tui vLLM 요청 속도: 1분 슬라이딩 윈도우 RPM · TPM, 
   assert.equal(R.rateLabel({ rpm: 3, tpm: 12_400 }), "3 rpm · 12.4K tpm");
   assert.equal(R.rateLabel({ rpm: 0, tpm: 0 }), "0 rpm · 0 tpm");
   assert.equal(R.rateLabel({ rpm: 40, tpm: 250_000 }), "40 rpm · 250K tpm");
+  assert.equal(R.rateLabel({ rpm: 3, tpm: 12_400, limits: { rpm: 20, tpm: 100_000 } }), "3/20 rpm · 12.4K/100K tpm", "한도가 있으면 함께");
+  assert.equal(R.rateFull({ rpm: 20, tpm: 0, limits: { rpm: 20 } }), true);
+  assert.equal(R.rateFull({ rpm: 3, tpm: 0, limits: {} }), false);
   assert.equal(R.usageTokens({ input: 1000, output: 200, cacheRead: 50 }), 1250);
   const llm = { connections: [{ id: "vllm", kind: "vllm" }, { id: "anthropic-claude", kind: "anthropic" }] };
   assert.equal(R.isVllmProvider("oxy-vllm", llm), true);
