@@ -5,11 +5,12 @@ import type { Component } from "@earendil-works/pi-tui";
 import { measure } from "../chrome.ts";
 import { type Glyphs, glyphs } from "../glyphs.ts";
 import { bashSummary, commandHead, diffStats, errorLines, lineCount, parseBash, readRange, relPath, textOf } from "./basic.ts";
-import { type ResultView, type ToolPaint, type ToolStatus, callLine, resultLines } from "./frame.ts";
-import { grepArgs, grepCollapsed, grepExpanded, grepSummary, matcher, parseGrep } from "./grep.ts";
+import { type ResultView, type ToolPaint, type ToolStatus, callLine, fmtDuration, resultLines } from "./frame.ts";
+import { grepArgs, grepExpanded, matcher, parseGrep } from "./grep.ts";
 import { searchCommand, searchView } from "./search.ts";
 import { backgroundArgs, backgroundView, parseJobNotice } from "./jobs.ts";
 import { SYSTEM_TOOLS, systemDetails, systemSentence } from "./system.ts";
+import { ONE_LINE_TOOLS, type Sentence, editSentence, failSentence, grepSentence, readSentence, runningSentence, writeSentence } from "./primitive.ts";
 import { brandEnv, brandFg } from "../brand.ts";
 
 /** width 마다 줄을 만드는 컴포넌트 */
@@ -57,6 +58,7 @@ function errorView(text: string, p: ToolPaint): ResultView {
   return { summary: p.fg("error", e.first), body: e.rest.map((l) => p.fg("toolOutput", l)), keep: "head", max: 200, unit: "line" };
 }
 
+// read · write · edit · grep 은 한 줄 문장 (oneLineRenderer, primitive.ts). 여기는 두 줄(실행 줄 + 요약) 도구
 export const SUMMARIZERS: Record<string, Summarizer> = {
   // oxy-jobs 의 background (docs/ui-unify-spec.md §2.5)
   background: {
@@ -66,22 +68,6 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       if (c?.isError) return { view: errorView(text, p) };
       const v = backgroundView(String(c?.args?.action ?? ""), text);
       return { view: { summary: p.fg(v.level, v.summary), body: v.body.map((l) => p.fg("toolOutput", l)), keep: v.keep, max: 200, unit: "line" } };
-    },
-  },
-  grep: {
-    call: (a, c) => ({ title: "grep", args: grepArgs(a, relPath(a?.path, c?.cwd ?? "")) }),
-    result: (r, o, c, p, g) => {
-      const text = textOf(r.content);
-      if (c?.isError) return { view: errorView(text, p) };
-      const parsed = parseGrep(text);
-      if (!parsed) return { view: { summary: p.fg("text", "결과"), body: text.split("\n").map((l) => p.fg("toolOutput", l)), keep: "head", max: 200, unit: "line" } };
-      const s = grepSummary(parsed, r.details);
-      const summary = p.fg(parsed.matches ? "success" : "text", s.text) + (s.warn ? p.fg("warning", ` · ${s.warn}`) : "");
-      const a = c?.args ?? {};
-      const body = o.expanded
-        ? grepExpanded(measure, parsed, matcher(a.pattern, { literal: a.literal, ignoreCase: a.ignoreCase }), g.vbar, p)
-        : grepCollapsed(measure, parsed, p);
-      return { view: { summary, body, keep: "head", max: 200, unit: o.expanded ? "line" : "file" } };
     },
   },
   bash: {
@@ -100,41 +86,12 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       return { view: { summary, body: b.lines.map((l) => p.fg("toolOutput", l)), keep: "tail", max: 200, unit: "line" } };
     },
   },
-  read: {
-    call: (a, c) => ({ title: "read", args: `${relPath(a?.path, c?.cwd ?? "")}${readRange(a?.offset, a?.limit)}` }),
-    result: (r, o, c, p) => {
-      const text = textOf(r.content);
-      if (c?.isError) return { view: errorView(text, p) };
-      const img = Array.isArray(r.content) && r.content.some((x: any) => x?.type === "image");
-      const n = lineCount(text);
-      const total = r.details?.truncation?.totalLines;
-      const summary = img ? p.fg("success", "이미지") : p.fg("success", total && total > n ? `전체 ${total}줄 중 ${n}줄` : `${n}줄`);
-      return { view: { summary, body: [], keep: "head", max: 0, unit: "line" }, extra: o.expanded ? "base" : undefined };
-    },
-  },
-  edit: {
-    call: (a, c) => ({ title: "edit", args: relPath(a?.path, c?.cwd ?? "") }),
-    result: (r, o, c, p) => {
-      const text = textOf(r.content);
-      if (c?.isError) return { view: errorView(text, p) };
-      const d = diffStats(r.details?.diff);
-      const summary = d.added || d.removed ? `${p.fg("success", `+${d.added}`)} ${p.fg("error", `-${d.removed}`)}` : p.fg("success", "고침");
-      return { view: { summary, body: [], keep: "head", max: 0, unit: "line" }, extra: o.expanded ? "base" : undefined };
-    },
-  },
-  write: {
-    call: (a, c) => ({ title: "write", args: relPath(a?.path, c?.cwd ?? "") }),
-    result: (r, _o, c, p) => {
-      const text = textOf(r.content);
-      if (c?.isError) return { view: errorView(text, p) };
-      return { view: { summary: p.fg("success", `${lineCount(String(c?.args?.content ?? ""))}줄 씀`), body: [], keep: "head", max: 0, unit: "line" } };
-    },
-  },
 };
 
 export function registerToolRows(pi: ExtensionAPI, isOn: () => boolean, glyphMode: () => "unicode" | "ascii"): void {
   pi.registerToolRenderer((toolName, next) => {
     if (SYSTEM_TOOLS.has(toolName)) return isOn() ? systemRenderer(toolName, glyphMode) : next();
+    if (ONE_LINE_TOOLS.has(toolName)) return isOn() ? oneLineRenderer(toolName, next(), glyphMode) : next();
     const s = SUMMARIZERS[toolName];
     if (!s || !isOn()) return next();
     const base = next();
@@ -156,6 +113,86 @@ export function registerToolRows(pi: ExtensionAPI, isOn: () => boolean, glyphMod
       },
     } as any;
   });
+}
+
+/** 한 줄 문장 (primitive.ts): ` ✓ Read sample.txt, 12 lines        0.0s` — 동사 굵게 · 대상 강조색 · 결과 본문색, 오른쪽 걸린 시간 */
+function sentenceLine(g: Glyphs, width: number, status: ToolStatus, v: Sentence, p: ToolPaint, durationMs?: number): string {
+  const glyph = status === "running" ? p.fg("warning", g.running) : status === "fail" ? p.fg("error", g.fail) : p.fg("success", g.ok);
+  const tail = v.parts ? v.parts.map((x) => p.fg(x.tone, x.text)).join("") : v.detail ? p.fg(status === "fail" ? "error" : "text", v.detail) : "";
+  const dur = status === "running" ? "" : fmtDuration(durationMs);
+  const right = dur ? `${p.fg("muted", dur)} ` : "";
+  const room = width - (right ? measure.width(right) + 1 : 0);
+  // 넘치면 결과(tail)는 두고 대상(긴 경로 · 패턴)을 줄인다
+  const fixed = measure.width(` ${glyph} ${p.bold(v.verb)} `) + measure.width(tail);
+  const target = v.target && fixed + measure.width(v.target) > room && room - fixed >= 8 ? measure.trunc(v.target, room - fixed, "…") : v.target;
+  const left = ` ${glyph} ${p.fg("toolTitle", p.bold(v.verb))}${target ? ` ${p.fg("accent", target)}` : ""}${tail}`;
+  const l = measure.width(left) > room ? measure.trunc(left, Math.max(1, room), "…") : left;
+  const gap = Math.max(1, width - measure.width(l) - measure.width(right));
+  return right ? l + " ".repeat(gap) + right : l;
+}
+
+/** 도구 대상: read · write · edit 는 파일, grep 은 패턴 + 위치 */
+function targetOf(toolName: string, a: any, cwd: string): string {
+  if (toolName === "grep") return grepArgs(a, relPath(a?.path, cwd));
+  const t = relPath(a?.path, cwd);
+  return toolName === "read" ? `${t}${readRange(a?.offset, a?.limit)}` : t;
+}
+
+/**
+ * 기본 도구 한 줄 (docs/pi-tui-spec.md §7.6): 실행 중에는 실행 줄(`○ Reading x..`), 끝나면 결과 줄 하나(`✓ Read x, 12 lines`).
+ * 세부 내용(파일 내용 · diff · 찾은 줄 · 오류 나머지)은 펼쳤을 때만 (기본 접힘), Ctrl+K 는 다른 줄처럼 접는다
+ */
+function oneLineRenderer(toolName: string, base: any, glyphMode: () => "unicode" | "ascii"): any {
+  return {
+    renderShell: "self",
+    renderCall(args: any, theme: any, context: any) {
+      // 결과가 오면(걸린 시간이 생기면) 실행 줄은 그리지 않는다. 결과 줄이 대신한다
+      if (context?.durationMs !== undefined || context?.state?.oxyDone) return lines(() => []);
+      const g = glyphs(glyphMode());
+      return lines((w) => [sentenceLine(g, w, "running", runningSentence(toolName, targetOf(toolName, args, context?.cwd ?? "")), theme)]);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      if (context?.state && !options?.isPartial) context.state.oxyDone = true;
+      const g = glyphs(glyphMode());
+      const a = context?.args ?? {};
+      const target = targetOf(toolName, a, context?.cwd ?? "");
+      const text = textOf(result?.content);
+      const expanded = Boolean(options?.expanded) && !folded;
+      const indent = (ls: string[]) => ls.map((l) => `   ${l}`);
+      if (context?.isError) {
+        const e = errorLines(text);
+        return lines((w) => [sentenceLine(g, w, "fail", failSentence(toolName, target, e.first), theme, context?.durationMs),
+          ...(expanded ? indent(e.rest.map((l) => theme.fg("toolOutput", l))).map((l) => measure.trunc(l, w, "…")) : [])]);
+      }
+      let v: Sentence;
+      let body: ((w: number) => string[]) | null = null;
+      if (toolName === "grep") {
+        const parsed = parseGrep(text);
+        const d = result?.details;
+        v = parsed ? grepSentence(target, parsed.matches, parsed.files.length, { limit: d?.matchLimitReached, size: d?.truncation?.truncated, lines: d?.linesTruncated })
+          : { verb: "Searched", target };
+        if (expanded) {
+          body = parsed
+            ? (w) => { const ex = grepExpanded(measure, parsed, matcher(a.pattern, { literal: a.literal, ignoreCase: a.ignoreCase }), g.vbar, theme); const all = typeof ex === "function" ? ex(Math.max(1, w - 3)) : ex.map((l: any) => (typeof l === "function" ? l(Math.max(1, w - 3)) : l)); return indent(all); }
+            : () => indent(text.split("\n").map((l) => theme.fg("toolOutput", l)));
+        }
+      } else if (toolName === "read") {
+        const img = Array.isArray(result?.content) && result.content.some((x: any) => x?.type === "image");
+        v = readSentence(target, lineCount(text), result?.details?.truncation?.totalLines, img);
+      } else if (toolName === "edit") {
+        const d = diffStats(result?.details?.diff);
+        v = editSentence(target, d.added, d.removed);
+      } else {
+        v = writeSentence(target, lineCount(String(a.content ?? "")));
+      }
+      const head = lines((w) => [sentenceLine(g, w, statusFrom(context), v, theme, context?.durationMs), ...(body ? body(w).map((l) => measure.trunc(l, w, "…")) : [])]);
+      // read · edit · write 의 펼친 내용은 pi 기본 그리기 (파일 내용 · diff)를 3칸 들여 붙인다
+      if (toolName === "grep" || !expanded || !base?.renderResult) return head;
+      let more: Component | undefined;
+      try { more = base.renderResult(result, options, theme, { ...context, lastComponent: undefined }) as Component; } catch { more = undefined; }
+      return stack([head, indented(more)]);
+    },
+  };
 }
 
 /**

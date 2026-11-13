@@ -2025,6 +2025,25 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   assert.deepEqual(M.planRows(cur, new Set(["p:p2"]), 35).map((r: any) => r.text).slice(2, 4), ["[2/3] 구현", "↶ 여기까지 되돌림 (취소함)"]);
 });
 
+test("oxygen-pi-tui 기본 도구 한 줄: read · write · edit · grep 문장 (pi-tui-spec §7.6)", async () => {
+  const P = await import("../agent/extensions/oxygen-pi-tui/tools/primitive.ts");
+  const flat = (v: any) => v.verb + " " + v.target + (v.parts ? v.parts.map((x: any) => x.text).join("") : v.detail ?? "");
+  assert.equal(flat(P.readSentence("sample.txt", 12, undefined, false)), "Read sample.txt, 12 lines");
+  assert.equal(flat(P.readSentence("a.ts", 1, undefined, false)), "Read a.ts, 1 line");
+  assert.equal(flat(P.readSentence("big.log", 2000, 12400, false)), "Read big.log, 2,000 of 12,400 lines");
+  assert.equal(flat(P.readSentence("x.png", 0, undefined, true)), "Read x.png, image");
+  assert.equal(flat(P.writeSentence("notes.md", 3)), "Wrote notes.md, 3 lines");
+  assert.equal(flat(P.editSentence("sample.txt", 1, 1)), "Edited sample.txt, +1 -1");
+  assert.deepEqual(P.editSentence("a", 2, 0).parts!.map((x: any) => x.tone), ["text", "success", "text", "error"]);
+  assert.equal(flat(P.grepSentence("/x/ in src", 5, 2)), "Searched /x/ in src, 5 matches in 2 files");
+  assert.equal(flat(P.grepSentence("/x/ in src", 0, 0)), "Searched /x/ in src, no matches");
+  assert.equal(flat(P.grepSentence("/x/ in .", 1, 1, { limit: 100, lines: true })), "Searched /x/ in ., 1 match in 1 file, stopped at 100 matches, some lines cut");
+  assert.equal(P.grepSentence("p", 1, 1, { size: true }).parts!.at(-1)!.tone, "warning");
+  assert.equal(flat(P.runningSentence("read", "a.ts")), "Reading a.ts..");
+  assert.equal(flat(P.failSentence("read", "nope.txt", "ENOENT: no such file")), "Read nope.txt failed.., ENOENT: no such file");
+  assert.deepEqual([...P.ONE_LINE_TOOLS].sort(), ["edit", "grep", "read", "write"]);
+});
+
 test("oxygen-pi-tui 시스템 작업 줄: flow_plan · flow_note · flow_show 를 짧은 문장으로 (pi-tui-spec §7.5)", async () => {
   const S = await import("../agent/extensions/oxygen-pi-tui/tools/system.ts");
   const res = "Updated p1 [done].\n- p1 [done] Write a.txt\n- p2 [doing] Write b.txt (commits n2)\n  - p2.1 [todo] sub one\nNext: p2 Write b.txt";

@@ -305,6 +305,22 @@ pi 기본 입력창의 윗줄 · 아랫줄 가로선을 상태가 들어간 테�
   위치 `[i/n]` 은 결과 글의 계획 줄에서 같은 단계 안의 순서로 센다 (화면의 Overall Task 와 같은 꼴). 색은 상태 뜻이 아니라 "시스템 작업" 구분이라 시그니처 둘째 단계를 썼다 (`.claude/rules/oxygen-design.md`: 시그니처 o2.sage 는 1~2곳, 상태색은 쓰지 않음).
 - 실측 (mock pi, mintty 80×34 D2Coding): 접힘 `◇ Plan set, 2 tasks` · `◇ Finished [1/2] Write a!` 색 `127;169;138`, 사용자 줄 `> scenario:…`. Ctrl+O 로 `action="update" id="p1" status="done"` 과 결과 글. 증거: scratchpad `caps/system-rows.png`.
 
+### 7.6 기본 도구 한 줄 (2026-11-14)
+
+요청 (사용자, 2026-11-14): "read, write, grep과 같은 프리머티브 툴들의 메세지도 동일한 원칙을 적용해서 수정하고 반영하자" — §7.5 와 같은 원칙: 도구 이름 · 인자 줄 대신 짧은 문장 한 줄, 세부 내용은 펼칠 때만(기본 접힘, Ctrl+O · Ctrl+K), 말투는 다른 줄과 같게.
+
+| 도구 | 실행 중 | 끝남 (펼치면) |
+| --- | --- | --- |
+| read | `○ Reading sample.txt..` | `✓ Read sample.txt, 12 lines` · `Read big.log, 2,000 of 12,400 lines` · `Read x.png, image` (파일 내용) |
+| write | `○ Writing notes.md..` | `✓ Wrote notes.md, 3 lines` (쓴 내용) |
+| edit | `○ Editing a.ts..` | `✓ Edited a.ts, +1 -1` (+ 초록 · - 빨강, diff) |
+| grep | `○ Searching /pat/ in src..` | `✓ Searched /pat/ in src, 5 matches in 2 files` · `…, no matches` · 멈춘 이유는 노랑 `, stopped at 100 matches` (찾은 줄) |
+| 실패 | | `× Read nope.txt failed.., <첫 줄>` (오류 나머지) |
+
+- 동사는 굵게(도구 제목색), 대상은 강조색, 결과는 본문색, 오른쪽에 걸린 시간. 넘치면 결과는 두고 대상(긴 경로 · 패턴)을 줄인다.
+- 예전 두 줄(`✓ read sample.txt` / `└ 1줄`)과 grep 의 접힌 파일 목록 3줄을 대신한다. bash 는 `Task done!, print N lines` 두 줄 그대로 (§7.4, 사용자가 정한 문구).
+- 실측 (mock pi, mintty 80×40 D2Coding): `✓ Read sample.txt, 1 line` · `✓ Edited sample.txt, +1 -1` · `✓ Wrote notes.md, 3 lines` · `✓ Searched /registerTool/ in ~/OneDrive/Documents…, 11 matches in 5 files`, Ctrl+O 로 read 아래 파일 내용 · grep 아래 찾은 줄. 증거: scratchpad `caps/primitive-rows.png`.
+
 ## 8. 글꼴 D2Coding 반입 · 적용
 
 ### 반입 (fetch · 번들)
