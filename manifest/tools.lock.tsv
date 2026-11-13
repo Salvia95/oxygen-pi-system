@@ -28,4 +28,4 @@ dbhub	1.5.0	@bytebase/dbhub@1.5.0	npm-lock	MIT	optional	database
 d2coding	1.4.0	https://github.com/naver/d2-coding-font/releases/download/VER1.4.0/D2Coding-Ver1.4.0-20261003.zip	17e2da5e2879006eb725b87943f7988736ef8b6c9f8b84bc8e3bdbcb8dd46744	OFL-1.1	harness	core
 # 화면 프로그램: 이 저장소의 installer/oxy-tui 를 GitHub Actions(.github/workflows/oxy-tui-release.yml)가 빌드해 Release 에 올린 것.
 # 새 버전을 릴리스하면 version · url 을 올리고 sha256 을 다시 고정한다: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock
-oxy-tui	0.4.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.4.0/oxy-tui.exe	807ad3144be62305c4c2035dbc386a85e6e25e98ca6d2b009f34e8e856f9deef	Apache-2.0	harness	core
+oxy-tui	0.5.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.5.0/oxy-tui.exe	807ad3144be62305c4c2035dbc386a85e6e25e98ca6d2b009f34e8e856f9deef	Apache-2.0	harness	core

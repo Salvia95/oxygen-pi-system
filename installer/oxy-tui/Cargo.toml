@@ -1,6 +1,6 @@
 [package]
 name = "oxy-tui"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 description = "oxygen-pi-system 설치·설정 TUI 의 화면. 그리기와 키 입력만 맡고, 무엇을 보일지는 installer/*.mjs 가 파이프로 지시한다"
 publish = false
