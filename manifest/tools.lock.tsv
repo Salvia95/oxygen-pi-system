@@ -28,4 +28,4 @@ dbhub	1.5.0	@bytebase/dbhub@1.5.0	npm-lock	MIT	optional	database
 pi-tokyo-night	1.0.0	https://registry.npmjs.org/pi-tokyo-night/-/pi-tokyo-night-1.0.0.tgz	03a376bb0ffb20ef1ff6aacb653789ce45e24e67bc39cb0f6cf1e44df8b6fa77	MIT	harness	core
 # 화면 프로그램: 이 저장소의 installer/oxy-tui 를 GitHub Actions(.github/workflows/oxy-tui-release.yml)가 빌드해 Release 에 올린 것.
 # 새 버전을 릴리스하면 version · url 을 올리고 sha256 을 다시 고정한다: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock
-oxy-tui	0.2.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.2.0/oxy-tui.exe	ef141d11679a4d3ec2cfd2ab76a94aaed7a597886409a6d17e3e0a1549547d47	Apache-2.0	harness	core
+oxy-tui	0.3.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.3.0/oxy-tui.exe	20e22ba9fd7c288e0b3a53ff6d7d8cdf4c1d9f36d9ce8d951cf425786f228fbf	Apache-2.0	harness	core
