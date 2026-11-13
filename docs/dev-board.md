@@ -63,8 +63,8 @@
 | `tui-fix/2` | 점검 화면 `번들 구성요소` 줄: 설명을 경로 앞에 (§6) | 완료 | `tests/installer-sandbox.sh` 통과 (2026-11-13) | mintty 80×24 점검 화면 캡처: `필수 5개 확인 · C:\Users\…\workspace\oxygen-pi-system` (2026-11-13) | `docs/tui-spec.md` §6 |
 | `skill-combo/1` | combo 시나리오 · 기록 (§2 §3) | 완료 | LLM 없이 판정 검사: 손대지 않은 자료 4 FAIL · 정답 4 PASS (2026-11-13 부모) | claude-haiku-5-5 두 번 (`combo-r1` · `combo-r2`), 합격 1/4 · 1/4, SKILL.md 읽음 0 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
 | `skill-combo/2` | `report.mjs --gate` · `run.mjs --key-env` · `--hide` (§4) | 완료 | 단위 `CI 판정` 시험 (`gate.mjs`), 기준 `HEAD af5bdfa + 미커밋` (2026-11-13 부모) | Python 을 숨긴 하이쿠 `hide-r1`: 합격 2/4 → `baseline-combo.json`. `--key-env` 는 CI 첫 실행에서 확인 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
-| `skill-combo/3` | `ci.yml` (mock 시험, 승인 필요) | 예정 | – | – | – |
-| `skill-combo/4` | `skill-eval.yml` (하이쿠, 승인 필요) | 예정 | – | – | – |
+| `skill-combo/3` | `ci.yml` (mock 시험) | 완료 | GitHub Actions run 43363974266 성공: 구성요소 받기 · 위생 · 단위 · E2E · Rust (2026-11-13). 첫 실행에서 E2E 의 skill 읽기 검사가 선택 구성요소(SQLcl) skill 에 기대어 실패 → find-code 로 바꿈 | 해당 없음 (CI) | 40e3126 |
+| `skill-combo/4` | `skill-eval.yml` (하이쿠) | 구현 | workflow 작성 (2b5bbe3). 비밀 · Environment 등록 전이라 아직 실행하지 않음 | – | 2b5bbe3 |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |
