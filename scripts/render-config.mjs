@@ -2,7 +2,7 @@
 // configure.sh 와 설치 TUI(installer/) 가 공통으로 사용한다. 외부 의존성 없음.
 //
 //   CLI: node scripts/render-config.mjs <agentDir>      (값은 환경변수에서 읽음)
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as secrets from "../installer/secrets.mjs";
@@ -82,6 +82,26 @@ function applyLlmSettings(json, llm) {
  * opts.root: 하네스 루트 (pi 내장 카탈로그 확인용. 기본은 vars.OXY_HOME → agentDir 의 상위)
  * @returns 생성한 파일 경로 목록
  */
+export const DEFAULT_THEME = "tokyo-night";
+
+/**
+ * pi 테마 (docs/flow-view-spec.md §4): 번들의 vendor/pi-themes/*.json 을 agent/themes 로 복사하고,
+ * settings.json 의 theme 은 지금 값(사용자가 pi /settings 에서 고른 것)을 두되 없으면 DEFAULT_THEME (그 테마 파일이 있을 때만).
+ */
+export function applyTheme(json, agentDir, root) {
+  const src = join(root, "vendor", "pi-themes");
+  if (existsSync(src)) {
+    mkdirSync(join(agentDir, "themes"), { recursive: true });
+    for (const f of readdirSync(src).filter((x) => x.endsWith(".json"))) copyFileSync(join(src, f), join(agentDir, "themes", f));
+  }
+  let current;
+  try { current = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).theme; } catch { /* 아직 없음 */ }
+  const out = { ...json };
+  if (typeof current === "string" && current) out.theme = current;
+  else if (existsSync(join(agentDir, "themes", `${DEFAULT_THEME}.json`))) out.theme = DEFAULT_THEME;
+  return out;
+}
+
 export function renderConfig(agentDir, vars, opts = {}) {
   const root = opts.root ?? vars.OXY_HOME ?? resolve(agentDir, "..");
   // 예전 값은 oxy.env 파일에서만 읽는다 (셸에 이전 값이 내보내져 있어도 llm.json 을 덮어쓰지 않게)
@@ -97,7 +117,7 @@ export function renderConfig(agentDir, vars, opts = {}) {
   const outputs = {};
   for (const file of readdirSync(tplDir).filter((f) => f.endsWith(".json"))) {
     let json = JSON.parse(substitute(readFileSync(join(tplDir, file), "utf8"), vars, file));
-    if (file === "settings.json") json = applyLlmSettings(json, llm);
+    if (file === "settings.json") json = applyTheme(applyLlmSettings(json, llm), agentDir, root);
     outputs[file] = json;
   }
   for (const [file, json] of Object.entries(outputs)) {

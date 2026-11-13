@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Gauge, Padding, Paragraph};
 
 use crate::model::{App, ConfirmSpec, InputSpec, Screen, SelectSpec, TaskSpec};
-use crate::parts::{alert_line, context_lines, desc_line, help_text, keys_for, keys_line, label_width, loc_parts, loc_title, result_line, row_spans, summary_lines};
+use crate::parts::{Button, alert_line, centered, dialog, widen, context_lines, desc_line, help_text, keys_for, keys_line, label_width, loc_parts, loc_title, result_line, row_spans, summary_lines};
 use crate::text::{trunc, w, wrap};
 use crate::theme;
 use crate::view_a::{self, desc_rows, select_desc, shown_value, tail, task_body, window};
@@ -345,19 +345,6 @@ fn task_panel(f: &mut Frame, app: &App, t: &TaskSpec, area: Rect) {
 }
 
 // ---------------------------------------------------------------- 팝업
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let wd = width.min(area.width);
-    let ht = height.min(area.height);
-    Rect::new(area.x + (area.width - wd) / 2, area.y + (area.height - ht) / 2, wd, ht)
-}
-
-/// 팝업 자리를 지울 때 좌우로 한 칸 더 지운다 (한글처럼 2칸인 글자의 반쪽이 테두리에 걸리면 글자가 테두리를 덮는다)
-fn widen(r: Rect, within: Rect) -> Rect {
-    let x = r.x.saturating_sub(1).max(within.x);
-    let right = (r.x + r.width + 1).min(within.x + within.width);
-    Rect::new(x, r.y, right - x, r.height)
-}
-
 /// 확인 팝업: 질문 · 요약표 · 되돌릴 수 없는 결과 · 버튼 두 개. 위험한 확인은 테두리가 노랑
 fn confirm_popup(f: &mut Frame, c: &ConfirmSpec, area: Rect) {
     let width = (area.width.saturating_sub(6)).min(70);
@@ -391,20 +378,8 @@ fn confirm_popup(f: &mut Frame, c: &ConfirmSpec, area: Rect) {
         lines.push(desc_line(&format!("! {}", c.warning), iw, 0));
     }
     lines.push(Line::raw(""));
-    let button = |label: &str, on: bool, danger: bool| {
-        let text = format!("  {}{label}  ", if danger { "! " } else { "" });
-        if on {
-            Span::styled(text, Style::new().fg(if danger { Color::Yellow } else { theme::accent_color() }).add_modifier(Modifier::REVERSED | Modifier::BOLD))
-        } else {
-            Span::styled(text, theme::strong())
-        }
-    };
-    lines.push(Line::from(vec![button(&c.yes, c.on_yes, c.danger), Span::raw("   "), button(&c.no, !c.on_yes, false)]).centered());
-    let border = if c.danger { theme::warn() } else { theme::accent() };
-    let block = Block::bordered().border_style(border).padding(Padding::horizontal(1)).title(Line::from(vec![Span::raw(" "), Span::styled(c.title.clone(), theme::strong()), Span::raw(" ")]));
-    let rect = centered(area, width, lines.len() as u16 + 2);
-    f.render_widget(Clear, widen(rect, area));
-    f.render_widget(Paragraph::new(lines).block(block), rect);
+    let buttons = [Button { label: &c.yes, on: c.on_yes, danger: c.danger }, Button { label: &c.no, on: !c.on_yes, danger: false }];
+    dialog(f, area, width, &c.title, lines, &buttons, c.danger);
 }
 
 fn help_popup(f: &mut Frame, s: &SelectSpec, area: Rect) {
@@ -414,4 +389,52 @@ fn help_popup(f: &mut Frame, s: &SelectSpec, area: Rect) {
     let rect = centered(area, width, lines.len() as u16 + 2);
     f.render_widget(Clear, widen(rect, area));
     f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    /// 확인 팝업을 `parts::dialog` 로 옮겨도 설치 화면의 모양은 그대로다: 넉넉한 버튼(앞뒤 2칸 · 사이 3칸), 위험이면 `! ` 와 경고색 테두리
+    #[test]
+    fn confirm_popup_keeps_the_install_screen_shape() {
+        let c = ConfirmSpec {
+            title: "제거".into(),
+            header: "이 PC에서 제거할까요?".into(),
+            warning: "삭제하면 복구할 수 없습니다.".into(),
+            yes: "설치 폴더 삭제".into(),
+            no: "제거 취소".into(),
+            danger: true,
+            ..ConfirmSpec::default()
+        };
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| confirm_popup(f, &c, f.area())).unwrap();
+        let buf = term.backend().buffer().clone();
+        let row = |y: u16| -> String {
+            let mut s = String::new();
+            let mut x = 0;
+            while x < 100 {
+                let sym = buf[(x, y)].symbol();
+                s.push_str(sym);
+                x += w(sym).max(1) as u16;
+            }
+            s.trim().to_string()
+        };
+        let rows: Vec<String> = (0..20).map(row).filter(|r| !r.is_empty()).collect();
+        assert_eq!(rows.len(), 7, "{rows:?}");
+        assert!(rows[0].starts_with("┌ 제거 ") && rows[0].ends_with('┐') && rows[6].starts_with('└'), "{rows:?}");
+        assert_eq!(rows[1].trim_matches('│').trim(), "이 PC에서 제거할까요?");
+        assert_eq!(rows[3].trim_matches('│').trim(), "! 삭제하면 복구할 수 없습니다.");
+        assert!(rows[5].contains("! 설치 폴더 삭제       제거 취소"), "{rows:?}");
+        // 포커스는 취소(on_yes=false): 취소만 반전, 테두리는 경고색(노랑)
+        let at = |label: &str| (0..20).find_map(|y| (0..100).find(|&x| buf[(x, y)].symbol() == label).map(|x| (x, y))).unwrap();
+        let (x, y) = at("취");
+        assert!(buf[(x, y)].style().add_modifier.contains(Modifier::REVERSED) && buf[(x, y)].style().fg == Some(theme::accent_color()));
+        let (x, y) = at("설");
+        assert!(!buf[(x, y)].style().add_modifier.contains(Modifier::REVERSED));
+        let (x, y) = at("┌");
+        assert_eq!(buf[(x, y)].style().fg, Some(Color::Yellow));
+    }
 }

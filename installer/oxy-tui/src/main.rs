@@ -454,6 +454,8 @@ fn monitor_key(k: &KeyEvent) -> Option<&'static str> {
     match k.code {
         KeyCode::Up => Some("up"),
         KeyCode::Down => Some("down"),
+        KeyCode::Left => Some("left"),
+        KeyCode::Right => Some("right"),
         KeyCode::Enter => Some("enter"),
         KeyCode::Esc => Some("esc"),
         KeyCode::Char('s' | 'S') => Some("s"),
@@ -470,6 +472,7 @@ fn spinner_at(start: Instant) -> usize {
 /// `--pipe <이름> --mode monitor`: Node 가 보내는 보기 모델(`{"op":"monitor",…}`)을 그리고 키 · 창 크기를 이벤트로 돌려준다.
 /// 연결은 설치 화면과 같다 (protocol.rs). 지시 연결이 끊기면 터미널을 되돌리고 끝낸다
 fn run_monitor(name: &str) -> io::Result<i32> {
+    theme::set_monitor(); // OXY_TUI_THEME=tokyo-night 는 모니터 화면에서만 쓴다
     let mut link = protocol::connect(name)?;
     let mut model: Option<monitor::MonitorModel> = None;
     let mut term = enter()?;
@@ -535,6 +538,7 @@ fn run_monitor(name: &str) -> io::Result<i32> {
 /// `demo monitor --model <JSON>`: 보기 모델 파일을 그린다 (스피너 · 경과가 움직인다. q 로 끝낸다).
 /// 터미널이 아니면(파이프 · 시험) 화면을 만들지 않고 한 장면을 글자로 찍는다: `--size WxH`(기본 80x24), `--now <ms>`(경과를 셀 기준 시각)
 fn run_monitor_demo(args: &[String]) -> io::Result<i32> {
+    theme::set_monitor();
     let Some(path) = arg(args, "--model") else {
         eprintln!("usage: oxy-tui demo monitor --model <json> [--exit-after <ms>] [--size WxH] [--now <ms>]");
         return Ok(2);
@@ -582,4 +586,32 @@ fn run_monitor_demo(args: &[String]) -> io::Result<i32> {
     leave();
     println!("oxy-tui 데모 종료: monitor {}×{}", size.width, size.height);
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn monitor_keys_are_named_for_node_including_left_and_right() {
+        for (code, name) in [
+            (KeyCode::Up, "up"),
+            (KeyCode::Down, "down"),
+            (KeyCode::Left, "left"),
+            (KeyCode::Right, "right"),
+            (KeyCode::Enter, "enter"),
+            (KeyCode::Esc, "esc"),
+            (KeyCode::Char('s'), "s"),
+            (KeyCode::Char('S'), "s"),
+            (KeyCode::Char('q'), "q"),
+        ] {
+            assert_eq!(monitor_key(&key(code)), Some(name), "{code:?}");
+        }
+        assert_eq!(monitor_key(&key(KeyCode::Tab)), None);
+        assert_eq!(monitor_key(&KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)), None);
+    }
 }

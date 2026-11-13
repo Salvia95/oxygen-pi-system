@@ -22,10 +22,15 @@
 //!   {"op":"suspend", "id":N}                                               대체 화면과 raw mode 에서 나온다 (verify 를 본 화면에서 돌릴 때) → {"id":N}
 //!   {"op":"resume", "id":N, "wait":"계속"}                                  wait 가 있으면 본 화면에서 `Enter 계속` 을 기다린 뒤 대체 화면으로 돌아온다 → {"id":N}
 //!   {"op":"quit", "code":0, "summary":["본 화면에 남길 줄", …]}             터미널을 되돌리고 summary 를 찍은 뒤 code 로 끝난다
+//!   (`--mode monitor` 전용. monitor.rs 가 받는다) {"op":"monitor", kind, title, right, now, nowAt, sections, selected, keys, popup}   보기 전체. 답 없음
+//!        행: {key, marker, text, right, since, indent, prefix, emphasis, error, badge}   badge: 오른쪽 열(경과) 앞에 두 칸 띄워 그리는 짧은 글 (예: `셸 1`)
+//!        popup: {title, lines, buttons, focus, danger}  있으면 화면 가운데에 확인 팝업. focus: 강조할 버튼의 위치, danger: 경고 모양(`! ` · 경고색)으로 그릴 버튼의 위치 (없으면 경고 버튼 없음)
 //!
 //! # 이벤트 (exe → Node)
 //!   {"event":"interrupt"}          Ctrl+C. 화면은 그대로 두고 Node 의 `quit` 을 기다린다 (무엇이 반쯤 됐는지는 Node 가 안다)
 //!   {"event":"error","message"}    알 수 없는 지시 · 형식 오류
+//!   {"event":"key","key":"up|down|left|right|enter|esc|s|q"}   (monitor 모드) 눌린 키. 무엇을 할지는 Node 가 정한다
+//!   {"event":"resize","width":W,"height":H}                       (monitor 모드) 창 크기가 바뀜
 //!
 //! 답을 보낸 뒤에는 다음 지시가 올 때까지 화면을 그대로 둔다 (화면 사이에 빈 화면이 깜박이지 않는다).
 use std::fs::{File, OpenOptions};

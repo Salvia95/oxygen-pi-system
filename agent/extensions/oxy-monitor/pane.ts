@@ -104,3 +104,6 @@ export function monitorCommand(node: string, script: string, kind: string, piPid
   const p = (s: string) => shQuote(s.replace(/\\/g, "/"));
   return `exec ${p(node)} --disable-warning=ExperimentalWarning ${p(script)} ${kind} --pi-pid ${piPid} --cwd ${p(cwd)} --agent ${p(dirs.agent)} --root ${p(dirs.root)}`;
 }
+
+/** pi 를 끝낼 때 모니터 pane 을 닫는가: 화면을 그린 본 대화가 끝날 때만 (/new · 세션 넘기기 · subagent 의 끝은 아니다) */
+export const closesMonitorsOnShutdown = (reason: string | undefined, ownsScreen: boolean): boolean => reason === "quit" && ownsScreen;

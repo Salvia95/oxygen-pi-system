@@ -19,6 +19,14 @@ const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "a
   // 화면 프로그램(oxy-tui)의 빌드 산출물과 캡처 도구의 상태 파일 (개발 PC 에만 있다)
   "installer/oxy-tui/target", "tests/tui-capture/.state"];
 
+/** Windows Terminal 프로필의 색 구성: pi 테마 tokyo-night 와 같은 Tokyo Night 바탕 (docs/flow-view-spec.md §4, T3) */
+export const WT_SCHEME = {
+  name: "Tokyo Night (Oxygen Pi)",
+  background: "#1A1B26", foreground: "#C0CAF5", cursorColor: "#C0CAF5", selectionBackground: "#283457",
+  black: "#15161E", red: "#F7768E", green: "#9ECE6A", yellow: "#E0AF68", blue: "#7AA2F7", purple: "#BB9AF7", cyan: "#7DCFFF", white: "#A9B1D6",
+  brightBlack: "#414868", brightRed: "#F7768E", brightGreen: "#9ECE6A", brightYellow: "#E0AF68", brightBlue: "#7AA2F7", brightPurple: "#BB9AF7", brightCyan: "#7DCFFF", brightWhite: "#C0CAF5",
+};
+
 /** 하네스 자체 파일 (구성요소 바이너리 외) */
 const HARNESS_FILES = [
   "installer/components.mjs", "wrappers/sql", "wrappers/jq", "config/ripgreprc", "agent/templates/models.json",
@@ -223,10 +231,11 @@ export function createSystem({ root, sandbox = null }) {
       const profile = {
         guid: WT_GUID, name: WT_PROFILE_NAME, startingDirectory: "%USERPROFILE%",
         commandline: `"${run.exe}" ${run.args}`,
+        colorScheme: WT_SCHEME.name,
         ...(icon ? { icon } : {}),
       };
       const file = join(dir, "oxygen-pi.json");
-      writeFileSync(file, JSON.stringify({ profiles: [profile] }, null, 2) + "\n");
+      writeFileSync(file, JSON.stringify({ profiles: [profile], schemes: [WT_SCHEME] }, null, 2) + "\n");
       return file;
     },
     removeTerminalProfile(file) { if (file) rmSync(dirname(file), { recursive: true, force: true }); },

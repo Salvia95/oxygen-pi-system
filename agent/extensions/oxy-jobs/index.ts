@@ -22,7 +22,7 @@ import { blocked, enabled, envInt, harnessHome } from "../_lib/common.ts";
 import { inspect } from "../oxy-bash-guard.ts";
 import { clip } from "../oxy-context-budget.ts";
 import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration } from "./manager.ts";
-import { type ControlResult, ControlInbox, StateWriter, pruneRuns } from "./state.ts";
+import { type ControlResult, ControlInbox, StateWriter, pruneRuns, subRunFromEnv } from "./state.ts";
 import { type AgentDef, type LevelTarget, loadAgents, runSubagent } from "./subagent.ts";
 import { harnessRoot, INHERIT_ENV, sharedLlm } from "../oxy-llm.ts";
 
@@ -56,9 +56,12 @@ export default async function (pi: ExtensionAPI) {
     llm = llmLib.loadLlm(agentDir);
   } catch { /* 예전 배치 */ }
   const levels: Array<{ id: string; use?: string }> = llm?.levels ?? [];
+  // subagent 로 실행되면 본 대화의 실행 폴더 아래에 상태를 쓴다 (docs/jobs-view-spec.md §3)
+  const subRun = subRunFromEnv();
   const mgr = new JobManager(join(agentDir, "jobs"), {
     maxBash: envInt("OXY_JOBS_MAX_CONCURRENT", 4),
     maxAgents: envInt("OXY_LLM_MAX_CONCURRENT", 2),
+    ...(subRun ? { runDir: subRun } : {}),
   });
   const depth = Number(process.env.OXY_SUBAGENT_DEPTH ?? 0);
   const allowSubagent = depth < envInt("OXY_SUBAGENT_MAX_DEPTH", 1);
@@ -109,14 +112,14 @@ export default async function (pi: ExtensionAPI) {
   const connectionOf = (provider?: string) => (provider?.startsWith("oxy-") ? llmLib?.findConnection(llm, provider.slice(4)) : undefined);
   const safeThinking = (): string | undefined => { try { return pi.getThinkingLevel?.() || undefined; } catch { return undefined; } };
 
-  // ---------------------------------------------------------------- 모니터용 상태 파일 · 중지 요청 (대화형만)
+  // ---------------------------------------------------------------- 모니터용 상태 파일 · 중지 요청 (대화형, 그리고 본 대화가 띄운 subagent)
   let writer: StateWriter | null = null;
   let inbox: ControlInbox | null = null;
   let lastControl: ControlResult | null = null;
   let stateCwd = process.cwd();
   mgr.onChange(() => writer?.changed());
   const startMonitorState = (ctx: any) => {
-    if (writer || !ctx?.hasUI) return;
+    if (writer || (!ctx?.hasUI && !subRun)) return;
     stateCwd = ctx.cwd ?? stateCwd;
     writer = new StateWriter(mgr.runDir, () => mgr.snapshot(stateCwd, lastControl));
     inbox = new ControlInbox(mgr.runDir, (req) => {
@@ -278,9 +281,11 @@ export default async function (pi: ExtensionAPI) {
               : { provider: defs[i].provider ?? parent.provider, model: defs[i].model ?? (defs[i].provider ? undefined : parent.id), thinking: defs[i].thinking ?? parent.thinking },
           }));
           const keys = sharedLlm()?.keys ?? {};
-          const childEnv = Object.keys(keys).length ? { [INHERIT_ENV]: Buffer.from(JSON.stringify(keys)).toString("base64") } : undefined;
+          const baseEnv: Record<string, string> = Object.keys(keys).length ? { [INHERIT_ENV]: Buffer.from(JSON.stringify(keys)).toString("base64") } : {};
           const runs = jobs.map((j, i) => {
             const conn = connectionOf(j.target?.provider);
+            // 자식은 자기 작업(백그라운드 셸)을 본 대화의 실행 폴더 아래 sub/<작업 id> 에 쓴다 (모니터의 Sub Context)
+            const childEnv = { ...baseEnv, OXY_JOBS_PARENT: mgr.runDir, OXY_JOBS_PARENT_JOB: j.id };
             return runSubagent(mgr, j, defs[i], items[i].task, ctx.cwd, {
               parent, target: targets[i], childEnv, shell: shellPath(agentDir),
               slots: mgr.slotsFor(conn?.id, conn ? (conn.maxConcurrent || llmLib.LLM_KINDS[conn.kind]?.maxConcurrent || defaultAgents) : defaultAgents),
@@ -351,7 +356,7 @@ export default async function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_e: any, ctx: any) => {
     remember(ctx);
-    try { pruneRuns(mgr.jobsDir, 20, [mgr.runDir]); mgr.pruneLogs(); } catch { /* 정리 실패는 무시 */ }
+    if (!subRun) { try { pruneRuns(mgr.jobsDir, 20, [mgr.runDir]); mgr.pruneLogs(); } catch { /* 정리 실패는 무시 */ } }
     startMonitorState(ctx);
     render();
   });

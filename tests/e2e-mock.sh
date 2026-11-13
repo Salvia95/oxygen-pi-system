@@ -181,7 +181,7 @@ chk "상태 점검: 워크스페이스 PASS · 없으면 FAIL 과 해결 방법"
 chk "여러 연결: light 수준은 vLLM 에서 실행"          '[[ "$out" == *"MOCK-ANTHROPIC Task: claude-task review"* && "$out" == *"(scout: scenario:env vllm-task) done"* && "$out" == *"hello-from-Msys"* ]]'
 
 # 대화형 경로 (RPC 모드: 작업 패널·상태줄, 완료 시 새 턴, /jobs 로그 보기)
-rpc=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-jobs.mjs")" "$OXY_PI_CLI" "$(winpath "$TMP/work")" 2>&1 | tail -1) || true
+rpc=$(cd "$TMP/work" && timeout 240 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-jobs.mjs")" "$OXY_PI_CLI" "$(winpath "$TMP/work")" 2>&1 | tail -1) || true
 printf '\n\033[1m[rpc-jobs]\033[0m %s\n' "$rpc"
 chk "대화형: 작업 패널·상태줄 표시"            '[[ "$rpc" == *"\"widgetRunning\":true"* && "$rpc" == *"\"statusRunning\":true"* && "$rpc" == *"\"widgetDone\":true"* ]]'
 chk "대화형: 작업이 끝나면 새 턴으로 결과 전달"   '[[ "$rpc" == *"\"followUpTurn\":true"* ]]'
@@ -189,6 +189,7 @@ chk "대화형: /jobs → 로그 보기"               '[[ "$rpc" == *"\"jobsLog
 chk "모니터: 상태 파일에 작업 목록·로그 경로"    '[[ "$rpc" == *"\"stateFile\":true"* && "$rpc" == *"\"stateRunning\":true"* ]]'
 chk "모니터: 중지 요청 → 작업 중지·알림·모델에 전달" '[[ "$rpc" == *"\"monitorStop\":true"* && "$rpc" == *"\"monitorStopNotice\":true"* && "$rpc" == *"\"stopReported\":true"* ]]'
 chk "모니터: 이미 끝난 작업 중지 요청은 실패로 기록" '[[ "$rpc" == *"\"monitorStopRejected\":true"* ]]'
+chk "모니터: subagent 의 셸이 sub/<작업 id>/state.json 에, 그 셸을 모니터에서 중지, subagent 는 끝남 (jobs-view-spec §3)" '[[ "$rpc" == *"\"subState\":true"* && "$rpc" == *"\"subStop\":true"* && "$rpc" == *"\"subDone\":true"* ]]'
 chk "실시간 활동: 도구 실행 중 live.json 에 상태 · 도구 요약" '[[ "$rpc" == *"\"liveTool\":true"* ]]'
 chk "실시간 활동: 끝나면 대기 · 최근 이벤트(요청 · 도구 · 작업)" '[[ "$rpc" == *"\"liveIdle\":true"* ]]'
 chk "실시간 활동: 긴 도구 동안에도 live.json 이 5초마다 갱신" '[[ "$rpc" == *"\"liveHeartbeat\":true"* ]]'
@@ -213,6 +214,7 @@ chk "flow: 새 세션은 빈 기록으로 시작 (이전 작업은 보관, 첫 �
 FSID=flowa frun "scenario:flow-plan add g with a plan"
 chk "flow: 이전 세션을 다시 열면 그 작업 기록을 되살려 첫 요청에 넣음" '[[ $(first "$CONV") == *"[oxy-flow] Task state"*"scenario:flow-commit add the f file"*"Store sessions in SQLite"* && $(cat "$FW"/.oxy/flow/archive/*.json | grep -c "scenario:env another task") -ge 1 ]]'
 chk "flow 계획: 항목·할 일 저장, 커밋이 진행 중인 할 일에 연결" '[[ $(jq -r "[.plan[0].id, .plan[0].status, .plan[0].children[0].nodes[0], .plan[0].children[1].status, .plan[1].status] | join(\" \")" "$FW/.oxy/flow/flow.json") == "p1 done n2 done todo" ]]'
+chk "flow 계획: 걸린 시간 기록 (시작한 할 일만 시작 · 끝 시각, flow-view-spec §3)" '[[ $(jq -r "[(.plan[0].children[0] | has(\"startedAt\") and has(\"endedAt\")), (.plan[0].children[1] | has(\"startedAt\")), (.plan[0] | has(\"endedAt\"))] | map(tostring) | join(\" \")" "$FW/.oxy/flow/flow.json") == "true false true" ]]'
 chk "flow 계획: 도구 결과에 계획과 다음 할 일"     '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Updated p1 [done]."*"p2 [todo] Report"*"Next: p2 Report"* ]]'
 chk "flow 계획: 커밋 결과에 연결된 할 일과 done 안내" '[[ $(tail -1 "$REQ" | jq -r "[.body.messages[] | select(.role==\"tool\") | .content | tostring] | join(\" \")") == *"Linked to plan item p1.1 "*"write g"*"If this commit finishes it, call flow_plan(action="* ]]'
 chk "flow 계획: FLOW.md 에 계획"                 '[[ $(cat "$FW/.oxy/flow/FLOW.md") == *"## 계획"*"✓ p1 Add g file"*"· p2 Report"* ]]'

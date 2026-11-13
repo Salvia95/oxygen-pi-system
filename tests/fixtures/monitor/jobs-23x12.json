@@ -1,8 +1,8 @@
 {
   "op": "monitor",
   "kind": "jobs",
-  "title": "jobs",
-  "right": "실행 중 2 · 완료 3",
+  "title": "Jobs",
+  "right": "Processing 2",
   "now": [
     {
       "marker": "spinner",
@@ -15,53 +15,48 @@
   "nowAt": "bottom",
   "sections": [
     {
+      "title": "Main Context",
       "rows": [
         {
-          "key": "job-1",
+          "key": "m:job-1",
           "marker": "spinner",
           "text": "npm run build",
           "indent": 0,
-          "error": false,
           "since": 1794499881629
         },
         {
-          "key": "job-2",
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        }
+      ]
+    },
+    {
+      "title": "Sub Context",
+      "rows": [
+        {
+          "key": "s:job-2",
           "marker": "spinner",
           "text": "scout: 로그 찾기",
           "indent": 0,
-          "error": false,
           "since": 1794499910629
         },
         {
-          "key": "job-3",
-          "marker": "done",
-          "text": "npm test",
-          "indent": 0,
-          "error": false,
-          "right": "1:03"
-        },
-        {
-          "key": "job-4",
-          "marker": "failed",
-          "text": "npm run lint",
-          "indent": 0,
-          "error": true,
-          "right": "0:10"
-        },
-        {
-          "key": "job-5",
-          "marker": "stopped",
-          "text": "reviewer: 검토",
-          "indent": 0,
-          "error": false,
-          "right": "0:10"
+          "marker": "none",
+          "text": "",
+          "indent": 0
         }
       ]
     }
   ],
-  "selected": "job-2",
+  "selected": "s:job-2",
   "keys": [
-    "▲▼ 이동  Enter 로그",
+    "▲▼ 이동  Enter 열기",
     "s 중지  q 닫기"
   ]
 }

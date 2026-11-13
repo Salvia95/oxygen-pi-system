@@ -14,7 +14,7 @@ import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent"
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { enabled, harnessHome } from "../_lib/common.ts";
 import { type BarKind, type BarRange, type FlowSummary, type JobsSummary, barItems, barLine, itemAt } from "./bar.ts";
-import { PaneManager, monitorCommand, psmuxRunner } from "./pane.ts";
+import { PaneManager, closesMonitorsOnShutdown, monitorCommand, psmuxRunner } from "./pane.ts";
 import { reassertMouseWhenReady } from "./mouse.ts";
 import { type LiveInput, type LiveState, emptyLive, flowEvents, jobEvents, reduceLive } from "./live.ts";
 import { StateWriter } from "../oxy-jobs/state.ts";
@@ -220,6 +220,7 @@ export default function (pi: ExtensionAPI) {
     startLive(ctx);
     if (!ctx.hasUI || (ctx.mode && ctx.mode !== "tui")) return;
     uiCtx = ctx;
+    ownsScreen = true;
     refreshOpen();
     ctx.ui.setWidget("oxy-bar", barComponent, { placement: "belowEditor" });
     cleanup.push(ctx.ui.onTerminalInput(onInput));
@@ -234,11 +235,14 @@ export default function (pi: ExtensionAPI) {
     cleanup.push(() => clearInterval(timer));
   });
   const cleanup: Array<() => void> = [];
+  // 이 pi 가 화면(TUI)을 그린 본 대화인가. subagent(자식 pi, -p)는 부모 pane 의 TMUX 환경을 물려받으므로,
+  // 이것 없이 닫으면 subagent 가 끝날 때 부모의 모니터 pane 을 모두 닫는다 (2026-11-13 jobs-view 4단계 실측에서 발견)
+  let ownsScreen = false;
   pi.on("session_shutdown", async (e: any) => {
     // 세션이 바뀌면 이 extension 은 새로 로드되므로 입력 가로채기 · 타이머를 정리한다
     for (const fn of cleanup.splice(0)) { try { fn(); } catch { /* 이미 정리됨 */ } }
     // 모니터 pane 은 pi 를 끝낼 때만 닫는다 (/new · 세션 넘기기는 같은 pi 라 그대로 둔다)
-    if (e?.reason !== "quit") return;
+    if (!closesMonitorsOnShutdown(e?.reason, ownsScreen)) return;
     try { paneManager().mgr?.closeAll(); } catch { /* 이미 닫힘 */ }
   });
 }

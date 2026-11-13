@@ -54,6 +54,34 @@ export interface ControlRequest { seq: string; op: "stop"; id: string }
 /** 실행 폴더 이름: run-<pid>-<시작 시각 ms> */
 export const runDirName = (pid: number, startedAt: number) => `run-${pid}-${startedAt}`;
 
+/**
+ * subagent 의 실행 폴더 (docs/jobs-view-spec.md §3): 본 대화의 실행 폴더 아래 sub/<작업 id>.
+ * 본 대화가 subagent 를 띄울 때 OXY_JOBS_PARENT(본 대화의 실행 폴더) · OXY_JOBS_PARENT_JOB(작업 id)을 넘기고, subagent 의 oxy-jobs 가 여기에 상태를 쓴다
+ */
+export const subRunDir = (parentRunDir: string, jobId: string): string => {
+  if (!/^[\w.-]+$/.test(jobId)) throw new Error(`bad job id: ${jobId}`);
+  return join(parentRunDir, "sub", jobId);
+};
+
+/** 환경변수로 받은 subagent 의 실행 폴더 (없거나 잘못되면 null) */
+export function subRunFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const parent = env.OXY_JOBS_PARENT, job = env.OXY_JOBS_PARENT_JOB;
+  if (!parent || !job) return null;
+  try { return subRunDir(parent, job); } catch { return null; }
+}
+
+/** 본 대화의 실행 폴더 아래 subagent 들의 상태 (작업 id → 상태). 모니터가 읽는다 */
+export function readSubStates(runDir: string): Map<string, JobsState> {
+  const out = new Map<string, JobsState>();
+  let ids: string[] = [];
+  try { ids = readdirSync(join(runDir, "sub")); } catch { return out; }
+  for (const id of ids) {
+    const s = readState(join(runDir, "sub", id));
+    if (s) out.set(id, s);
+  }
+  return out;
+}
+
 export function parseRunDirName(name: string): { pid: number; startedAt: number } | null {
   const m = name.match(/^run-(\d+)-(\d+)$/);
   return m ? { pid: Number(m[1]), startedAt: Number(m[2]) } : null;

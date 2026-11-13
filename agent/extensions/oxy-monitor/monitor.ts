@@ -10,11 +10,11 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { harnessHome } from "../_lib/common.ts";
-import { type JobsState, findRun, readState, sendControl } from "../oxy-jobs/state.ts";
+import { type JobsState, findRun, readState, readSubStates, sendControl, subRunDir } from "../oxy-jobs/state.ts";
 import { projectRoot } from "../oxy-flow/store.ts";
 import type { LiveState } from "./live.ts";
-import { type FlowUiState, type JobsUiState, flowModel, jobOrder, jobsModel } from "./model.ts";
-import { KEYS, type MonitorKey, flowKey, jobsKey, supportsMonitor } from "./controller.ts";
+import { type FlowUiState, type JobsUiState, type StopTarget, flowModel, jobOrder, jobsModel, jobsUiInit } from "./model.ts";
+import { KEYS, type MonitorKey, flowKey, jobsKey, monitorTheme, supportsMonitor } from "./controller.ts";
 import { type Fit, type FlowLike, type FlowUi, type JobsUi, flowKeys, flowView, jobsView } from "./view.ts";
 
 const args = process.argv.slice(2);
@@ -35,6 +35,7 @@ const agentDir = opt("--agent") ?? process.env.PI_CODING_AGENT_DIR ?? join(root,
 
 // ------------------------------------------------------------------ 데이터 (두 화면 공통)
 let jobs: { runDir: string; state: JobsState } | null = null;
+let subs = new Map<string, JobsState>();   // subagent 들의 상태 (실행 폴더/sub/<작업 id>, docs/jobs-view-spec.md §3)
 let flow: FlowLike | null = null;
 let live: LiveState | null = null;
 let flowFile: string | null = null;
@@ -43,6 +44,7 @@ function loadJobs() {
   const runDir = findRun(join(agentDir, "jobs"), piPid);
   const state = runDir ? readState(runDir) : null;
   jobs = runDir && state ? { runDir, state } : null;
+  subs = runDir && kind === "jobs" ? readSubStates(runDir) : new Map();
   live = null;
   if (runDir) { try { live = JSON.parse(readFileSync(join(runDir, "live.json"), "utf8")); } catch { /* 아직 없음 */ } }
 }
@@ -58,10 +60,12 @@ function loadFlow() {
 
 /** 화면에 필요한 것을 다시 읽는다 (flow 화면도 지금 상태 · 실행 폴더를 위해 jobs 를 읽는다) */
 const reload = () => { loadJobs(); if (kind === "flow") loadFlow(); };
-const readLog = (id: string | null): string[] => {
-  const j = jobs?.state.jobs.find((x) => x.id === id);
-  if (!j || !jobs) return [];
-  try { return readFileSync(join(jobs.runDir, j.log), "utf8").split(/\r?\n/).slice(-500); } catch { return []; }
+const readLog = (id: string | null, sub?: string): string[] => {
+  if (!jobs || !id) return [];
+  const dir = sub ? subRunDir(jobs.runDir, sub) : jobs.runDir;
+  const j = (sub ? subs.get(sub)?.jobs : jobs.state.jobs)?.find((x) => x.id === id);
+  if (!j) return [];
+  try { return readFileSync(join(dir, j.log), "utf8").split(/\r?\n/).slice(-500); } catch { return []; }
 };
 
 // ------------------------------------------------------------------ 시작: 어느 화면으로 그릴지
@@ -74,14 +78,22 @@ function exeOk(): boolean {
 reload();
 if (exeOk()) await runExe(); else await runPiTui();
 
+const NOTICE_MS = 5000;
+
 // ------------------------------------------------------------------ oxy-tui 모니터 모드
 async function runExe() {
   const { ExeLink, displayWidth } = await import(pathToFileURL(join(root, "installer", "tui.mjs")).href);
+  // pi 테마가 tokyo-night 면 모니터도 같은 팔레트로 (exe 는 OXY_TUI_THEME 을 읽는다)
+  let settingsText: string | null = null;
+  try { settingsText = readFileSync(join(agentDir, "settings.json"), "utf8"); } catch { /* 없음 */ }
+  const theme = monitorTheme(settingsText, process.env.OXY_TUI_THEME);
+  if (theme) process.env.OXY_TUI_THEME = theme;
   let size = { width: process.stdout.columns || 30, height: process.stdout.rows || 24 };
   let flowUi: FlowUiState = { sel: null, open: new Set(), manualAt: 0 };
-  let jobsUi: JobsUiState = { sel: null, mode: "list" };
+  let jobsUi: JobsUiState = jobsUiInit();
   let scroll = 0;
-  let pendingStop: { seq: string; id: string } | null = null;
+  let pendingStop: { seq: string; target: StopTarget } | null = null;
+  let notice: { text: string; at: number } | null = null;   // 키 안내 줄의 알림은 잠시만 (docs/jobs-view-spec.md §2)
   let last = "";
   let quitting = false;
 
@@ -92,13 +104,20 @@ async function runExe() {
       if (!flowUi.sel && m.selected) flowUi = { ...flowUi, sel: m.selected };
       return m;
     }
-    if (pendingStop && jobs?.state.control?.seq === pendingStop.seq) {
-      jobsUi = { ...jobsUi, notice: jobs.state.control.ok ? `${pendingStop.id} 작업을 중지했습니다.` : `중지하지 못했습니다: ${jobs.state.control.message}` };
-      pendingStop = null;
+    if (pendingStop) {
+      const t = pendingStop.target;
+      const control = t.scope === "child" ? subs.get(t.sub!)?.control : jobs?.state.control;
+      if (control?.seq === pendingStop.seq) {
+        jobsUi = { ...jobsUi, notice: control.ok ? `${t.label} 작업을 중지했습니다.` : `중지하지 못했습니다: ${control.message}` };
+        pendingStop = null;
+      }
     }
-    const logs = jobsUi.mode === "log" ? readLog(jobsUi.sel) : [];
-    const m = jobsModel(jobs?.state ?? null, live, jobsUi, size.width, size.height, now, displayWidth, logs.slice(0, Math.max(0, logs.length - scroll)));
-    if (!jobsUi.sel && m.selected) jobsUi = { ...jobsUi, sel: m.selected };
+    if (!jobsUi.notice) notice = null;
+    else if (jobsUi.notice !== notice?.text) notice = { text: jobsUi.notice, at: now };
+    if (jobsUi.notice && notice && now - notice.at > NOTICE_MS) jobsUi = { ...jobsUi, notice: undefined };
+    const logs = jobsUi.mode === "log" && jobsUi.log ? readLog(jobsUi.log.id, jobsUi.log.scope === "child" ? jobsUi.log.sub : undefined) : [];
+    const m = jobsModel(jobs?.state ?? null, subs, live, jobsUi, size.width, size.height, now, displayWidth, logs.slice(0, Math.max(0, logs.length - scroll)));
+    if (m.selected && jobsUi.sel !== m.selected && jobsUi.mode !== "log") jobsUi = { ...jobsUi, sel: m.selected };
     return m;
   };
   /** 바뀐 것이 있을 때만 보낸다 (스피너 · 경과는 exe 가 혼자 그린다) */
@@ -116,12 +135,15 @@ async function runExe() {
     setTimeout(() => { link.killAndRestore(process.stdout); process.exit(code); }, 1500).unref();
   };
   const onKey = (key: MonitorKey) => {
-    if (key === "q") return quit(0);
+    if (key === "q" && !(kind === "jobs" && jobsUi.confirm)) return quit(0);   // 팝업이 떠 있으면 q 는 취소
     if (kind === "flow") flowUi = flowKey(flowUi, flow, size.width, key, Date.now());
     else {
-      const r = jobsKey(jobsUi, scroll, jobs?.state.jobs ?? [], key);
+      const r = jobsKey(jobsUi, scroll, jobs?.state ?? null, subs, key);
       jobsUi = r.ui; scroll = r.scroll;
-      if (r.stop && jobs) pendingStop = { seq: sendControl(jobs.runDir, "stop", r.stop), id: r.stop };
+      if (r.stop && jobs) {
+        const dir = r.stop.scope === "child" ? subRunDir(jobs.runDir, r.stop.sub!) : jobs.runDir;
+        pendingStop = { seq: sendControl(dir, "stop", r.stop.id), target: r.stop };
+      }
     }
     push();
   };

@@ -54,6 +54,7 @@ chk "verify 통과 (FAIL 0)"               'grep -q "FAIL 0" "$SB/out.txt"'
 WTF="$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi/oxygen-pi.json"
 chk "터미널 셸 · 멀티플렉서 기록 (git-bash · psmux) + oxy.cmd 용 OXY_GIT_BASH"  'grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_GIT_BASH=.*bash.exe" "$I/agent/oxy.env"'
 chk "WT 프로필: Git Bash 로 env.sh"           'grep -q "bash.exe.*env.sh" "$WTF"'
+chk "WT 프로필: Tokyo Night 색 구성"          '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Tokyo Night (Oxygen Pi) #1A1B26" ]]'
 chk "확인 요약 · 완료 화면에 멀티플렉서"         'grep -q "터미널.*Git Bash · 멀티플렉서 psmux" "$SB/out.txt" && grep -q "oxy --no-mux" "$SB/out.txt"'
 # oxy 런처: OXY_MUX=psmux 여도 비대화형(파이프)·--no-mux 는 세션 없이 바로 실행
 ver=$(cd "$SB" && env -u TMUX bash "$I/oxy" --version </dev/null 2>&1 | tail -1)

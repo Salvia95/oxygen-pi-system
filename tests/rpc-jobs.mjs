@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { findRun, readState, sendControl } from "../agent/extensions/oxy-jobs/state.ts";
+import { findRun, readState, readSubStates, sendControl, subRunDir } from "../agent/extensions/oxy-jobs/state.ts";
 
 const [cli, cwd] = process.argv.slice(2);
 const pi = spawn(process.execPath, [cli, "--mode", "rpc", "--no-session"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
@@ -69,15 +69,28 @@ result.monitorStopRejected = Boolean(await poll(() => { const c = readState(runD
 // ---------------------------------------------------------------- 실시간 활동 live.json (docs/monitor-tui-spec.md §2)
 const readLive = () => { try { return JSON.parse(readFileSync(join(runDir, "live.json"), "utf8")); } catch { return null; } };
 send({ id: "p4", type: "prompt", message: "scenario:live-tool" });
-const during = await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.tools?.[0]?.summary === "sleep 8; echo live-tool-done" ? l : null; }, 15000);
+const during = await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.tools?.[0]?.summary === "sleep 12; echo live-tool-done" ? l : null; }, 15000);
 result.liveTool = Boolean(during && during.tools[0].name === "bash" && during.agent.running === true && during.pid === pi.pid);
 // 도구가 도는 동안 이벤트가 없어도 5초마다 updatedAt 이 새로워진다 (예전: 그대로라 모니터가 10초 뒤 "pi 상태를 알 수 없습니다")
 const later = during && await poll(() => { const l = readLive(); return l?.agent?.state === "tool" && l.updatedAt - during.updatedAt >= 4000 ? l : null; }, 7000);
 result.liveHeartbeat = Boolean(later);
-const after = await poll(() => { const l = readLive(); return l?.agent?.state === "idle" && l.events?.some((e) => e.kind === "tool" && e.text === "bash sleep 8; echo live-tool-done") ? l : null; }, 20000);
+const after = await poll(() => { const l = readLive(); return l?.agent?.state === "idle" && l.events?.some((e) => e.kind === "tool" && e.text === "bash sleep 12; echo live-tool-done") ? l : null; }, 20000);
 const texts = (after?.events ?? []).map((e) => `${e.kind}:${e.text}`);
 result.liveIdle = Boolean(after && after.tools.length === 0 && texts.includes("user:scenario:live-tool")
   && texts.some((t) => t.startsWith("job:job-2 시작")) && texts.includes("job:job-2 중지"));
+
+// ---------------------------------------------------------------- subagent 의 셸 (docs/jobs-view-spec.md §3)
+send({ id: "p5", type: "prompt", message: "scenario:sub-bg" });
+const subJob = await poll(() => readState(runDir)?.jobs.find((x) => x.kind === "agent" && x.agent === "worker" && x.state === "running"), 20000);
+const subDir = subJob && subRunDir(runDir, subJob.id);
+const child = subDir && await poll(() => { const s = readState(subDir); const j = s?.jobs.find((x) => x.id === "job-1"); return j?.state === "running" && j.last === "child-bg-started" ? s : null; }, 30000);
+result.subState = Boolean(child && child.pid !== pi.pid && readSubStates(runDir).has(subJob.id));
+const sseq = child && sendControl(subDir, "stop", "job-1");
+const stopped = sseq && await poll(() => { const s = readState(subDir); return s?.control?.seq === sseq && s.jobs.find((x) => x.id === "job-1")?.state === "stopped" ? s : null; }, 10000);
+result.subStop = Boolean(stopped?.control?.ok);
+// 셸을 멈추면 subagent 는 일을 마치고 끝난다 → 자식 상태는 closed, 본 대화의 작업은 done
+const fin = subJob && await poll(() => readState(runDir)?.jobs.find((x) => x.id === subJob.id && x.state === "done"), 40000);
+result.subDone = Boolean(fin && readState(subDir)?.closed === true);
 
 console.log(JSON.stringify(result));
 pi.kill();

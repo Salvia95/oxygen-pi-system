@@ -1,0 +1,61 @@
+{
+  "op": "monitor",
+  "kind": "jobs",
+  "title": "scout",
+  "right": "Processing 1",
+  "now": [
+    {
+      "marker": "spinner",
+      "text": "scout 실행 중",
+      "since": 1794499910629,
+      "indent": 0,
+      "emphasis": true
+    }
+  ],
+  "nowAt": "bottom",
+  "sections": [
+    {
+      "title": "scout: 로그 찾기",
+      "rows": [
+        {
+          "key": "sublog",
+          "marker": "none",
+          "text": "대화 로그",
+          "indent": 2
+        },
+        {
+          "key": "c:job-1",
+          "marker": "spinner",
+          "text": "npm test -- login",
+          "indent": 0,
+          "since": 1794499902629
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        }
+      ]
+    }
+  ],
+  "selected": "c:job-1",
+  "keys": [
+    "▲▼ 이동  Enter 로그",
+    "s 중지  Esc 목록"
+  ]
+}

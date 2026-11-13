@@ -1,81 +1,88 @@
 {
   "op": "monitor",
   "kind": "flow",
-  "title": "flow",
-  "right": "할 일 2/6",
-  "now": [
-    {
-      "marker": "spinner",
-      "text": "도구 실행 중",
-      "since": 1794499910629,
-      "indent": 0,
-      "emphasis": true
-    },
-    {
-      "marker": "none",
-      "text": "bash npm test -- --run login",
-      "indent": 2
-    },
-    {
-      "marker": "spinner",
-      "text": "p2.2 테스트 작성",
-      "indent": 0,
-      "emphasis": true
-    }
-  ],
+  "title": "Flow Monitor",
+  "right": "Total 2/6",
+  "now": [],
   "nowAt": "top",
   "sections": [
     {
+      "title": "Current Task",
+      "rows": [
+        {
+          "marker": "spinner",
+          "text": "테스트 작성",
+          "since": 1794499880629,
+          "indent": 0,
+          "emphasis": true
+        },
+        {
+          "marker": "none",
+          "text": "도구 실행 중 · bash npm test -- --run login",
+          "indent": 2
+        },
+        {
+          "marker": "none",
+          "text": "Next Task: 오류 처리",
+          "indent": 0
+        }
+      ]
+    },
+    {
+      "title": "Overall Task",
       "rows": [
         {
           "key": "p:p1",
           "marker": "done",
-          "text": "p1 환경 구성",
-          "right": "n1",
+          "text": "[1/4] 환경 구성",
+          "right": "3:00",
           "indent": 0,
           "emphasis": false
         },
         {
           "key": "p:p2",
           "marker": "spinner",
-          "text": "p2 로그인 API",
-          "right": "1/3",
+          "text": "[2/4] 로그인 API",
           "indent": 0,
           "emphasis": true
         },
         {
           "key": "p:p2.1",
           "marker": "done",
-          "text": "p2.1 라우트",
-          "right": "n2",
-          "indent": 2,
+          "text": "[1/3] 라우트",
+          "right": "3:10",
+          "indent": 0,
+          "prefix": "├ ",
           "emphasis": false
         },
         {
           "key": "p:p2.2",
           "marker": "spinner",
-          "text": "p2.2 테스트 작성",
-          "indent": 2,
+          "text": "[2/3] 테스트 작성",
+          "right": "◀ Current Task",
+          "indent": 0,
+          "prefix": "├ ",
           "emphasis": true
         },
         {
           "key": "p:p2.3",
           "marker": "todo",
-          "text": "p2.3 오류 처리",
-          "indent": 2,
+          "text": "[3/3] 오류 처리",
+          "indent": 0,
+          "prefix": "└ ",
           "emphasis": false
         },
         {
           "key": "p:p3",
           "marker": "todo",
-          "text": "p3 결제 연동",
+          "text": "[3/4] 결제 연동",
           "indent": 0,
           "emphasis": false
         },
         {
           "key": "p:p4",
           "marker": "blocked",
-          "text": "p4 배포 설정",
+          "text": "[4/4] 배포 설정",
           "indent": 0,
           "emphasis": false
         },
@@ -89,7 +96,7 @@
           "key": "n:n3",
           "marker": "done",
           "text": "n3 fix: 린트 오류",
-          "indent": 0
+          "indent": 2
         },
         {
           "marker": "none",
@@ -112,41 +119,6 @@
           "text": "npm test",
           "indent": 2,
           "error": true
-        }
-      ]
-    },
-    {
-      "title": "최근",
-      "rows": [
-        {
-          "marker": "done",
-          "text": "read C:\\Users\\kim\\project\\src\\components\\payment\\CheckoutSummary.tsx",
-          "indent": 0,
-          "error": false
-        },
-        {
-          "marker": "done",
-          "text": "edit src/components/payment/CheckoutSummary.test.tsx",
-          "indent": 0,
-          "error": false
-        },
-        {
-          "marker": "done",
-          "text": "커밋 n2 feat: 로그인 라우트",
-          "indent": 0,
-          "error": false
-        },
-        {
-          "marker": "failed",
-          "text": "bash npm test",
-          "indent": 0,
-          "error": true
-        },
-        {
-          "marker": "done",
-          "text": "p2.2 진행 테스트 작성",
-          "indent": 0,
-          "error": false
         }
       ]
     }

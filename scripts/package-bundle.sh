@@ -30,7 +30,7 @@ done < <("$NODE" "$(winpath "$OXY_HOME/installer/components.mjs")" status --root
 log "포함: ${included[*]/%/,}"
 (( ${#skipped[@]} )) && log "미포함 (선택 항목): ${skipped[*]}"
 # 화면 프로그램이 없어도 번들은 만든다: 폐쇄망 PC 에서 설치·설정 TUI 가 줄 입력 모드(번호 입력)로 동작한다
-(( ${#harness_missing[@]} )) && warn "화면 프로그램 없음: ${harness_missing[*]} → 설치·설정 TUI 가 줄 입력 모드로 동작합니다. 받으려면 bash scripts/fetch-bundle.sh --only=${harness_missing[0]}, 직접 빌드하려면 just tui-build"
+(( ${#harness_missing[@]} )) && warn "하네스 구성요소 없음: ${harness_missing[*]} → 화면 프로그램(oxy-tui)이 없으면 설치·설정 TUI 가 줄 입력 모드로, pi 테마(pi-tokyo-night)가 없으면 pi 가 기본 테마로 동작합니다. 받으려면 bash scripts/fetch-bundle.sh --only=${harness_missing[0]}"
 if (( ${#missing[@]} )); then
   die "필수 구성요소 누락: ${missing[*]} → bash scripts/fetch-bundle.sh 로 받은 뒤 다시 실행하세요"
 fi

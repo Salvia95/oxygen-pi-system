@@ -348,6 +348,10 @@ test("터미널 셸: 프로필과 바로가기가 선택한 셸을 하네스 환
     const prof = JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "cmd"), "utf8")).profiles[0];
     assert.equal(prof.commandline, `"${c.exe}" ${c.args}`);
     assert.equal(prof.icon, undefined);
+    // Tokyo Night 색 구성을 같은 조각 파일에 두고 프로필이 그것을 쓴다 (flow-view-spec §4 T3)
+    const frag = JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "cmd"), "utf8"));
+    assert.equal(prof.colorScheme, "Tokyo Night (Oxygen Pi)");
+    assert.deepEqual([frag.schemes.length, frag.schemes[0].name, frag.schemes[0].background], [1, "Tokyo Night (Oxygen Pi)", "#1A1B26"]);
     // 바로가기 (Windows Terminal 프로필 없이): 셸을 직접 연다
     const lnk = JSON.parse(readFileSync(sys.addShortcut(inst, bash, false, "powershell"), "utf8"));
     assert.deepEqual(lnk, { target: p.exe, args: p.args });
@@ -434,7 +438,7 @@ test("모니터 예시 모델: model.ts 가 지금 만드는 것과 tests/fixtur
     // since 는 now 기준 몇 초 전, 모든 모델의 줄 수는 높이 안
     for (const f of files) assert.ok(f.modelHeight <= f.height, `${f.file}: ${f.modelHeight} > ${f.height}`);
     const flow = JSON.parse(readFileSync(join(dir, "flow-23x12.json"), "utf8"));
-    assert.deepEqual([flow.op, flow.kind, flow.nowAt, flow.now[0].since], ["monitor", "flow", "top", index.generatedAt - 12000]);
+    assert.deepEqual([flow.op, flow.kind, flow.title, flow.sections[0].title, flow.sections[0].rows[0].since], ["monitor", "flow", "Flow Monitor", "Current Task", index.generatedAt - 42000]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -453,7 +457,8 @@ test("oxy-tui.exe: --version 에 monitor, demo monitor --model --exit-after 가 
     assert.equal(lines.length, size[1], `${name}: 줄 수`);
     for (const l of lines) assert.ok(displayWidth(l) <= size[0], `${name}: ${size[0]}칸 넘음: ${l}`);
     assert.match(lines.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, `${name}: 스피너`);
-    assert.match(lines.join("\n"), /\b0:17\b/, `${name}: 경과 m:ss (지금 + 5초 = 0:17)`);
+    const clock = name.startsWith("flow") ? "0:47" : "0:17";   // flow: 지금 할 일 42초 전 시작, jobs: 작업 12초 전 시작 (+ 5초)
+    assert.ok(new RegExp("\\b" + clock + "\\b").test(lines.join("\n")), `${name}: 경과 m:ss (${clock})`);
   }
   const bad = spawnSync(exe, ["demo", "monitor", "--model", join(DEFAULT_DIR, "없는파일.json")], { encoding: "utf8" });
   assert.equal(bad.status, 2);

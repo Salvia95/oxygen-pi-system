@@ -173,19 +173,32 @@ process_row() { # <name> <version> <url> <sha>
   log "✓ $name $version"
 }
 
-# 하네스 자체의 프로그램 (oxy-tui.exe). 받지 못해도 fetch 를 멈추지 않는다: 없으면 설치·설정 TUI 가 줄 입력 모드로 동작한다
+# 하네스 자체의 프로그램 · 자료 (oxy-tui.exe, pi 테마). 받지 못해도 fetch 를 멈추지 않는다: 없으면 설치·설정 TUI 가 줄 입력 모드로, pi 가 기본 테마로 동작한다
+harness_note() { case "$1" in pi-tokyo-night) echo "pi 는 기본 테마로 동작합니다" ;; *) echo "설치·설정 TUI 는 줄 입력 모드로 동작합니다" ;; esac; }
+place_harness() { # <name> <받은 파일>
+  local t
+  case "$1" in
+    pi-tokyo-night)
+      # 패키지에서 테마 파일만 꺼낸다 (configure 가 agent/themes 로 복사하고 settings 의 theme 으로 고른다)
+      t=$(fresh_tmp pi-tokyo-night); tar --force-local -xzf "$2" -C "$t"   # C:/ 경로를 원격 호스트로 읽지 않게
+      [[ -f "$t/package/themes/tokyo-night.json" ]] || die "pi-tokyo-night: 패키지에 themes/tokyo-night.json 이 없음"
+      mkdir -p "$OXY_HOME/vendor/pi-themes"
+      cp -f "$t/package/themes/tokyo-night.json" "$OXY_HOME/vendor/pi-themes/tokyo-night.json" ;;
+    *) cp -f "$2" "$BIN/$1.exe" ;;
+  esac
+}
 fetch_harness() { # <name> <version> <url> <sha>. 갱신된 sha 를 NEW_SHA 로 돌려준다
   local name="$1" version="$2" url="$3" sha="$4" file actual
   NEW_SHA="$sha"
   if [[ "$sha" == "-" && $UPDATE_LOCK == 0 ]]; then
     if [[ -f "$BIN/$name.exe" ]]; then log "· $name: 아직 릴리스가 없습니다. 이 PC 에서 빌드한 bin/$name.exe 를 그대로 씁니다"
-    else warn "$name $version: 아직 릴리스가 없어 받지 않습니다 (manifest 의 sha256 이 '-'). 설치·설정 TUI 는 줄 입력 모드로 동작합니다. Rust 가 있으면 just tui-build 로 빌드할 수 있습니다"; fi
+    else warn "$name $version: 아직 릴리스가 없어 받지 않습니다 (manifest 의 sha256 이 '-'). $(harness_note "$name"). Rust 가 있으면 just tui-build 로 빌드할 수 있습니다"; fi
     return 0
   fi
   file="$CACHE/$name-$version.download"
   if ! (download "$url" "$file"); then
     rm -f "$file.part"
-    warn "$name $version: 내려받지 못했습니다 ($url). 설치·설정 TUI 는 줄 입력 모드로 동작합니다"
+    warn "$name $version: 내려받지 못했습니다 ($url). $(harness_note "$name")"
     return 0
   fi
   actual=$(sha256 "$file")
@@ -196,7 +209,7 @@ fetch_harness() { # <name> <version> <url> <sha>. 갱신된 sha 를 NEW_SHA 로 
     rm -f "$file"
     die "$name: sha256 불일치 (기대 $sha, 실제 $actual)"
   fi
-  cp -f "$file" "$BIN/$name.exe"
+  place_harness "$name" "$file"
   log "✓ $name $version"
 }
 

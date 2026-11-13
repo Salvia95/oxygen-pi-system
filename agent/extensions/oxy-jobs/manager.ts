@@ -165,10 +165,11 @@ export class JobManager {
   readonly jobsDir: string;
   readonly runDir: string;    // 이 실행(세션)의 폴더. 첫 작업의 로그를 쓸 때 만든다
   readonly startedAt: number;
-  constructor(jobsDir: string, opts: { maxBash: number; maxAgents: number }) {
+  /** opts.runDir: subagent 는 본 대화의 실행 폴더 아래 sub/<작업 id> 를 쓴다 (state.ts 의 subRunDir) */
+  constructor(jobsDir: string, opts: { maxBash: number; maxAgents: number; runDir?: string }) {
     this.jobsDir = jobsDir;
     this.startedAt = Date.now();
-    this.runDir = join(jobsDir, runDirName(process.pid, this.startedAt));
+    this.runDir = opts.runDir ?? join(jobsDir, runDirName(process.pid, this.startedAt));
     this.bashSlots = new Semaphore(opts.maxBash);
     this.agentSlots = new Semaphore(opts.maxAgents);
     mkdirSync(jobsDir, { recursive: true });

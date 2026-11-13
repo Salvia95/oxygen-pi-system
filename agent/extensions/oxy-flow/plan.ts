@@ -9,6 +9,8 @@ export interface PlanItem {
   text: string;
   status: PlanStatus;
   at: number;            // 마지막으로 상태·글이 바뀐 시각
+  startedAt?: number;    // 처음 doing 이 된 시각 (docs/flow-view-spec.md §3). todo 에서 바로 done 이 되면 없다
+  endedAt?: number;      // done 이 된 시각. done 이 아니게 되면 지운다
   nodes: string[];       // 이 항목이 doing 일 때 생긴 커밋 노드 (n3 …)
   children: PlanItem[];  // 할 일 (2단째는 children 이 늘 빈 배열)
 }
@@ -23,6 +25,32 @@ export const PLAN_TEXT_MAX = 200;
 export const PLAN_ICON: Record<PlanStatus, string> = { todo: "·", doing: "⏳", done: "✓", blocked: "!", dropped: "–" };
 
 const closed = (s: PlanStatus) => s === "done" || s === "dropped";
+
+/** 상태를 바꾸고 시작 · 끝 시각을 맞춘다 (걸린 시간 표시용, docs/flow-view-spec.md §3) */
+export function setStatus(x: PlanItem, s: PlanStatus, now: number): void {
+  x.status = s;
+  if (s === "doing" && x.startedAt === undefined) x.startedAt = now;
+  if (s === "done") x.endedAt = now;
+  else delete x.endedAt;
+}
+
+/** 걸린 시간 (ms). 끝난 것만. 할 일이 있으면 가장 이른 할 일 시작 ~ 가장 늦은 할 일 끝. 시각을 모르면 null (지어내지 않는다) */
+export function itemDuration(x: PlanItem): number | null {
+  if (x.status !== "done") return null;
+  const parts = x.children.length ? x.children.filter((c) => c.status === "done") : [x];
+  const starts = parts.map((c) => c.startedAt).filter((t): t is number => typeof t === "number");
+  const ends = parts.map((c) => c.endedAt).filter((t): t is number => typeof t === "number");
+  if (!starts.length || !ends.length) return null;
+  const d = Math.max(...ends) - Math.min(...starts);
+  return d >= 0 ? d : null;
+}
+
+/** 경과 m:ss (한 시간 넘으면 h:mm:ss) */
+export function clock(ms: number): string {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), r = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
+}
 
 export function cleanText(s: unknown): string {
   const t = String(s ?? "").replace(/\s+/g, " ").trim();
@@ -43,7 +71,7 @@ export function rollUp(p: PlanItem, now = Date.now()): void {
   else if (st.includes("done")) next = "doing";              // 일부만 끝남 = 진행 중
   else if (st.every((s) => s === "blocked" || closed(s))) next = "blocked";
   else next = p.status === "doing" || p.status === "blocked" ? p.status : "todo"; // 모두 todo: 직접 지정한 doing/blocked 는 유지
-  if (next !== p.status) { p.status = next; p.at = now; }
+  if (next !== p.status) { setStatus(p, next, now); p.at = now; }
 }
 
 /**
@@ -59,7 +87,10 @@ export function setPlan(old: PlanItem[], items: PlanInput[], now = Date.now()): 
   }
   const make = (k: string, text: string, id: string, children: PlanItem[]): PlanItem => {
     const o = prev.get(k);
-    return { id, text, status: o?.status ?? "todo", at: o?.at ?? now, nodes: o ? [...o.nodes] : [], children };
+    const item: PlanItem = { id, text, status: o?.status ?? "todo", at: o?.at ?? now, nodes: o ? [...o.nodes] : [], children };
+    if (o?.startedAt !== undefined) item.startedAt = o.startedAt;
+    if (o?.endedAt !== undefined) item.endedAt = o.endedAt;
+    return item;
   };
   const plan = items.map((it, i) => {
     const text = cleanText(it?.text);
@@ -121,9 +152,9 @@ export function updateItem(plan: PlanItem[], id: string, change: { status?: stri
   if (change.status !== undefined) {
     const s = change.status as PlanStatus;
     if (!PLAN_STATUSES.includes(s)) throw new Error(`status must be one of ${PLAN_STATUSES.join(", ")}`);
-    item.status = s;
+    setStatus(item, s, now);
     if (item.children.length && closed(s)) {
-      for (const c of item.children) if (!closed(c.status)) { c.status = s; c.at = now; }
+      for (const c of item.children) if (!closed(c.status)) { setStatus(c, s, now); c.at = now; }
     }
   }
   item.at = now;
@@ -183,6 +214,9 @@ export function renderPlanLines(plan: PlanItem[], opts: { collapse?: boolean; ma
 
 /** 사람이 보는 계획 (FLOW.md) */
 export function renderPlanMarkdown(plan: PlanItem[]): string[] {
-  const line = (x: PlanItem, indent: string) => `${indent}- ${PLAN_ICON[x.status]} ${x.id} ${x.text}${x.nodes.length ? ` — ${x.nodes.join(" ")}` : ""}`;
+  const line = (x: PlanItem, indent: string) => {
+    const d = itemDuration(x);
+    return `${indent}- ${PLAN_ICON[x.status]} ${x.id} ${x.text}${d !== null ? ` (${clock(d)})` : ""}${x.nodes.length ? ` — ${x.nodes.join(" ")}` : ""}`;
+  };
   return plan.flatMap((p) => [line(p, ""), ...p.children.map((c) => line(c, "  "))]);
 }

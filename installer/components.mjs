@@ -72,7 +72,7 @@ export const CATALOG = {
 };
 
 /** 하네스 자체의 프로그램 (manifest 의 role=harness) 과 그 파일. 없어도 설치는 된다: 화면 프로그램이 없으면 TUI 가 줄 입력 모드로 동작한다 */
-export const HARNESS_FILES = { "oxy-tui": "bin/oxy-tui.exe" };
+export const HARNESS_FILES = { "oxy-tui": "bin/oxy-tui.exe", "pi-tokyo-night": "vendor/pi-themes/tokyo-night.json" };
 
 export const hasComponent = (name, root) => (HARNESS_FILES[name] ? existsSync(join(root, HARNESS_FILES[name]))
   : Boolean(CATALOG[name]) && existsSync(join(root, CATALOG[name].check)));

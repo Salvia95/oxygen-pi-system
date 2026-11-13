@@ -3,22 +3,25 @@
 //! 스피너와 경과 시간만 이 프로그램의 시계로 움직인다 (Node 가 1초마다 보내지 않는다). 선택한 줄은 모델의 `selected` 를 따른다.
 //!
 //! 줄 배치 (model.ts 의 `modelHeight` 와 줄 수가 같아야 한다)
-//!   제목 1줄(왼쪽 title, 오른쪽 right) → nowAt 이 top 이면 지금(now) 줄들 → 가로줄(지금이 있을 때) → 구역 0 의 줄
-//!   → 다음 구역마다 가로줄(구역 제목은 그 가로줄 안에 `── 최근 ──`) + 줄 → nowAt 이 bottom 이면 가로줄 + 지금 줄들 → 키 안내 줄들
+//!   맨 윗줄 띠 1줄(왼쪽 title, 오른쪽 right. pane 폭 전체를 바탕색으로 칠한다) → nowAt 이 top 이면 지금(now) 줄들 → 가로줄(지금이 있을 때)
+//!   → 구역마다 줄 (제목이 있으면 가로줄 안에 `── Current Task ──`, 구역 0 도 같다. 제목 없는 구역 0 은 가로줄이 없다. 제목 없는 다음 구역은 빈 가로줄) → nowAt 이 bottom 이면 가로줄 + 지금 줄들 → 키 안내 줄들
 //! 키 안내는 항상 창의 맨 아래에 붙인다 (모델이 창보다 짧아도 아래에 놓인다. 길면 위쪽 줄을 자른다).
-//! 줄 모양: `<들여쓰기 칸><기호> <글>` + 오른쪽 정렬 right (since 가 있으면 right 대신 경과 m:ss).
+//! 줄 모양: `<들여쓰기 칸><prefix(회색)><기호> <글>` + 오른쪽 정렬 right (since 가 있으면 right 대신 경과 m:ss).
 //! 줄이 폭을 넘으면 글을 `…` 로 줄이고 right 는 가능한 한 남긴다. 줄이 다음 줄로 넘어가지 않는다.
-//! 색: emphasis = 강조색 · error = 오류색 · 선택한 줄 = 반전 (색이 없어도 보인다). 한글 문구에 회색을 쓰지 않는다 (가로줄과 · − 기호만 회색).
+//! badge 가 있으면 오른쪽 열 바로 앞에 두 칸 띄워 둔다 (`⠋ worker: 결제 모듈 수정  셸 1  2:12`). 글을 먼저 줄이고, 그래도 글이 4칸도 안 남으면 badge 를 뺀다.
+//! popup 이 있으면 맨 윗줄 띠와 키 안내만 두고 그 사이를 흐리게 한 뒤 가운데에 설치 화면의 확인 팝업(parts::dialog)을 겹쳐 그린다 (draw_popup).
+//! 색: emphasis = 강조색 · error = 오류색 · 선택한 줄 = 반전 (Tokyo Night 는 바탕색. 색이 없어도 보인다). 한글 문구에 회색을 쓰지 않는다 (가로줄과 · − 기호만 회색).
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use serde::Deserialize;
 
-use crate::text::{fit, w};
+use crate::parts::{Button, dialog};
+use crate::text::{fit, w, wrap};
 use crate::theme;
 
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -34,8 +37,24 @@ pub struct MRow {
     /// 경과 시작 시각 (ms epoch). 이 프로그램이 1초마다 m:ss 로 그린다
     pub since: Option<i64>,
     pub indent: usize,
+    /// 들여쓰기 다음 · 기호 앞에 회색으로 그리는 트리 바 (`├ ` `└ ` `│ `)
+    pub prefix: Option<String>,
     pub emphasis: bool,
     pub error: bool,
+    /// 오른쪽 열(경과 · right) 바로 앞에 두 칸 띄워 그리는 짧은 글 (Sub Context 의 `셸 1`). 줄이 모자라면 글을 먼저 줄이고, 그래도 안 되면 뺀다
+    pub badge: Option<String>,
+}
+
+/// 중지 확인 같은 팝업. 화면 가운데에 겹쳐 그린다. focus 는 buttons 의 위치
+#[derive(Deserialize, Clone, Default, Debug)]
+#[serde(default)]
+pub struct MPopup {
+    pub title: String,
+    pub lines: Vec<String>,
+    pub buttons: Vec<String>,
+    pub focus: usize,
+    /// 경고 모양(`! ` · 경고색)으로 그릴 버튼의 위치. 없으면 경고 버튼이 없다 (버튼 이름으로 알아내지 않는다)
+    pub danger: Option<usize>,
 }
 
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -61,6 +80,8 @@ pub struct MonitorModel {
     pub selected: Option<String>,
     /// 키 안내 줄 (폭에 맞춰 이미 나눈 것)
     pub keys: Vec<String>,
+    /// 있으면 화면 가운데에 팝업을 겹쳐 그린다 (아래 화면은 흐리게. 맨 윗줄 띠와 키 안내는 그대로)
+    pub popup: Option<MPopup>,
 }
 
 /// 지시 한 줄의 결과
@@ -105,7 +126,7 @@ pub fn clock(ms: i64) -> String {
 
 fn marker_of(name: &str, frame: usize) -> Option<(&'static str, Style)> {
     Some(match name {
-        "spinner" => (theme::SPINNER[frame % theme::SPINNER.len()], theme::accent()),
+        "spinner" => (theme::SPINNER[frame % theme::SPINNER.len()], theme::spinner()),
         "todo" => ("·", theme::sub()),
         "done" => (theme::OK, theme::ok()),
         "failed" => (theme::ERR, theme::err()),
@@ -120,22 +141,33 @@ fn blank(n: usize) -> Span<'static> {
     Span::raw(" ".repeat(n))
 }
 
-/// 왼쪽 글과 오른쪽 글을 폭 안에 놓는다. 폭이 모자라면 왼쪽 글을 `…` 로 줄이고, 오른쪽 글은 왼쪽에 4칸이 남는 한 둔다
-fn two_sides(head: Vec<Span<'static>>, head_w: usize, text: &str, text_style: Style, right: Option<(String, Style)>, width: usize) -> Vec<Span<'static>> {
+/// 왼쪽 글과 오른쪽 글(두 칸 띄운 조각들: 배지 · 경과)을 폭 안에 놓는다. 폭이 모자라면 왼쪽 글을 `…` 로 줄이고,
+/// 그래도 왼쪽에 4칸이 남지 않으면 오른쪽 조각을 앞(배지)부터 하나씩 뺀다
+fn two_sides(head: Vec<Span<'static>>, head_w: usize, text: &str, text_style: Style, right: Vec<(String, Style)>, width: usize) -> Vec<Span<'static>> {
     let avail = width.saturating_sub(head_w);
+    let right: Vec<(String, Style)> = right.into_iter().filter(|(r, _)| !r.is_empty()).collect();
+    let right_w = |from: usize| right[from..].iter().map(|(r, _)| w(r)).sum::<usize>() + 2 * right.len().saturating_sub(from + 1);
     let mut spans = head;
-    let (shown, right) = match right {
-        Some((r, st)) if !r.is_empty() => {
-            let room = avail.saturating_sub(w(&r) + 1);
-            if room >= 4 || w(text) <= room { (fit(text, room), Some((r, st))) } else { (fit(text, avail), None) }
+    let mut chosen = right.len();
+    let mut shown = fit(text, avail);
+    for from in 0..right.len() {
+        let room = avail.saturating_sub(right_w(from) + 1);
+        if room >= 4 || w(text) <= room {
+            chosen = from;
+            shown = fit(text, room);
+            break;
         }
-        _ => (fit(text, avail), None),
-    };
+    }
     let used = head_w + w(&shown);
     spans.push(Span::styled(shown, text_style));
-    if let Some((r, st)) = right {
-        spans.push(blank(width.saturating_sub(used + w(&r))));
-        spans.push(Span::styled(r, st));
+    if chosen < right.len() {
+        spans.push(blank(width.saturating_sub(used + right_w(chosen))));
+        for (i, (r, st)) in right.into_iter().enumerate().skip(chosen) {
+            if i > chosen {
+                spans.push(blank(2));
+            }
+            spans.push(Span::styled(r, st));
+        }
     }
     spans
 }
@@ -168,13 +200,17 @@ fn clip(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
     out
 }
 
-/// 한 행. selected 면 줄 전체를 반전한다
+/// 한 행. selected 면 줄 전체를 칠한다 (`theme::select`: 반전, Tokyo Night 는 바탕색)
 fn row_line(r: &MRow, selected: bool, width: usize, frame: usize, now: i64) -> Line<'static> {
     let indent = r.indent.min(width / 2);
     let mut head = Vec::new();
     let mut head_w = indent;
     if indent > 0 {
         head.push(blank(indent));
+    }
+    if let Some(p) = r.prefix.as_deref().filter(|p| !p.is_empty()) {
+        head.push(Span::styled(p.to_string(), theme::sub()));
+        head_w += w(p);
     }
     if let Some((sym, st)) = marker_of(&r.marker, frame) {
         head.push(Span::styled(sym, st));
@@ -183,26 +219,37 @@ fn row_line(r: &MRow, selected: bool, width: usize, frame: usize, now: i64) -> L
     }
     let text_style = if r.error { theme::err() } else if r.emphasis { theme::focus() } else { theme::text() };
     let right_style = if r.error { theme::err() } else if r.emphasis { theme::accent() } else { theme::text() };
-    let right = match (r.since, &r.right) {
-        (Some(s), _) => Some((clock(now - s), right_style)),
-        (None, Some(t)) => Some((t.clone(), right_style)),
-        _ => None,
-    };
+    let mut right = Vec::new();
+    if let Some(b) = r.badge.as_deref().filter(|b| !b.is_empty()) {
+        right.push((b.to_string(), theme::text())); // 한글이라 회색을 쓰지 않는다
+    }
+    match (r.since, &r.right) {
+        (Some(s), _) => right.push((clock(now - s), right_style)),
+        (None, Some(t)) => right.push((t.clone(), right_style)),
+        _ => {}
+    }
     let mut spans = clip(two_sides(head, head_w, &r.text, text_style, right, width), width);
     if selected {
         let used: usize = spans.iter().map(|s| w(&s.content)).sum();
         spans.push(blank(width.saturating_sub(used)));
         for s in &mut spans {
-            s.style = s.style.add_modifier(Modifier::REVERSED);
+            s.style = theme::select(s.style);
         }
     }
     Line::from(spans)
 }
 
-/// 제목: 왼쪽 title(굵게), 오른쪽 right
+/// 맨 윗줄 띠: 왼쪽 title, 오른쪽 right 를 한 줄에 놓고 pane 폭 전체를 띠 색(`theme::band`)으로 칠한다
 fn title_line(m: &MonitorModel, width: usize) -> Line<'static> {
-    let right = (!m.right.is_empty()).then(|| (m.right.clone(), theme::text()));
-    Line::from(two_sides(Vec::new(), 0, &m.title, theme::strong(), right, width))
+    let band = theme::band();
+    let right = vec![(m.right.clone(), band)];
+    let mut spans = clip(two_sides(Vec::new(), 0, &m.title, band, right, width), width);
+    let used: usize = spans.iter().map(|s| w(&s.content)).sum();
+    spans.push(blank(width.saturating_sub(used)));
+    for s in &mut spans {
+        s.style = band;
+    }
+    Line::from(spans)
 }
 
 /// 가로줄. 제목이 있으면 `── 최근 ──` 처럼 그 안에 쓴다 (줄은 폭을 꽉 채운다)
@@ -250,10 +297,9 @@ pub fn layout(m: &MonitorModel, width: usize, frame: usize, now: i64) -> (Vec<Li
         body.push(rule(None, width));
     }
     for (i, s) in m.sections.iter().enumerate() {
-        if i > 0 {
+        // 제목이 있는 구역은 구역 0 도 가로줄 안에 제목을 쓴다. 제목 없는 구역 0 은 줄이 없다 (jobs 의 목록)
+        if i > 0 || s.title.as_deref().is_some_and(|t| !t.is_empty()) {
             body.push(rule(s.title.as_deref(), width));
-        } else if let Some(t) = s.title.as_deref().filter(|t| !t.is_empty()) {
-            body.push(Line::from(Span::styled(fit(t, width), theme::strong())));
         }
         body.extend(s.rows.iter().map(row));
     }
@@ -293,6 +339,41 @@ pub fn render(f: &mut Frame, m: &MonitorModel, frame: usize, now: i64) {
     draw(f, body, 0);
     draw(f, pinned, pinned_at);
     draw(f, keys, keys_at);
+    if let Some(p) = m.popup.as_ref().filter(|p| !p.buttons.is_empty()) {
+        draw_popup(f, p, area, keys_at as u16 + area.y);
+    }
+}
+
+/// 중지 확인 팝업 (설치 화면의 확인 팝업과 같은 모양: `parts::dialog`). 맨 윗줄 띠와 키 안내는 그대로 두고 그 사이를 흐리게 한 뒤 가운데에 겹쳐 그린다.
+/// 본문은 팝업 안 폭에 맞춰 줄바꿈하고, 높이가 모자라면 본문과 버튼 사이의 빈 줄 → 맨 윗줄 띠를 덮는 한 줄 → 본문 끝(`…`) 순으로 줄인다. 버튼은 늘 남는다.
+/// keys_y: 키 안내가 시작하는 줄 (창 기준)
+fn draw_popup(f: &mut Frame, p: &MPopup, area: Rect, keys_y: u16) {
+    let body = Rect::new(area.x, area.y + 1, area.width, keys_y.saturating_sub(area.y + 1));
+    let full = Rect::new(area.x, area.y, area.width, keys_y.saturating_sub(area.y));
+    f.buffer_mut().set_style(body, theme::dimmed());
+    let width = area.width.saturating_sub(2).clamp(1, 70);
+    let iw = (width.saturating_sub(4) as usize).max(4);
+    let mut text: Vec<Line<'static>> = Vec::new();
+    for (i, l) in p.lines.iter().enumerate() {
+        for part in wrap(l, iw) {
+            text.push(if i == 0 { Line::styled(part, theme::strong()) } else { Line::raw(part) });
+        }
+    }
+    // (자리, 빈 줄을 둘지) 를 위에서부터 시도한다. 줄 수 = 본문 + 빈 줄 + 버튼 줄 + 테두리 2
+    let tries = [(body, true), (body, false), (full, true), (full, false)];
+    let (place, spacer) = tries.into_iter().find(|(r, sp)| text.len() + usize::from(*sp) + 3 <= r.height as usize).unwrap_or((full, false));
+    let room = (place.height as usize).saturating_sub(3);
+    if text.len() > room {
+        text.truncate(room.saturating_sub(1));
+        if room > 0 {
+            text.push(Line::raw("…"));
+        }
+    }
+    if spacer {
+        text.push(Line::raw(""));
+    }
+    let buttons: Vec<Button> = p.buttons.iter().enumerate().map(|(i, b)| Button { label: b, on: i == p.focus, danger: p.danger == Some(i) }).collect();
+    dialog(f, place, width, &p.title, text, &buttons, p.danger.is_some_and(|d| d < buttons.len()));
 }
 
 /// 화면을 글자로 (시험 · 터미널이 아닌 곳에서의 데모). 세로로 height 줄, 가로는 줄마다 오른쪽 공백을 뗀다
@@ -372,7 +453,8 @@ mod tests {
             // 실제 버퍼에 그려서도 키 안내는 맨 아래, 제목은 맨 위
             let rows = dump(m, *width, *height, 0, at + 5_000);
             assert_eq!(rows.len(), *height as usize);
-            assert!(rows[0].starts_with(m.title.as_str()), "{name}: {}", rows[0]);
+            // 팝업이 모자란 높이에서 맨 윗줄 띠를 덮을 수는 있다 (popup 시험이 따로 본다)
+            assert!(m.popup.is_some() || rows[0].starts_with(m.title.as_str()), "{name}: {}", rows[0]);
             let last_key = m.keys.last().unwrap();
             assert_eq!(rows.last().unwrap().trim_start(), last_key.trim_start(), "{name}");
             assert!(rows.iter().all(|r| w(r) <= *width as usize), "{name}");
@@ -410,7 +492,7 @@ mod tests {
             let spinners = all_rows(m).into_iter().filter(|r| r.marker == "spinner").count();
             for frame in 0..10 {
                 let (body, _) = lines(m, *width as usize, frame, at);
-                let glyphs: Vec<char> = body.iter().map(line_text).filter_map(|t| t.trim_start().chars().next()).filter(|c| ('\u{2800}'..='\u{28FF}').contains(c)).collect();
+                let glyphs: Vec<char> = body.iter().map(line_text).filter_map(|t| t.trim_start_matches(|c: char| c == ' ' || "├└│".contains(c)).chars().next()).filter(|c| ('\u{2800}'..='\u{28FF}').contains(c)).collect();
                 assert_eq!(glyphs.len(), spinners, "{name}: spinner 줄마다 점자 글자 하나");
                 assert!(glyphs.iter().all(|g| theme::SPINNER.contains(&g.to_string().as_str())));
                 seen.extend(glyphs);
@@ -449,7 +531,8 @@ mod tests {
         let mut seen = 0;
         for (name, width, _, _, m) in &fx {
             let (body, _) = lines(m, *width as usize, 0, at);
-            for s in m.sections.iter().skip(1).filter(|s| s.title.is_some()) {
+            // 구역 0 의 제목도 같은 가로줄이다 (한 줄이라 줄 수는 그대로)
+            for s in m.sections.iter().filter(|s| s.title.is_some()) {
                 let t = s.title.as_deref().unwrap();
                 let l = body.iter().map(line_text).find(|l| l.starts_with(&format!("── {t} "))).unwrap_or_else(|| panic!("{name}: `── {t} ──` 줄이 없다"));
                 assert!(l.ends_with('─') && w(&l) == *width as usize, "{name}: {l}");
@@ -462,8 +545,24 @@ mod tests {
             assert_eq!(rules, expected, "{name}: 가로줄 수");
         }
         assert!(seen >= 2, "구역 제목이 있는 예시 모델이 flow 에 있어야 한다");
-        // 작은 창의 flow 에는 최근 구역이 없다 (spec §3 폭과 높이)
-        assert!(fx.iter().filter(|(n, ..)| n.starts_with("flow-23x12")).all(|(.., m)| m.sections.iter().all(|s| s.title.is_none())));
+        // flow 는 구역 0 이 Current Task, 다음이 Overall Task 다 (flow-view-spec §2)
+        for (name, width, _, _, m) in fx.iter().filter(|(n, ..)| n.starts_with("flow-")) {
+            let titles: Vec<_> = m.sections.iter().map(|s| s.title.as_deref()).collect();
+            assert_eq!(titles, [Some("Current Task"), Some("Overall Task")], "{name}");
+            let (body, _) = lines(m, *width as usize, 0, at);
+            assert_eq!(line_text(&body[1]), format!("── Current Task {}", "─".repeat(*width as usize - 16)), "{name}: 맨 윗줄 바로 아래가 구역 0 가로줄");
+        }
+        // jobs 의 목록은 Main Context · Sub Context 두 구역이고, subagent 화면은 `<agent>: <일>` 한 구역이다 (jobs-view-spec §2)
+        for (name, width, _, _, m) in fx.iter().filter(|(n, ..)| n.starts_with("jobs-")) {
+            let titles: Vec<_> = m.sections.iter().map(|s| s.title.as_deref()).collect();
+            if name.starts_with("jobs-sub-") {
+                assert!(titles.len() == 1 && titles[0].is_some_and(|t| t.starts_with("scout: ")), "{name}: {titles:?}");
+            } else {
+                assert_eq!(titles, [Some("Main Context"), Some("Sub Context")], "{name}");
+            }
+            let (body, _) = lines(m, *width as usize, 0, at);
+            assert!(line_text(&body[1]).starts_with("── "), "{name}: 맨 윗줄 바로 아래가 구역 0 가로줄");
+        }
     }
 
     #[test]
@@ -472,7 +571,11 @@ mod tests {
         for (name, width, _, _, m) in &fx {
             let (body, keys) = lines(m, *width as usize, 0, at);
             let texts: Vec<String> = body.iter().map(line_text).collect();
-            let first_now = m.now.first().map(|r| r.text.chars().take(2).collect::<String>()).unwrap();
+            // 새 flow 모델은 지금(now) 줄이 없다 (구역 Current Task 가 대신한다)
+            let Some(first_now) = m.now.first().map(|r| r.text.chars().take(2).collect::<String>()) else {
+                assert!(m.kind == "flow" && !texts.iter().any(|t| *t == "─".repeat(*width as usize)), "{name}");
+                continue;
+            };
             let pos = texts.iter().position(|t| t.contains(&first_now)).unwrap();
             let rule_at = texts.iter().position(|t| *t == "─".repeat(*width as usize)).unwrap();
             if m.now_at == "top" {
@@ -556,32 +659,27 @@ mod tests {
     }
 
     #[test]
-    fn jobs_now_row_sits_right_above_the_keys_and_the_blank_lines_are_above_its_rule() {
+    fn jobs_now_row_sits_right_above_the_keys_and_the_areas_fill_the_window() {
         let (at, fx) = fixtures();
-        for want in ["jobs-35x28", "jobs-23x24", "jobs-35x14", "jobs-23x12"] {
-            let Some((name, width, height, model_h, m)) = fx.iter().find(|(n, ..)| n.starts_with(want)) else { continue };
-            assert_eq!(m.now_at, "bottom");
-            assert!(*model_h < *height as usize, "{name}: 목록이 짧아 빈 줄이 생기는 모델이어야 한다");
+        let mut seen = 0;
+        for (name, width, height, model_h, m) in fx.iter().filter(|(n, ..)| n.starts_with("jobs-")) {
+            // 새 jobs 모델은 영역이 빈 줄로 창을 채운다: 모델 높이 = 창 높이
+            assert_eq!((m.now_at.as_str(), *model_h), ("bottom", *height as usize), "{name}");
             let rows = dump(m, *width, *height, 0, at);
             let h = *height as usize;
-            let key_rows = m.keys.len();
-            // 맨 아래 = 키 안내, 그 위 = 지금 줄들, 그 위 = 가로줄
+            // 맨 아래 = 키 안내, 그 위 = 지금 줄들, 그 위 = 가로줄 (팝업이 있어도 이 줄들은 그대로)
             assert_eq!(rows[h - 1].trim_start(), m.keys.last().unwrap().trim_start(), "{name}");
-            let now_first = h - key_rows - m.now.len();
+            if m.popup.is_some() {
+                seen += 1; // 팝업이 지금 줄을 덮을 수 있다 (11줄 pane): popup 시험이 따로 본다
+                continue;
+            }
+            let now_first = h - m.keys.len() - m.now.len();
             assert_eq!(rows[now_first - 1], "─".repeat(*width as usize), "{name}: 가로줄이 지금 바로 위");
             let head: String = m.now[0].text.chars().take(2).collect();
             assert!(rows[now_first].contains(&head), "{name}: {}", rows[now_first]);
-            // 목록과 가로줄 사이에 빈 줄이 있고, 목록은 제목 바로 아래에서 시작한다
-            let list_rows = m.sections[0].rows.len();
-            assert_eq!(rows[1 + list_rows..now_first - 1].iter().filter(|r| r.is_empty()).count(), h - model_h, "{name}: 빈 줄 수");
-            assert!(rows[1 + list_rows..now_first - 1].iter().all(|r| r.is_empty()), "{name}");
-            assert!(!rows[1].is_empty(), "{name}");
+            seen += 1;
         }
-        // 창이 모델과 같은 높이면 순서대로의 줄과 같다 (빈 줄 없음)
-        let (_, _, _, _, m) = fx.iter().find(|(n, ..)| n.starts_with("jobs-35x28")).unwrap();
-        let (body, keys) = lines(m, 35, 0, at);
-        let rows = dump(m, 35, (body.len() + keys.len()) as u16, 0, at);
-        assert!(rows.iter().all(|r| !r.is_empty()));
+        assert_eq!(seen, 15);
         // flow(지금이 위)는 그대로: 빈 줄이 가로줄 아래가 아니라 본문과 키 안내 사이에 생긴다
         let (_, _, _, _, f) = fx.iter().find(|(n, ..)| n.starts_with("flow-23x12")).unwrap();
         let rows = dump(f, 23, 16, 0, at);
@@ -607,6 +705,372 @@ mod tests {
         }
     }
 
+    use crate::theme::{Look, Variant, with_look};
+    use ratatui::style::{Color, Modifier};
+
+    fn look(theme: Variant, no_color: bool) -> Look {
+        Look { theme, monitor: true, no_color }
+    }
+    fn c(hex: u32) -> Color {
+        Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+    }
+    fn style_of<'a>(l: &'a Line, text: &str) -> &'a Style {
+        &l.spans.iter().find(|s| s.content == text).unwrap_or_else(|| panic!("{text} 칸이 없다: {:?}", l.spans)).style
+    }
+
+    #[test]
+    fn prefix_goes_between_the_indent_and_the_marker_in_grey_and_counts_in_the_width() {
+        with_look(look(Variant::Dark, false), || {
+            let r = MRow { prefix: Some("├ ".into()), ..row("done", "라우트", Some("3:10"), 0) };
+            let l = row_line(&r, false, 20, 0, NOW);
+            assert_eq!(line_text(&l), "├ ✓ 라우트      3:10");
+            assert_eq!(*style_of(&l, "├ "), theme::sub());
+            assert_ne!(*style_of(&l, "✓"), theme::sub());
+            // 들여쓰기가 있으면 그 다음에 온다. 폭 계산에 들어가 긴 글은 그만큼 더 줄어든다
+            let r = MRow { prefix: Some("│ ".into()), ..row("none", "결정: 아주 긴 결정 문장이 폭을 넘습니다", None, 2) };
+            let t = line_text(&row_line(&r, false, 20, 0, NOW));
+            assert!(t.starts_with("  │ ") && w(&t) <= 20 && t.contains('…'), "{t}");
+            // 고른 줄이면 prefix 도 줄 전체와 같이 칠해진다
+            let l = row_line(&MRow { prefix: Some("└ ".into()), ..row("todo", "x", None, 0) }, true, 12, 0, NOW);
+            assert!(reversed(&l) && w(&line_text(&l)) == 12);
+        });
+    }
+
+    #[test]
+    fn title_band_fills_the_pane_in_each_palette_and_inverts_without_color() {
+        let m = MonitorModel { title: "Flow Monitor".into(), right: "Total 2/6".into(), ..MonitorModel::default() };
+        for (v, bg, fg) in [(Variant::Dark, 0x3A5A4D, 0xF1F7EE), (Variant::Light, 0xA9CBA4, 0x1E2E28), (Variant::Tokyo, 0x7AA2F7, 0x1A1B26)] {
+            with_look(look(v, false), || {
+                for width in [23, 35, 5] {
+                    let l = title_line(&m, width);
+                    assert_eq!(w(&line_text(&l)), width, "{v:?} {width}: 띠는 폭 전체");
+                    for s in &l.spans {
+                        assert_eq!((s.style.bg, s.style.fg), (Some(c(bg)), Some(c(fg))), "{v:?}: {:?}", s.content);
+                        assert!(s.style.add_modifier.contains(Modifier::BOLD) && !s.style.add_modifier.contains(Modifier::REVERSED));
+                    }
+                }
+                let l = title_line(&m, 35);
+                assert!(line_text(&l).starts_with("Flow Monitor") && line_text(&l).ends_with("Total 2/6"));
+            });
+        }
+        with_look(look(Variant::Tokyo, true), || {
+            let l = title_line(&m, 23);
+            assert_eq!(w(&line_text(&l)), 23);
+            assert!(l.spans.iter().all(|s| s.style.add_modifier.contains(Modifier::REVERSED | Modifier::BOLD) && s.style.bg.is_none() && s.style.fg.is_none()));
+        });
+        // 오른쪽 글이 없어도 띠는 폭 전체
+        with_look(look(Variant::Dark, false), || {
+            let l = title_line(&MonitorModel { title: "jobs".into(), ..MonitorModel::default() }, 23);
+            assert_eq!((w(&line_text(&l)), l.spans.iter().all(|s| s.style.bg == Some(c(0x3A5A4D)))), (23, true));
+        });
+        // 맨 윗줄은 layout 의 첫 줄이다 (flow · jobs 공통)
+        let (at, fx) = fixtures();
+        with_look(look(Variant::Dark, false), || {
+            for (name, width, _, _, m) in &fx {
+                let (body, _) = lines(m, *width as usize, 0, at);
+                assert!(body[0].spans.iter().all(|s| s.style.bg == Some(c(0x3A5A4D))), "{name}");
+                assert!(body[1..].iter().all(|l| l.spans.iter().all(|s| s.style.bg.is_none())), "{name}: 띠는 맨 윗줄뿐");
+            }
+        });
+    }
+
+    #[test]
+    fn tokyo_night_colors_the_monitor_and_fills_the_selected_row_instead_of_inverting() {
+        with_look(look(Variant::Tokyo, false), || {
+            let l = |m: &str, text: &str| row_line(&row(m, text, None, 0), false, 20, 3, NOW);
+            // 점자 스피너 #7dcfff · 완료 #9ece6a · 주의 #e0af68 · 실패 #f7768e · 흐린 것 #565f89
+            assert_eq!(style_of(&l("spinner", "진행"), theme::SPINNER[3]).fg, Some(c(0x7DCFFF)));
+            assert_eq!(style_of(&l("done", "완료"), "✓").fg, Some(c(0x9ECE6A)));
+            assert_eq!(style_of(&l("blocked", "주의"), "!").fg, Some(c(0xE0AF68)));
+            assert_eq!(style_of(&l("failed", "실패"), "×").fg, Some(c(0xF7768E)));
+            assert_eq!(style_of(&l("todo", "할 일"), "·").fg, Some(c(0x565F89)));
+            assert_eq!(style_of(&l("dropped", "뺌"), "-").fg, Some(c(0x565F89)));
+            let err = MRow { error: true, ..row("failed", "오류 글", None, 0) };
+            assert_eq!(style_of(&row_line(&err, false, 20, 0, NOW), "오류 글").fg, Some(c(0xF7768E)));
+            // 강조(focus · accent · emphasis 글) #7aa2f7
+            let emph = MRow { emphasis: true, right: Some("◀".into()), ..row("done", "지금", None, 0) };
+            let e = row_line(&emph, false, 20, 0, NOW);
+            assert_eq!((style_of(&e, "지금").fg, style_of(&e, "◀").fg), (Some(c(0x7AA2F7)), Some(c(0x7AA2F7))));
+            // 가로줄과 prefix 는 흐린 색, 한글 문구는 흐린 색이 아니다
+            let rl = rule(Some("Current Task"), 20);
+            assert_eq!((rl.spans[0].style.fg, rl.spans[2].style.fg), (Some(c(0x565F89)), Some(c(0x565F89))));
+            let p = MRow { prefix: Some("├ ".into()), ..row("done", "한글 문구", Some("오른쪽"), 0) };
+            let pl = row_line(&p, false, 30, 0, NOW);
+            assert_eq!(style_of(&pl, "├ ").fg, Some(c(0x565F89)));
+            assert!(pl.spans.iter().filter(|s| s.content.contains("한글") || s.content.contains("오른쪽")).all(|s| s.style.fg != Some(c(0x565F89))));
+            // 고른 줄: 반전이 아니라 바탕 #283457, 글자색은 그대로, 줄 전체
+            let sel = row_line(&MRow { emphasis: true, ..row("spinner", "고른 줄", Some("0:42"), 0) }, true, 20, 3, NOW);
+            assert_eq!(w(&line_text(&sel)), 20);
+            assert!(sel.spans.iter().all(|s| s.style.bg == Some(c(0x283457)) && !s.style.add_modifier.contains(Modifier::REVERSED)));
+            assert_eq!(style_of(&sel, theme::SPINNER[3]).fg, Some(c(0x7DCFFF)));
+            assert_eq!(style_of(&sel, "고른 줄").fg, Some(c(0x7AA2F7)));
+            // 고르지 않은 줄에는 바탕이 없다
+            assert!(l("done", "x").spans.iter().all(|s| s.style.bg.is_none()));
+        });
+        // 색을 끄면 Tokyo Night 에서도 반전
+        with_look(look(Variant::Tokyo, true), || {
+            let sel = row_line(&row("done", "고른 줄", None, 0), true, 20, 0, NOW);
+            assert!(reversed(&sel) && sel.spans.iter().all(|s| s.style.bg.is_none() && s.style.fg.is_none()));
+        });
+        // 기본 · 밝은 팔레트는 지금처럼 반전
+        for v in [Variant::Dark, Variant::Light] {
+            with_look(look(v, false), || {
+                let sel = row_line(&row("done", "고른 줄", None, 0), true, 20, 0, NOW);
+                assert!(reversed(&sel) && sel.spans.iter().all(|s| s.style.bg.is_none()), "{v:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn install_screens_keep_the_default_palette_even_when_tokyo_night_is_asked() {
+        // 모니터 모드가 아니면 tokyo-night 값이 와도 기본 팔레트 (설치 · 설정 화면)
+        with_look(Look { theme: Variant::Tokyo, monitor: false, no_color: false }, || {
+            let base = Look { theme: Variant::Dark, monitor: false, no_color: false };
+            assert_eq!(theme::variant(), Variant::Dark);
+            let tokyo = (theme::accent(), theme::sub(), theme::ok(), theme::warn(), theme::err(), theme::spinner(), theme::band(), theme::select(Style::new()));
+            let dark = with_look(base, || (theme::accent(), theme::sub(), theme::ok(), theme::warn(), theme::err(), theme::spinner(), theme::band(), theme::select(Style::new())));
+            assert_eq!(tokyo, dark);
+            assert_eq!(theme::err().fg, Some(Color::Red));
+            assert_eq!(theme::warn().fg, Some(Color::Yellow));
+        });
+        // light 는 모니터 여부와 관계없이 그대로
+        with_look(Look { theme: Variant::Light, monitor: false, no_color: false }, || assert_eq!(theme::variant(), Variant::Light));
+    }
+
+    fn badge_row(text: &str, badge: &str, since: Option<i64>) -> MRow {
+        MRow { badge: Some(badge.into()), since, ..row("spinner", text, None, 0) }
+    }
+
+    #[test]
+    fn badge_sits_right_before_the_elapsed_column_and_goes_first_when_the_line_is_short() {
+        let l = |r: &MRow, width| line_text(&row_line(r, false, width, 0, NOW));
+        let r = badge_row("worker: 결제 모듈 수정", "셸 1", Some(NOW - 132_000));
+        // 글 · 배지 · 경과 순. 배지와 경과 사이는 두 칸이고 경과는 오른쪽 끝
+        let t = l(&r, 36);
+        assert_eq!(t, "⠋ worker: 결제 모듈 수정  셸 1  2:12");
+        assert_eq!(w(&t), 36);
+        // 35칸에서는 글과 배지 사이가 한 칸으로 줄지만 배지와 경과 사이는 두 칸이다
+        assert_eq!(l(&r, 35), "⠋ worker: 결제 모듈 수정 셸 1  2:12");
+        // 글을 먼저 `…` 로 줄이고 배지는 남긴다
+        let t = l(&r, 23);
+        assert!(t.starts_with("⠋ worker") && t.contains('…') && t.ends_with("셸 1  2:12") && w(&t) == 23, "{t}");
+        // 그래도 글이 4칸도 못 남으면 배지를 뺀다 (경과는 남는다)
+        let t = l(&r, 14);
+        assert!(!t.contains("셸") && t.ends_with("2:12") && w(&t) <= 14 && t.contains('…'), "{t}");
+        // 글이 다 들어가면 줄이지 않는다
+        assert_eq!(l(&badge_row("npm", "셸 2", Some(NOW - 5_000)), 20), "⠋ npm     셸 2  0:05");
+        // 경과가 없으면 배지가 오른쪽 끝
+        assert_eq!(l(&badge_row("scout", "셸 1", None), 20), "⠋ scout         셸 1");
+        // 배지가 없으면 지금과 같다
+        assert_eq!(l(&MRow { since: Some(NOW - 5_000), ..row("spinner", "npm", None, 0) }, 20), "⠋ npm           0:05");
+        for width in [1, 2, 5, 9, 12, 14, 23] {
+            assert!(w(&l(&r, width)) <= width, "{width}");
+        }
+        // 한글이므로 회색을 쓰지 않고, 고른 줄이면 줄 전체와 같이 칠한다
+        with_look(look(Variant::Dark, false), || {
+            let line = row_line(&r, false, 35, 0, NOW);
+            assert_eq!(*style_of(&line, "셸 1"), theme::text());
+            let sel = row_line(&r, true, 35, 0, NOW);
+            assert!(reversed(&sel) && w(&line_text(&sel)) == 35);
+        });
+        with_look(look(Variant::Tokyo, false), || {
+            assert_eq!(*style_of(&row_line(&r, false, 35, 0, NOW), "셸 1"), theme::text());
+        });
+        // 예시 모델: Sub Context 의 첫 행
+        let (at, fx) = fixtures();
+        let (_, _, _, _, m) = fx.iter().find(|(n, ..)| n.starts_with("jobs-35x14")).unwrap();
+        let (body, _) = lines(m, 35, 0, at + 10_000);
+        let t = body.iter().map(line_text).find(|t| t.contains("scout")).unwrap();
+        assert!(t.ends_with("셸 1  0:22") && w(&t) == 35, "{t}");
+    }
+
+    use ratatui::buffer::Buffer;
+
+    fn buffer(m: &MonitorModel, width: u16, height: u16, now: i64) -> Buffer {
+        let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
+        term.draw(|f| render(f, m, 0, now)).unwrap();
+        term.backend().buffer().clone()
+    }
+    /// 팝업 테두리의 칸 범위: (왼쪽, 오른쪽 포함, 위, 아래 포함)
+    fn box_of(b: &Buffer, width: u16, height: u16) -> (u16, u16, u16, u16) {
+        let find = |sym: &str| (0..height).flat_map(|y| (0..width).map(move |x| (x, y))).find(|&(x, y)| b[(x, y)].symbol() == sym).unwrap_or_else(|| panic!("{sym} 가 없다"));
+        let (l, t) = find("┌");
+        let (r, bt) = find("┘");
+        (l, r, t, bt)
+    }
+    fn popup_fixtures() -> (i64, Vec<(String, u16, u16, MonitorModel)>) {
+        let (at, fx) = fixtures();
+        (at, fx.into_iter().filter(|(n, ..)| n.starts_with("jobs-popup-")).map(|(n, w_, h, _, m)| (n, w_, h, m)).collect())
+    }
+
+    #[test]
+    fn popup_is_drawn_inside_the_pane_with_the_text_wrapped_and_both_buttons() {
+        let (at, fx) = popup_fixtures();
+        assert_eq!(fx.len(), 5);
+        for (name, width, height, m) in &fx {
+            let p = m.popup.as_ref().unwrap();
+            let b = buffer(m, *width, *height, at);
+            let (l, r, t, bt) = box_of(&b, *width, *height);
+            assert!(l >= 1 && r + 2 <= *width && t < bt && bt < *height, "{name}: 테두리 {l}..{r} × {t}..{bt} 가 pane 안(양쪽 한 칸 남김)에 있어야 한다");
+            let rows = dump(m, *width, *height, 0, at);
+            let inner: Vec<String> = rows[t as usize + 1..bt as usize].iter().map(|r| r.trim().trim_matches('│').trim().to_string()).collect();
+            assert!(rows[t as usize].contains("┌ 작업 중지 ") && rows[bt as usize].contains('└'), "{name}");
+            // 본문은 줄바꿈만 하고 줄이지 않는다 (공백을 빼고 이어 붙이면 원문)
+            let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            let buttons = inner.last().unwrap();
+            let body = inner[..inner.len() - 1].join("");
+            assert_eq!(squash(&body), squash(&p.lines.join("")), "{name}: {inner:?}");
+            assert!(buttons.contains("! 중지") && buttons.contains("취소") && !body.contains('…'), "{name}: {buttons}");
+            assert!(rows.iter().all(|r| w(r) <= *width as usize), "{name}");
+            // 키 안내는 팝업 아래에서 그대로 맨 아래에 있다
+            assert_eq!(rows.last().unwrap().trim_start(), m.keys.last().unwrap().trim_start(), "{name}");
+            assert!(m.keys.iter().any(|k| k.contains("←→ 이동")), "{name}: 팝업 키 안내");
+        }
+        let get = |n: &str| fx.iter().find(|(name, ..)| name.starts_with(n)).unwrap();
+        // 높이가 넉넉하면 본문 · 빈 줄 · 버튼
+        let (_, w28, h28, m28) = get("jobs-popup-35x28");
+        let rows = dump(m28, *w28, *h28, 0, at);
+        let (_, _, t, bt) = box_of(&buffer(m28, *w28, *h28, at), *w28, *h28);
+        assert!(rows[bt as usize - 2].trim_matches(|c| c == ' ' || c == '│').is_empty(), "{:?}", &rows[t as usize..=bt as usize]);
+        // 맨 윗줄 띠는 12줄 · 14줄 · 24줄 · 28줄 pane 에서도 그대로다 (11줄은 팝업이 덮는다)
+        for n in ["jobs-popup-23x12", "jobs-popup-23x24", "jobs-popup-35x14", "jobs-popup-35x28"] {
+            let (_, w_, h, m) = get(n);
+            assert!(dump(m, *w_, *h, 0, at)[0].starts_with(m.title.as_str()), "{n}");
+        }
+        // 팝업 위아래로 팝업 아래 화면이 비친다: 구역 제목과 지금 줄이 남는다
+        let (_, w14, h14, m14) = get("jobs-popup-35x14");
+        let rows = dump(m14, *w14, *h14, 0, at);
+        assert!(rows.iter().any(|r| r.starts_with("── Main Context")) && rows.iter().any(|r| r.contains("도구 실행 중")));
+    }
+
+    #[test]
+    fn popup_focus_button_is_highlighted_and_stop_is_the_danger_style() {
+        let (at, fx) = popup_fixtures();
+        let (_, w_, h, m) = fx.iter().find(|(n, ..)| n.starts_with("jobs-popup-35x14")).unwrap();
+        // 버튼 줄(테두리 바로 위)에서 label 첫 글자 칸의 스타일
+        let cell_style = |m: &MonitorModel, label: &str| {
+            let b = buffer(m, *w_, *h, at);
+            let (_, _, _, bt) = box_of(&b, *w_, *h);
+            let x = (0..*w_).find(|&x| b[(x, bt - 1)].symbol() == label).unwrap_or_else(|| panic!("{label} 가 없다"));
+            b[(x, bt - 1)].style()
+        };
+        assert_eq!(m.popup.as_ref().unwrap().focus, 1, "처음 포커스는 취소 (J3-1)");
+        for (v, warn) in [(Variant::Dark, Color::Yellow), (Variant::Tokyo, c(0xE0AF68))] {
+            with_look(look(v, false), || {
+                // 포커스 = 취소: 취소만 반전, 중지는 굵은 글씨
+                let cancel = cell_style(m, "취");
+                assert!(cancel.add_modifier.contains(Modifier::REVERSED | Modifier::BOLD) && cancel.fg == Some(theme::accent_color()), "{v:?}: {cancel:?}");
+                let stop = cell_style(m, "중");
+                assert!(!stop.add_modifier.contains(Modifier::REVERSED) && stop.add_modifier.contains(Modifier::BOLD), "{v:?}: {stop:?}");
+                // 포커스를 중지로 옮기면 중지가 경고색으로 반전
+                let mut m2 = m.clone();
+                m2.popup.as_mut().unwrap().focus = 0;
+                let stop = cell_style(&m2, "중");
+                assert!(stop.add_modifier.contains(Modifier::REVERSED | Modifier::BOLD) && stop.fg == Some(warn), "{v:?}: {stop:?}");
+                assert!(!cell_style(&m2, "취").add_modifier.contains(Modifier::REVERSED), "{v:?}");
+                // 위험한 확인이라 테두리도 경고색
+                let b = buffer(m, *w_, *h, at);
+                let (l, _, t, _) = box_of(&b, *w_, *h);
+                assert_eq!(b[(l, t)].style().fg, Some(warn), "{v:?}: 테두리");
+            });
+        }
+        with_look(look(Variant::Tokyo, false), || assert_eq!(theme::accent_color(), c(0x7AA2F7)));
+        // 색을 끄면 반전과 굵기로만 구분된다
+        with_look(look(Variant::Tokyo, true), || {
+            let cancel = cell_style(m, "취");
+            assert!(cancel.add_modifier.contains(Modifier::REVERSED) && cancel.fg.is_none_or(|c| c == Color::Reset), "{cancel:?}");
+            let mut m2 = m.clone();
+            m2.popup.as_mut().unwrap().focus = 0;
+            assert!(cell_style(&m2, "중").fg.is_none_or(|c| c == Color::Reset));
+        });
+    }
+
+    #[test]
+    fn popup_danger_comes_from_the_field_and_not_from_the_button_name() {
+        let (at, fx) = popup_fixtures();
+        let (_, w_, h, m) = fx.iter().find(|(n, ..)| n.starts_with("jobs-popup-35x14")).unwrap();
+        assert_eq!(m.popup.as_ref().unwrap().danger, Some(0), "예시 모델의 danger");
+        let text = |m: &MonitorModel| dump(m, *w_, *h, 0, at).join("
+");
+        assert!(text(m).contains("! 중지") && !text(m).contains("! 취소"));
+        // 필드가 없으면 경고 버튼이 없다 (이름이 `중지` 여도): `! ` 도 경고색 테두리도 없다
+        let mut none = m.clone();
+        none.popup.as_mut().unwrap().danger = None;
+        assert!(!text(&none).contains("! "), "{}", text(&none));
+        with_look(look(Variant::Dark, false), || {
+            let b = buffer(&none, *w_, *h, at);
+            let (l, _, t, _) = box_of(&b, *w_, *h);
+            assert_eq!(b[(l, t)].style().fg, Some(theme::accent_color()), "경고가 없으면 강조색 테두리");
+            // 위치를 가리키는 대로: danger=1 이면 두 번째 버튼이 경고
+            let mut second = m.clone();
+            second.popup.as_mut().unwrap().danger = Some(1);
+            assert!(text(&second).contains("! 취소") && !text(&second).contains("! 중지"));
+            // 범위를 벗어난 위치는 경고 버튼이 없는 것과 같다
+            let mut out = m.clone();
+            out.popup.as_mut().unwrap().danger = Some(5);
+            let b = buffer(&out, *w_, *h, at);
+            let (l, _, t, _) = box_of(&b, *w_, *h);
+            assert!(!text(&out).contains("! ") && b[(l, t)].style().fg == Some(theme::accent_color()));
+        });
+    }
+
+    #[test]
+    fn popup_dims_the_view_below_but_not_the_title_band_or_the_keys() {
+        let (at, fx) = popup_fixtures();
+        let (_, w_, h, m) = fx.iter().find(|(n, ..)| n.starts_with("jobs-popup-35x28")).unwrap();
+        for v in [Variant::Dark, Variant::Tokyo] {
+            with_look(look(v, false), || {
+                let b = buffer(m, *w_, *h, at);
+                let dim = theme::dimmed().fg;
+                // 맨 윗줄 띠(바탕색)와 키 안내(맨 아래 줄)는 흐리지 않다
+                assert_eq!(b[(0, 0)].style().bg, theme::band().bg, "{v:?}");
+                let key_x = (0..*w_).find(|&x| b[(x, h - 1)].symbol() == "E").unwrap();
+                assert_ne!(b[(key_x, h - 1)].style().fg, dim, "{v:?}");
+                // 그 사이 화면은 흐리다 (구역 제목 · 가로줄)
+                assert_eq!(b[(3, 1)].style().fg, dim, "{v:?}: 구역 제목");
+                assert_eq!(b[(0, *h - 3)].style().fg, dim, "{v:?}: 가로줄");
+            });
+        }
+        with_look(look(Variant::Tokyo, false), || assert_eq!(theme::dimmed().fg, Some(c(0x565F89))));
+        // 팝업이 없으면 흐리지 않다
+        let (_, fx2) = fixtures();
+        let (_, _, _, _, plain) = fx2.iter().find(|(n, ..)| n.starts_with("jobs-35x28")).unwrap();
+        with_look(look(Variant::Dark, false), || assert_ne!(buffer(plain, 35, 28, at)[(3, 1)].style().fg, theme::dimmed().fg));
+    }
+
+    #[test]
+    fn popup_fits_odd_sizes_and_keeps_the_buttons() {
+        let m = MonitorModel {
+            title: "Job Monitor".into(),
+            keys: vec!["←→ 이동  Enter 선택".into(), "Esc 취소".into()],
+            popup: Some(MPopup {
+                title: "작업 중지".into(),
+                lines: vec!["scout: 로그 찾기 작업을 중지할까요?".into(), "그 subagent 와 그것이 띄운 셸이 모두 끝납니다.".into()],
+                buttons: vec!["중지".into(), "취소".into()],
+                focus: 1,
+                danger: Some(0),
+            }),
+            ..MonitorModel::default()
+        };
+        // 낮은 pane 에서는 본문을 `…` 로 줄여도 버튼은 남는다
+        for (width, height) in [(23u16, 6u16), (23, 7), (23, 8), (23, 9), (35, 8), (12, 9), (80, 24)] {
+            let rows = dump(&m, width, height, 0, 0);
+            assert!(rows.iter().all(|r| w(r) <= width as usize), "{width}x{height}");
+            assert!(rows.iter().any(|r| r.contains("취소")), "{width}x{height}: 버튼\n{}", rows.join("\n"));
+        }
+        let rows = dump(&m, 23, 6, 0, 0);
+        assert!(rows.iter().any(|r| r.contains('…')), "{rows:?}");
+        // 아주 작은 창에서도 panic 하지 않는다
+        for (cw, ch) in [(1, 1), (5, 2), (10, 3), (23, 1), (3, 12)] {
+            let mut term = Terminal::new(TestBackend::new(cw, ch)).unwrap();
+            term.draw(|f| render(f, &m, 0, 0)).unwrap();
+        }
+        // 버튼이 없는 팝업은 그리지 않는다
+        let mut none = m.clone();
+        none.popup.as_mut().unwrap().buttons.clear();
+        assert!(!dump(&none, 23, 12, 0, 0).iter().any(|r| r.contains('┌')));
+    }
+
     #[test]
     fn apply_takes_the_whole_view_and_quit() {
         let mut m = None;
@@ -619,6 +1083,14 @@ mod tests {
         let mm = m.as_ref().unwrap();
         assert_eq!((mm.kind.as_str(), mm.selected.is_none(), mm.keys.len(), mm.sections[0].rows.len()), ("flow", true, 0, 1));
         assert!(matches!(apply(&mut m, r#"{"op":"quit","code":3,"summary":["끝"]}"#), Ok(Next::Quit(3, s)) if s == ["끝"]));
+        // 팝업과 배지
+        apply(&mut m, r#"{"op":"monitor","kind":"jobs","sections":[{"rows":[{"marker":"spinner","text":"worker: x","badge":"셸 1","indent":0}]}],"popup":{"title":"작업 중지","lines":["a","b"],"buttons":["중지","취소"],"focus":1,"danger":0}}"#).unwrap();
+        let mm = m.as_ref().unwrap();
+        let p = mm.popup.as_ref().unwrap();
+        assert_eq!((mm.sections[0].rows[0].badge.as_deref(), p.title.as_str(), p.lines.len(), p.buttons.len(), p.focus), (Some("셸 1"), "작업 중지", 2, 2, 1));
+        assert_eq!(p.danger, Some(0));
+        apply(&mut m, r#"{"op":"monitor","kind":"jobs","popup":null}"#).unwrap();
+        assert!(m.as_ref().unwrap().popup.is_none());
         assert!(apply(&mut m, r#"{"op":"select"}"#).is_err());
         assert!(apply(&mut m, "not json").is_err());
         assert!(apply(&mut m, r#"{"op":"monitor","sections":"x"}"#).is_err());

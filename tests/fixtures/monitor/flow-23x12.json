@@ -1,64 +1,68 @@
 {
   "op": "monitor",
   "kind": "flow",
-  "title": "flow",
-  "right": "할 일 2/6",
-  "now": [
-    {
-      "marker": "spinner",
-      "text": "도구 실행 중",
-      "since": 1794499910629,
-      "indent": 0,
-      "emphasis": true
-    },
-    {
-      "marker": "none",
-      "text": "bash npm test -- --run login",
-      "indent": 2
-    },
-    {
-      "marker": "spinner",
-      "text": "p2.2 테스트 작성",
-      "indent": 0,
-      "emphasis": true
-    }
-  ],
+  "title": "Flow Monitor",
+  "right": "Total 2/6",
+  "now": [],
   "nowAt": "top",
   "sections": [
     {
+      "title": "Current Task",
+      "rows": [
+        {
+          "marker": "spinner",
+          "text": "테스트 작성",
+          "since": 1794499880629,
+          "indent": 0,
+          "emphasis": true
+        },
+        {
+          "marker": "none",
+          "text": "Next Task: 오류 처리",
+          "indent": 0
+        }
+      ]
+    },
+    {
+      "title": "Overall Task",
       "rows": [
         {
           "key": "p:p2.1",
           "marker": "done",
-          "text": "p2.1 라우트",
-          "indent": 2,
+          "text": "[1/3] 라우트",
+          "right": "3:10",
+          "indent": 0,
+          "prefix": "├ ",
           "emphasis": false
         },
         {
           "key": "p:p2.2",
           "marker": "spinner",
-          "text": "p2.2 테스트 작성",
-          "indent": 2,
+          "text": "[2/3] 테스트 작성",
+          "right": "◀",
+          "indent": 0,
+          "prefix": "├ ",
           "emphasis": true
         },
         {
           "key": "p:p2.3",
           "marker": "todo",
-          "text": "p2.3 오류 처리",
-          "indent": 2,
+          "text": "[3/3] 오류 처리",
+          "indent": 0,
+          "prefix": "└ ",
           "emphasis": false
         },
         {
           "key": "p:p3",
           "marker": "todo",
-          "text": "p3 결제 연동",
+          "text": "[3/4] 결제 연동",
           "indent": 0,
           "emphasis": false
         },
         {
           "key": "p:p4",
           "marker": "blocked",
-          "text": "p4 배포 설정",
+          "text": "[4/4] 배포 설정",
           "indent": 0,
           "emphasis": false
         }

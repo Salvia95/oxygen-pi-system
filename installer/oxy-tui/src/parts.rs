@@ -1,5 +1,9 @@
 //! 두 시안이 함께 쓰는 조각: 위치 줄 · 키 안내 · 목록 행 · 설명 문장 · 요약표 · 도움말 내용.
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Clear, Padding, Paragraph};
 
 use crate::model::{App, FrameSpec, Row, Screen, SelectSpec};
 use crate::text::{fit, pad, trunc_path, w, wrap};
@@ -291,4 +295,56 @@ mod tests {
         let line: String = row_spans(&r, false, false, 16, 60, true).iter().map(|s| s.content.as_ref()).collect();
         assert!(line.ends_with(r"\Programs\oxygen-pi") && line.contains('…') && w(&line) <= 60, "{line}");
     }
+}
+
+// ---------------------------------------------------------------- 팝업 (설치 화면의 확인 팝업과 모니터의 중지 확인이 함께 쓴다)
+/// `area` 가운데에 width × height 칸 (area 보다 크면 area 로 줄인다)
+pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
+    let wd = width.min(area.width);
+    let ht = height.min(area.height);
+    Rect::new(area.x + (area.width - wd) / 2, area.y + (area.height - ht) / 2, wd, ht)
+}
+
+/// 팝업 자리를 지울 때 좌우로 한 칸 더 지운다 (한글처럼 2칸인 글자의 반쪽이 테두리에 걸리면 글자가 테두리를 덮는다)
+pub fn widen(r: Rect, within: Rect) -> Rect {
+    let x = r.x.saturating_sub(1).max(within.x);
+    let right = (r.x + r.width + 1).min(within.x + within.width);
+    Rect::new(x, r.y, right - x, r.height)
+}
+
+/// 팝업 버튼 하나. danger 는 `! ` 를 붙이고 강조할 때 경고색으로 칠한다
+pub struct Button<'a> {
+    pub label: &'a str,
+    pub on: bool,
+    pub danger: bool,
+}
+
+/// 팝업 안쪽 폭 `iw` 에 버튼 줄이 들어가는지에 따라 넉넉하게(앞뒤 2칸 · 사이 3칸) 또는 좁게(앞뒤 1칸 · 사이 1칸) 만든다
+fn button_row(buttons: &[Button], iw: usize) -> Line<'static> {
+    let text = |b: &Button, pad: usize| format!("{p}{}{}{p}", if b.danger { "! " } else { "" }, b.label, p = " ".repeat(pad));
+    let wide: usize = buttons.iter().map(|b| w(&text(b, 2))).sum::<usize>() + 3 * buttons.len().saturating_sub(1);
+    let (pad, gap) = if wide <= iw { (2, 3) } else { (1, 1) };
+    let mut spans = Vec::new();
+    for (i, b) in buttons.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" ".repeat(gap)));
+        }
+        let t = text(b, pad);
+        spans.push(if b.on {
+            Span::styled(t, Style::new().fg(if b.danger { theme::danger_color() } else { theme::accent_color() }).add_modifier(Modifier::REVERSED | Modifier::BOLD))
+        } else {
+            Span::styled(t, theme::strong())
+        });
+    }
+    Line::from(spans).centered()
+}
+
+/// 가운데 팝업: 제목 · 본문 줄 · 마지막 줄에 버튼들. `width` 는 테두리를 포함한 폭이다. 위험한 확인은 테두리가 경고색
+pub fn dialog(f: &mut Frame, area: Rect, width: u16, title: &str, mut lines: Vec<Line<'static>>, buttons: &[Button], danger_border: bool) {
+    lines.push(button_row(buttons, width.saturating_sub(4) as usize));
+    let border = if danger_border { theme::warn() } else { theme::accent() };
+    let block = Block::bordered().border_style(border).padding(Padding::horizontal(1)).title(Line::from(vec![Span::raw(" "), Span::styled(title.to_string(), theme::strong()), Span::raw(" ")]));
+    let rect = centered(area, width, lines.len() as u16 + 2);
+    f.render_widget(Clear, widen(rect, area));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }

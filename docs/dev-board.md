@@ -14,6 +14,8 @@
 | `anthropic-ws` | `docs/tui-spec.md` §11 "Anthropic 워크스페이스" | 검증 | 사용자: 실제 조직 키 · 설치본 반영 승인 | 키가 생기면 `anthropic-ws/1` `anthropic-ws/2` 실측 (부모) | 2026-11-12 | c424194 | 2026-11-13 (`oxygen-pi-20261113.zip`) |
 | `flow-session` | `docs/flow-spec.md` oxy-flow 세션 단위 기록 (사후 명세) | 검증 | 사용자: 과금 실측 요청 (`flow-session/3`) | 요청이 오면 `/3` 설치본의 하이쿠 키로 (부모) | 2026-11-12 | acd4aac | 2026-11-13 (`oxygen-pi-20261113.zip`) |
 | `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 검증 | 사용자: 3 · 4 · 5단계 캡처 확인 | 확인되면 `완료` (부모) | 2026-11-12 | 96de47e d5e23e7 2de77ce d096c67 f9ce774 5271186 | 2026-11-13 (`oxygen-pi-20261113.zip`) |
+| `flow-view` | `docs/flow-view-spec.md` flow 모니터 구성 개편 (Current · Next · Overall) · Tokyo Night | 구현 | 사용자: 3 · 5단계 캡처 확인, 6단계 승인 | `flow-view/6` 릴리스 · 번들 · 설치본 (승인 필요) | 2026-11-13 | – | 안 됨 |
+| `jobs-view` | `docs/jobs-view-spec.md` Job Monitor 구성 개편 (Main · Sub Context, subagent 의 셸) | 구현 | 사용자: 4단계 캡처 확인, 릴리스 승인 | `jobs-view/5` 릴리스 · 번들 · 설치본 (`flow-view/6` 과 함께) | 2026-11-13 | – | 안 됨 |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -44,6 +46,17 @@
 | `monitor-tui/4` | `monitor.ts` 연결 · 예전 화면 대체 (§4) | 완료 | 단위 `# tests 67` `# pass 67` `# fail 0` · E2E `E2E 통과` (새 검사 `liveHeartbeat`: 고치기 전 FAIL · 고친 뒤 PASS), 기준 `HEAD 2de77ce + 미커밋` (2026-11-13 부모) | 대화형 pi + mock, mintty 120×30 · 80×24 실시간 갱신, pi-tui 대체 화면 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/5` | 실제 LLM 실측 (하이쿠, 사용자 요청) | 완료 | 단위 `# pass 68` `# fail 0` (새 시험 `writeAtomic` 동시 읽기: 고치기 전 FAIL · 고친 뒤 PASS) · E2E `E2E 통과`, 기준 `HEAD d096c67 + 미커밋` (2026-11-13 부모) | 대화형 pi + claude-haiku-5-5, mintty 120×30 · 80×24: 계획 · 편집 · background · 커밋을 모니터가 따라감, 고친 뒤 실패 도구 0 (2026-11-13) | `docs/monitor-tui-spec.md` §4 |
 | `monitor-tui/6` | `oxy-tui` 릴리스 · 번들 · 설치본 (승인 필요) | 완료 | 릴리스 워크플로 `oxy-tui-v0.2.0` 성공 (cargo test 33 통과), sha256 `ef141d11…547d47` 를 `manifest/tools.lock.tsv` 에 고정, 받은 exe 로 단위 `# pass 68` `# fail 0` (2026-11-13 부모) | 설치본 업데이트 후 `verify.sh` `PASS 47 / WARN 1 / FAIL 0` (WARN 은 SQLcl 미설치), 설치본 pi 에서 `/monitor flow` 가 oxy-tui 0.2.0 으로 열림 (2026-11-13) | 5271186 `docs/monitor-tui-spec.md` |
+| `flow-view/1` | 걸린 시간 기록 (§3) | 완료 | 단위 `# pass 69` `# fail 0` (새 시험 "oxy-flow 걸린 시간") · E2E `E2E 통과` (새 검사 "flow 계획: 걸린 시간 기록"), 기준 `HEAD 4c0d4e8 + 미커밋` (2026-11-13 부모) | 자동 검증으로 대신 (명세 §5 1) | `docs/flow-view-spec.md` §3 |
+| `flow-view/2` | 보기 모델 (§2) | 완료 | 단위 `# pass 69` `# fail 0` (flow 보기 모델 · 키 처리 시험을 새 구성으로, 23 · 35칸 × 11 · 15 · 24줄), 예시 모델 `tests/fixtures/monitor` 다시 만듦, 기준 `HEAD 4c0d4e8 + 미커밋` (2026-11-13 부모) | 자동 검증으로 대신 (명세 §5 2). 지금 exe(0.2.0)로 그린 글자 화면 확인 | `docs/flow-view-spec.md` §2 |
+| `flow-view/3` | `oxy-tui` 그리기 · 모니터 팔레트 (tui-implementer) | 완료 | `just tui-test` `37 passed; 0 failed` · 단위 `# pass 70` `# fail 0` (부모가 다시 실행, 기준 `HEAD 4c0d4e8 + 미커밋`, 2026-11-13) | mintty 80×24 · 120×30 (기본 · tokyo-night) · WT 캡처, `◀` 1칸 확인 (2026-11-13) | `docs/flow-view-spec.md` §5 |
+| `flow-view/4` | Tokyo Night 반입 · 적용 | 완료 | 단위 `# pass 70` · E2E `E2E 통과` · `tests/installer-sandbox.sh` 통과 (새 검사 WT 색 구성), 기준 `HEAD 4c0d4e8 + 미커밋` (2026-11-13 부모) | fetch 로 테마를 받아 configure 가 `theme: tokyo-night` 를 씀, 실제 pi 가 tokyo-night 로 뜸 (5단계와 함께, 2026-11-13) | `docs/flow-view-spec.md` §5 |
+| `flow-view/5` | 실제 LLM 실측 (하이쿠) | 완료 | 해당 없음 (실측만) | 대화형 pi + claude-haiku-5-5, mintty 120×30 · 80×24: 2단 계획 · background · 커밋을 Current · Next · Overall 이 따라감, 걸린 시간, 실패 도구 0 (2026-11-13) | `docs/flow-view-spec.md` §5 |
+| `flow-view/6` | `oxy-tui` 릴리스 · 번들 · 설치본 (승인 필요) | 예정 | – | – | – |
+| `jobs-view/1` | subagent 의 셸 내보내기 (§3) | 완료 | 단위 `# pass 71` (새 시험 subagent 의 실행 폴더) · E2E `E2E 통과` (새 검사 subState · subStop · subDone), 기준 `HEAD 4c0d4e8 + 미커밋` (2026-11-13 부모) | 자동 검증으로 대신 (명세 §4 1), 실제 LLM 은 4단계 | `docs/jobs-view-spec.md` §3 |
+| `jobs-view/2` | 보기 모델 · 키 처리 (§2) | 완료 | 단위 `# pass 71` `# fail 0` (Job Monitor 보기 모델 · 키 처리 시험을 새 구성으로), 예시 모델 `jobs-sub` · `jobs-popup` 추가, 기준 `HEAD 4c0d4e8 + 미커밋` (2026-11-13 부모) | 지금 exe(0.3.0 로컬)로 그린 글자 화면 확인, 빈 영역 `-` 가운데 | `docs/jobs-view-spec.md` §2 |
+| `jobs-view/3` | 화면 프로그램: 팝업 · 배지 · ←→ (tui-implementer) | 완료 | `just tui-test` `45 passed; 0 failed` · 단위 `# pass 72` · `tests/installer-sandbox.sh` 통과 (부모가 다시 실행, 기준 `HEAD 4c0d4e8 + 미커밋`, 2026-11-13) | mintty 80×24 · 120×30 (tokyo-night · 기본) · WT 팝업 캡처 (2026-11-13) | `docs/jobs-view-spec.md` §4 |
+| `jobs-view/4` | 실제 LLM 실측 (하이쿠) | 완료 | 해당 없음 (실측만) | 대화형 pi + claude-haiku-5-5, mintty 120×30: worker 의 셸 표시 · subagent 화면 · 팝업으로 그 셸만 중지 · 빈 영역 `-`, 모니터 pane 이 닫히던 결함을 찾아 고침 (2026-11-13) | `docs/jobs-view-spec.md` §4 |
+| `jobs-view/5` | 릴리스 · 번들 · 설치본 (`flow-view/6` 과 함께, 승인 필요) | 예정 | – | – | – |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |
@@ -91,4 +104,6 @@
 - 2026-11-12 `dev-process/1`: 인자 없는 `cat > 파일` 을 실수로 남겨 명령이 입력을 기다리며 멈췄다 (한 번). → 만들지 않음: 한 번뿐이고 피해가 없었다.
 - 2026-11-13 `monitor-tui/3`: 설치 점검 화면의 `번들 구성요소  C:\…\oxygen-pi-sys… (필수 5개 확인)` 줄은 경로 뒤에 괄호 설명이 붙어 `fit` 의 경로 줄임이 적용되지 않고 끝이 잘린다. 후속: `install.mjs` 문구에서 괄호 설명을 경로 앞으로 (tui-spec 범위, 아직 진행판 단계 없음).
 - 2026-11-13 `monitor-tui/4`: 실측에서 `live.json` 의 `updatedAt` 이 이벤트 없는 동안 갱신되지 않아 긴 도구에서 "pi 상태를 알 수 없습니다". 1단계 E2E 는 3초 도구라 놓쳤다. → E2E 를 8초 도구로 바꾸고 갱신 검사를 더했다 (회고: 시간 경계가 있는 동작은 그 경계를 넘는 시험을 둔다).
+- 2026-11-13 `jobs-view/4`: subagent 가 끝날 때 본 대화의 모니터 pane 이 닫혔다. 모니터 pane 기능(`monitor`) 때부터 있던 결함인데, 그동안의 실측에 subagent 가 없어 드러나지 않았다. 또 같은 날 전체 E2E 가 한 번 임시 폴더(`requests.jsonl`)가 사라져 중간에 멈췄고 다시 돌리면 통과했다 (원인 미확인). → 회고: 실측 시나리오에는 그 기능과 함께 쓰이는 다른 기능(subagent · background · 모니터)을 한 번은 함께 넣는다.
+- 2026-11-13 `jobs-view/1`: E2E `liveHeartbeat` 가 한 번 실패, 다시 돌리면 통과. 원인: 8초 도구에서 상태를 늦게 읽으면 다음 5초 갱신 전에 도구가 끝난다 → 도구를 12초로. 같은 날 단위 시험의 `FLOW.md` 걸린 시간 `(0:00)` 도 커밋이 1초를 넘으면 실패 → `m:ss` 형태만 본다 (회고: 시간 값을 정확히 맞추는 시험은 경계보다 넉넉한 여유를 둔다).
 - 2026-11-13 `monitor-tui/5`: 실제 LLM 실측에서 모니터가 `flow.json` 을 읽는 순간 oxy-flow 의 쓰기(이름 바꾸기)가 Windows EPERM 으로 실패. mock E2E 는 모니터 pane 을 띄우지 않아 놓쳤다. → 공용 `writeAtomic` 으로 다시 시도, 동시 읽기 단위 시험 추가 (회고: 다른 프로세스가 읽는 파일을 쓰는 코드는 동시 읽기 시험을 둔다).

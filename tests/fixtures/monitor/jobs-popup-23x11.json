@@ -1,0 +1,70 @@
+{
+  "op": "monitor",
+  "kind": "jobs",
+  "title": "Jobs",
+  "right": "Processing 2",
+  "now": [
+    {
+      "marker": "spinner",
+      "text": "도구 실행 중",
+      "since": 1794499910629,
+      "indent": 0,
+      "emphasis": true
+    }
+  ],
+  "nowAt": "bottom",
+  "sections": [
+    {
+      "title": "Main Context",
+      "rows": [
+        {
+          "key": "m:job-1",
+          "marker": "spinner",
+          "text": "npm run build",
+          "indent": 0,
+          "since": 1794499881629
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        }
+      ]
+    },
+    {
+      "title": "Sub Context",
+      "rows": [
+        {
+          "key": "s:job-2",
+          "marker": "spinner",
+          "text": "scout: 로그 찾기",
+          "indent": 0,
+          "since": 1794499910629
+        },
+        {
+          "marker": "none",
+          "text": "",
+          "indent": 0
+        }
+      ]
+    }
+  ],
+  "selected": "s:job-2",
+  "keys": [
+    "←→ 이동  Enter 선택",
+    "Esc 취소"
+  ],
+  "popup": {
+    "title": "작업 중지",
+    "lines": [
+      "scout: 로그 찾기 작업을 중지할까요?",
+      "그 subagent 와 그것이 띄운 셸이 모두 끝납니다."
+    ],
+    "buttons": [
+      "중지",
+      "취소"
+    ],
+    "focus": 1,
+    "danger": 0
+  }
+}

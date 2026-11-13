@@ -13,7 +13,21 @@
       "kind": "jobs",
       "width": 23,
       "height": 11,
-      "modelHeight": 10
+      "modelHeight": 11
+    },
+    {
+      "file": "jobs-sub-23x11.json",
+      "kind": "jobs-sub",
+      "width": 23,
+      "height": 11,
+      "modelHeight": 11
+    },
+    {
+      "file": "jobs-popup-23x11.json",
+      "kind": "jobs-popup",
+      "width": 23,
+      "height": 11,
+      "modelHeight": 11
     },
     {
       "file": "flow-23x12.json",
@@ -27,21 +41,49 @@
       "kind": "jobs",
       "width": 23,
       "height": 12,
-      "modelHeight": 10
+      "modelHeight": 12
+    },
+    {
+      "file": "jobs-sub-23x12.json",
+      "kind": "jobs-sub",
+      "width": 23,
+      "height": 12,
+      "modelHeight": 12
+    },
+    {
+      "file": "jobs-popup-23x12.json",
+      "kind": "jobs-popup",
+      "width": 23,
+      "height": 12,
+      "modelHeight": 12
     },
     {
       "file": "flow-23x24.json",
       "kind": "flow",
       "width": 23,
       "height": 24,
-      "modelHeight": 24
+      "modelHeight": 21
     },
     {
       "file": "jobs-23x24.json",
       "kind": "jobs",
       "width": 23,
       "height": 24,
-      "modelHeight": 10
+      "modelHeight": 24
+    },
+    {
+      "file": "jobs-sub-23x24.json",
+      "kind": "jobs-sub",
+      "width": 23,
+      "height": 24,
+      "modelHeight": 24
+    },
+    {
+      "file": "jobs-popup-23x24.json",
+      "kind": "jobs-popup",
+      "width": 23,
+      "height": 24,
+      "modelHeight": 24
     },
     {
       "file": "flow-35x14.json",
@@ -55,21 +97,49 @@
       "kind": "jobs",
       "width": 35,
       "height": 14,
-      "modelHeight": 9
+      "modelHeight": 14
+    },
+    {
+      "file": "jobs-sub-35x14.json",
+      "kind": "jobs-sub",
+      "width": 35,
+      "height": 14,
+      "modelHeight": 14
+    },
+    {
+      "file": "jobs-popup-35x14.json",
+      "kind": "jobs-popup",
+      "width": 35,
+      "height": 14,
+      "modelHeight": 14
     },
     {
       "file": "flow-35x28.json",
       "kind": "flow",
       "width": 35,
       "height": 28,
-      "modelHeight": 25
+      "modelHeight": 20
     },
     {
       "file": "jobs-35x28.json",
       "kind": "jobs",
       "width": 35,
       "height": 28,
-      "modelHeight": 9
+      "modelHeight": 28
+    },
+    {
+      "file": "jobs-sub-35x28.json",
+      "kind": "jobs-sub",
+      "width": 35,
+      "height": 28,
+      "modelHeight": 28
+    },
+    {
+      "file": "jobs-popup-35x28.json",
+      "kind": "jobs-popup",
+      "width": 35,
+      "height": 28,
+      "modelHeight": 28
     }
   ]
 }

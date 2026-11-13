@@ -18,14 +18,15 @@ const sec = (n) => n * 1000;
 
 /** 상태: flow(할 일 4개 · 커밋 3개 · 실패 한 건, 도구 실행 중) 와 jobs(실행 중 2 · 끝난 것 3) */
 function scenario(now) {
-  const item = (id, text, status, nodes = [], children = []) => ({ id, text, status, at: now - sec(60), nodes, children });
+  const item = (id, text, status, nodes = [], children = [], t = {}) => ({ id, text, status, at: now - sec(60), nodes, children, ...t });
+  const took = (start, end) => ({ startedAt: now - sec(start), ...(end === undefined ? {} : { endedAt: now - sec(end) }) });   // 걸린 시간 (flow-view-spec §3)
   const plan = [
-    item("p1", "환경 구성", "done", ["n1"]),
+    item("p1", "환경 구성", "done", ["n1"], [], took(600, 420)),
     item("p2", "로그인 API", "doing", [], [
-      item("p2.1", "라우트", "done", ["n2"]),
-      item("p2.2", "테스트 작성", "doing"),
+      item("p2.1", "라우트", "done", ["n2"], [], took(400, 210)),
+      item("p2.2", "테스트 작성", "doing", [], [], took(42)),
       item("p2.3", "오류 처리", "todo"),
-    ]),
+    ], took(400)),
     item("p3", "결제 연동", "todo"),
     item("p4", "배포 설정", "blocked"),
   ];
@@ -73,6 +74,13 @@ function jobsState(now) {
   };
 }
 
+/** subagent(job-2 scout)가 띄운 셸: 진행 중 1 · 끝난 것 1 (docs/jobs-view-spec.md §3) */
+function subStates(now) {
+  const job = (id, state, label, extra = {}) => ({ id, kind: "bash", state, label, createdAt: now - sec(30), startedAt: now - sec(20), endedAt: null, exitCode: null, usage: null, log: `logs/${id}.log`, last: "", result: null, ...extra });
+  return new Map([["job-2", { version: 1, pid: 4343, cwd: ".", updatedAt: now, closed: false, slots: {}, control: null,
+    jobs: [job("job-1", "running", "npm test -- login"), job("job-2", "done", "npm run build", { endedAt: now - sec(5), exitCode: 0 })] }]]);
+}
+
 /** 예시 보기 모델을 outDir 에 쓰고 index.json 에 크기 · model.ts 가 계산한 줄 수를 적는다 */
 export async function writeFixtures({ outDir = DEFAULT_DIR, now = Date.now(), sizes = DEFAULT_SIZES } = {}) {
   const M = await import("../agent/extensions/oxy-monitor/model.ts");
@@ -80,13 +88,16 @@ export async function writeFixtures({ outDir = DEFAULT_DIR, now = Date.now(), si
   const { flow } = scenario(now);
   const live = await liveState(L, now);
   const jobs = jobsState(now);
+  const subs = subStates(now);
   mkdirSync(outDir, { recursive: true });
   const files = [];
   for (const size of sizes) {
     const [width, height] = size.split("x").map(Number);
     const models = {
       flow: M.flowModel(flow, live, { sel: "p:p2.2", open: new Set(), manualAt: 0 }, width, height, now, displayWidth),
-      jobs: M.jobsModel(jobs, live, { sel: "job-2", mode: "list" }, width, height, now, displayWidth),
+      jobs: M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), sel: "s:job-2" }, width, height, now, displayWidth),
+      "jobs-sub": M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), mode: "sub", sub: "job-2", sel: "c:job-1" }, width, height, now, displayWidth),
+      "jobs-popup": M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), sel: "s:job-2", confirm: { scope: "main", id: "job-2", label: "scout: 로그 찾기", agent: true, focus: "no" } }, width, height, now, displayWidth),
     };
     for (const [kind, model] of Object.entries(models)) {
       const file = `${kind}-${size}.json`;

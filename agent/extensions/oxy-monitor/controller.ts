@@ -2,14 +2,23 @@
  * 모니터 화면의 키 처리 (docs/monitor-tui-spec.md §4, 4단계). oxy-tui 모니터 모드가 보내는 키 이벤트로 선택 · 펼침 · 화면 모드를 바꾼다.
  * 선택은 Node 가 정해 보기 모델의 selected 로 보낸다 (exe 는 선택을 기억하지 않는다). 파일 · 프로세스를 건드리지 않는 순수 함수다.
  */
-import type { JobSnapshot } from "../oxy-jobs/state.ts";
-import { type FlowLike, type FlowUiState, type JobsUiState, jobOrder, planRows } from "./model.ts";
+import type { JobsState } from "../oxy-jobs/state.ts";
+import { type FlowLike, type FlowUiState, type JobsUiState, type StopTarget, flowSelection, isActive, jobLists, planRows } from "./model.ts";
 
-export type MonitorKey = "up" | "down" | "enter" | "esc" | "s" | "q";
-export const KEYS: readonly MonitorKey[] = ["up", "down", "enter", "esc", "s", "q"];
+export type MonitorKey = "up" | "down" | "left" | "right" | "enter" | "esc" | "s" | "q";
+export const KEYS: readonly MonitorKey[] = ["up", "down", "left", "right", "enter", "esc", "s", "q"];
 
 /** exe 의 --version 출력에 모니터 모드 표시가 있는가 (예전 v0.1.0 exe 는 --mode 를 모르고 설치 화면 규약으로 기다린다) */
 export const supportsMonitor = (versionOutput: string): boolean => /^oxy-tui \S+ .*\bmonitor\b/m.test(versionOutput);
+
+/**
+ * 모니터 exe 의 팔레트 (OXY_TUI_THEME, docs/flow-view-spec.md §4 T2): 이미 정해져 있으면(사용자가 light 등으로 지정) 그대로,
+ * 아니면 pi settings.json 의 theme 이 tokyo-night 일 때 tokyo-night. settingsText 는 settings.json 내용 (없으면 null)
+ */
+export function monitorTheme(settingsText: string | null, envTheme: string | undefined): string | undefined {
+  if (envTheme) return envTheme;
+  try { return JSON.parse(settingsText ?? "").theme === "tokyo-night" ? "tokyo-night" : undefined; } catch { return undefined; }
+}
 
 /** 목록에서 key 를 기준으로 한 칸 이동 (없으면 첫 줄) */
 function move(keys: string[], cur: string | null, step: number): string | null {
@@ -19,13 +28,15 @@ function move(keys: string[], cur: string | null, step: number): string | null {
   return keys[Math.min(keys.length - 1, Math.max(0, i + step))];
 }
 
-/** flow 화면: ▲▼ 선택 이동(사용자 위치를 잠시 둔다), Enter 펼치기 · 접기 */
+/** flow 화면: ▲▼ 선택 이동(사용자 위치를 잠시 둔다), Enter 펼치기 · 접기. 움직임은 지금 고른 줄(기본: 지금 할 일)에서 시작한다 */
 export function flowKey(ui: FlowUiState, flow: FlowLike | null, width: number, key: MonitorKey, now: number): FlowUiState {
   if (!flow) return ui;
-  const keys = planRows(flow, ui.open, width).filter((r) => r.key).map((r) => r.key!);
-  if (key === "up" || key === "down") return { ...ui, sel: move(keys, ui.sel, key === "up" ? -1 : 1), manualAt: now };
+  const rows = planRows(flow, ui.open, width);
+  const keys = rows.filter((r) => r.key).map((r) => r.key!);
+  const cur = flowSelection(rows, flow.plan ?? [], ui, now);
+  if (key === "up" || key === "down") return { ...ui, sel: move(keys, cur, key === "up" ? -1 : 1), manualAt: now };
   if (key === "enter") {
-    const k = ui.sel && keys.includes(ui.sel) ? ui.sel : keys[0];
+    const k = cur && keys.includes(cur) ? cur : keys[0];
     if (!k) return ui;
     const open = new Set(ui.open);
     if (open.has(k)) open.delete(k); else open.add(k);
@@ -34,27 +45,67 @@ export function flowKey(ui: FlowUiState, flow: FlowLike | null, width: number, k
   return ui;
 }
 
-export interface JobsKeyResult { ui: JobsUiState; scroll: number; stop?: string }
+export interface JobsKeyResult { ui: JobsUiState; scroll: number; stop?: StopTarget }
 
-/** jobs 화면: ▲▼ 이동 · 로그에서는 스크롤, Enter 로그, Esc 목록, s 두 번 중지 (stop 에 작업 id) */
-export function jobsKey(ui: JobsUiState, scroll: number, jobs: JobSnapshot[], key: MonitorKey): JobsKeyResult {
-  const list = jobOrder(jobs);
-  const sel = list.find((j) => j.id === ui.sel) ?? list[0];
-  const active = Boolean(sel && (sel.state === "running" || sel.state === "queued"));
+/**
+ * jobs 화면 (docs/jobs-view-spec.md §2): 목록(Main · Sub Context) ▲▼ 이동, Enter 셸 로그 · subagent 화면, s 중지 확인 팝업.
+ * subagent 화면: 대화 로그 · 그 셸, Enter 로그, Esc 목록. 로그: ▲▼ 스크롤, Esc 돌아가기. 팝업: ←→ 이동, Enter 선택, Esc · q 취소 (처음 포커스 취소)
+ */
+export function jobsKey(ui: JobsUiState, scroll: number, state: JobsState | null, subs: Map<string, JobsState>, key: MonitorKey): JobsKeyResult {
+  const L = jobLists(state, subs);
   const base: JobsUiState = { ...ui, notice: undefined };
-  if (ui.mode === "confirm") {
-    if (key === "s" && sel && active) return { ui: { ...base, mode: "list", notice: `${sel.id} 작업의 중지를 요청했습니다.` }, scroll, stop: sel.id };
-    return { ui: { ...base, mode: "list" }, scroll };   // s 가 아닌 키(Esc 등)는 취소
+  if (ui.confirm) {
+    const c = ui.confirm;
+    if (key === "left" || key === "right") return { ui: { ...base, confirm: { ...c, focus: c.focus === "yes" ? "no" : "yes" } }, scroll };
+    if (key === "enter" && c.focus === "yes") {
+      const { focus: _f, ...target } = c;
+      return { ui: { ...base, confirm: null, notice: `${c.label} 중지를 요청했습니다.` }, scroll, stop: target };
+    }
+    if (key === "enter" || key === "esc" || key === "q") return { ui: { ...base, confirm: null }, scroll };
+    return { ui, scroll };
   }
-  if (ui.mode === "log") {
-    if (key === "esc") return { ui: { ...base, mode: "list" }, scroll: 0 };
+  const ask = (t: StopTarget): JobsKeyResult => ({ ui: { ...base, confirm: { ...t, focus: "no" } }, scroll });
+
+  if (ui.mode === "log" && ui.log) {
+    if (key === "esc") return { ui: { ...base, mode: ui.back, log: null }, scroll: 0 };
     if (key === "up") return { ui: base, scroll: scroll + 1 };
     if (key === "down") return { ui: base, scroll: Math.max(0, scroll - 1) };
-    if (key === "s" && active) return { ui: { ...base, mode: "confirm" }, scroll };
+    if (key === "s") {
+      const lg = ui.log;
+      const j = lg.scope === "child" ? L.findChild(lg.sub!, lg.id) : L.find(lg.id);
+      if (j && isActive(j)) return ask({ scope: lg.scope, id: lg.id, sub: lg.sub, label: j.label, agent: j.kind === "agent" });
+    }
     return { ui: base, scroll };
   }
-  if (key === "up" || key === "down") return { ui: { ...base, sel: move(list.map((j) => j.id), sel?.id ?? null, key === "up" ? -1 : 1) }, scroll };
-  if (key === "enter" && sel) return { ui: { ...base, sel: sel.id, mode: "log" }, scroll: 0 };
-  if (key === "s" && active) return { ui: { ...base, sel: sel!.id, mode: "confirm" }, scroll };
-  return { ui: base, scroll };
+
+  const agent = ui.mode === "sub" && ui.sub ? L.agents.find((j) => j.id === ui.sub) : undefined;
+  if (ui.mode === "sub" && !agent) return { ui: { ...base, mode: "list", sub: null, sel: ui.sub ? `s:${ui.sub}` : null }, scroll: 0 };   // subagent 가 끝났다
+  if (agent) {
+    const kids = L.children(agent.id);
+    const keys = ["sublog", ...kids.map((c) => `c:${c.id}`)];
+    const cur = ui.sel && keys.includes(ui.sel) ? ui.sel : "sublog";
+    if (key === "up" || key === "down") return { ui: { ...base, sel: move(keys, cur, key === "up" ? -1 : 1) }, scroll };
+    if (key === "esc") return { ui: { ...base, mode: "list", sub: null, sel: `s:${agent.id}` }, scroll: 0 };
+    if (key === "enter") {
+      const log = cur === "sublog" ? { scope: "main" as const, id: agent.id } : { scope: "child" as const, id: cur.slice(2), sub: agent.id };
+      return { ui: { ...base, sel: cur, mode: "log", log, back: "sub" }, scroll: 0 };
+    }
+    if (key === "s" && cur.startsWith("c:")) {
+      const c = kids.find((x) => `c:${x.id}` === cur)!;
+      return ask({ scope: "child", id: c.id, sub: agent.id, label: c.label });
+    }
+    return { ui: base, scroll };
+  }
+
+  const keys = [...L.main.map((j) => `m:${j.id}`), ...L.agents.map((j) => `s:${j.id}`)];
+  const cur = ui.sel && keys.includes(ui.sel) ? ui.sel : keys[0] ?? null;
+  if (key === "up" || key === "down") return { ui: { ...base, sel: move(keys, cur, key === "up" ? -1 : 1) }, scroll };
+  if (!cur) return { ui: base, scroll };
+  const j = L.find(cur.slice(2))!;
+  if (key === "enter") {
+    if (cur.startsWith("s:")) return { ui: { ...base, sel: "sublog", mode: "sub", sub: j.id }, scroll: 0 };
+    return { ui: { ...base, sel: cur, mode: "log", log: { scope: "main", id: j.id }, back: "list" }, scroll: 0 };
+  }
+  if (key === "s") return ask({ scope: "main", id: j.id, label: j.label, agent: j.kind === "agent" });
+  return { ui: { ...base, sel: cur }, scroll };
 }
