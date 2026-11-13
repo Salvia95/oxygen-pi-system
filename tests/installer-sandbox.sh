@@ -115,7 +115,7 @@ cp "$SB/install.json.keep" "$INST_JSON"; cp "$SB/fonts.json.keep" "$SB/fonts.jso
 #   LLM 연결 하위: 연결 1..n · + 새 연결 추가… · 기본 모델 · 작업 수준 · ← 이전   (연결 하나면 1 site · 2 추가 · 3 기본 모델 · 4 작업 수준 · 5 이전)
 #     연결 하나를 선택하면: 1 편집… · 2 연결 테스트 · 3 삭제… · 4 ← 이전
 #   DB 연결 하위: 연결 1..n · + 새 연결 추가… · SQLcl · ← 이전   (연결 0개면 1 추가 · 2 SQLcl · 3 이전)
-#   실행 제한 하위: 1 명령 출력 최대 길이 … 5 백그라운드 작업 동시 실행 수 · 6 ← 이전
+#   실행 제한 하위: 1 명령 출력 최대 길이 … 5 백그라운드 작업 동시 실행 수 · 6 작업 기록 보관 개수 · 7 ← 이전
 # 3-1 입력: DB 연결 / 1 추가 / 6 SQLite / 이름 / 파일 / 1 읽기 전용 / "" usql+dbhub / 1 연결 테스트 / "" 저장 결과 확인 / 4 ← 이전 / 10 종료
 INSTALLER="$I/installer/tweak.mjs" run "Tweak: DB 연결 추가" "$I/runtime/node/node.exe" 2 1 6 tdb "$(winpath "$SB/t.db")" 1 "" 1 "" 4 10
 chk "Tweak 종료코드 0"                         '[[ $RC == 0 ]]'
@@ -126,12 +126,13 @@ chk "설치된 usql 래퍼로 이름 붙은 연결 조회"        '[[ "$(bash "$
 
 # 3-2) Tweak: 항목 하나씩 (순서 무관) — GitLab 연결만 변경 → 실행 제한 값 하나만 변경 → 종료. 나머지 설정은 그대로여야 한다
 #      저장하면 Enter 를 기다리지 않고 허브(하위 메뉴)의 메시지 줄에 결과를 보인다
-#      입력: 3 GitLab 연결 / 호스트 / 7 실행 제한 / 1 명령 출력 최대 길이 / 9000 / 6 ← 이전 / 10 종료
+#      입력: 3 GitLab 연결 / 호스트 / 7 실행 제한 / 1 명령 출력 최대 길이 / 9000 / 6 작업 기록 보관 개수 / 200(범위 밖) · 20 / 7 ← 이전 / 10 종료
 before_llm=$(cat "$I/agent/llm.json")
-INSTALLER="$I/installer/tweak.mjs" run "Tweak: 항목별 조정" "$I/runtime/node/node.exe" 3 gitlab2.example.internal 7 1 9000 6 10
+INSTALLER="$I/installer/tweak.mjs" run "Tweak: 항목별 조정" "$I/runtime/node/node.exe" 3 gitlab2.example.internal 7 1 9000 6 200 20 7 10
 chk "Tweak 항목별: 종료코드 0"                   '[[ $RC == 0 ]]'
 chk "Tweak 항목별: GitLab 호스트만 변경"           'grep -q "^GITLAB_HOST=gitlab2.example.internal$" "$I/agent/oxy.env" && [[ "$(cat "$I/agent/llm.json")" == "$before_llm" ]]'
 chk "Tweak 항목별: 한도 값 하나만 저장"            'grep -q "^OXY_TOOL_OUTPUT_MAX_CHARS=9000$" "$I/agent/oxy.env" && ! grep -q "^OXY_READ_MAX_CHARS=" "$I/agent/oxy.env"'
+chk "Tweak 항목별: 작업 기록 보관 개수 (100 넘으면 거절)" 'grep -q "^OXY_FLOW_KEEP=20$" "$I/agent/oxy.env" && grep -q "1 이상 100 이하의 정수를 입력하세요" "$SB/out.txt"'
 chk "Tweak 항목별: 단계 흐름 없이 바로 저장"        '! grep -q "설정을 적용하는 중입니다" "$SB/out.txt" && grep -q "GitLab 연결 저장 중입니다" "$SB/out.txt"'
 
 # 3-2-1) Tweak: PATH·바로가기 하위 메뉴 (1 등록 항목 · 2 터미널 셸 · 3 멀티플렉서 · 4 ← 이전)

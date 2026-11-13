@@ -287,6 +287,9 @@ const LIMITS = [
   { key: "OXY_REPEAT_LIMIT", label: "반복 호출 허용 횟수", def: 3, fmt: (v) => `${v}회`, why: "같은 호출이 이 횟수에 이르면 차단합니다." },
   { key: "OXY_FLOW_ROLLOVER_PCT", label: "세션 자동 전환 기준", def: 50, fmt: (v) => `컨텍스트 ${v}%`, why: "컨텍스트 사용률이 이 값 이상이면 새 세션에서 이어서 처리합니다." },
   { key: "OXY_JOBS_MAX_CONCURRENT", label: "백그라운드 작업 동시 실행 수", def: 4, fmt: (v) => `${v}개`, tech: "bash", why: "동시에 실행할 백그라운드 명령의 수입니다." },
+  // docs/flow-rollback-spec.md D10 · O6 (사용자 확인 2026-11-14): oxy-flow 의 flowKeep 이 1~100 만 받는다
+  { key: "OXY_FLOW_KEEP", label: "작업 기록 보관 개수", def: 10, max: 100, fmt: (v) => `${v}개`, tech: "oxy-flow",
+    why: "끝난 작업 기록(Completed Flow)을 이 개수까지 보관하고, 넘으면 오래된 것부터 정리합니다." },
 ];
 const limitValue = (env, l) => (env[l.key] ? `${l.fmt(env[l.key])} (기본값 ${l.def})` : `${l.fmt(l.def)} (기본값)`);
 
@@ -307,7 +310,8 @@ async function limitsMenu() {
     last = LIMITS.findIndex((x) => x.key === k);
     const l = LIMITS[last];
     const v = await ui.input(l.label, { initial: String(env[l.key] || l.def), enter: "저장", note: `기본값은 ${l.def}입니다.${l.why ? ` ${l.why}` : ""}`,
-      validate: (s) => (/^\d+$/.test(s) && Number(s) > 0 ? null : "1 이상의 정수를 입력하세요") });
+      validate: (s) => (/^\d+$/.test(s) && Number(s) > 0 && (!l.max || Number(s) <= l.max) ? null
+        : l.max ? `1 이상 ${l.max} 이하의 정수를 입력하세요` : "1 이상의 정수를 입력하세요") });
     if (v === BACK) continue;
     writeFileSync(ENV_FILE, mergeEnv(text, { [l.key]: v }));
     msg = saved(`저장했습니다: ${l.label} = ${l.fmt(v)}${Number(v) === l.def ? " (기본값)" : ""}`);
