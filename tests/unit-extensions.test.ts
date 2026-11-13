@@ -810,6 +810,56 @@ test("renderConfig: oxy.env 의 예전 vLLM 값 → llm.json · 키는 DPAPI(sec
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("renderConfig: pi 에서 Ctrl+S 로 저장한 기본 모델을 업데이트가 되돌리지 않는다 · Tweak 에서 바꾸면 그것이 이긴다", async () => {
+  const { renderConfig, RENDERED_DEFAULTS } = await import("../scripts/render-config.mjs");
+  const { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "oxyrd-"));
+  const root = join(import.meta.dirname, "..");
+  const render = () => renderConfig(dir, { OXY_SHELL_PATH: "C:/bash.exe" }, { root });
+  const st = () => JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
+  const piSaves = (patch: any) => writeFileSync(join(dir, "settings.json"), JSON.stringify({ ...st(), ...patch }));
+  try {
+    cpSync(join(root, "agent", "templates"), join(dir, "templates"), { recursive: true });
+    const conn = (id: string, models: string[]) => ({ id, kind: "vllm", baseUrl: "http://x/v1", models: models.map((m) => ({ id: m, contextWindow: 131072, maxOutput: 8192 })) });
+    const llm: any = { version: 1, connections: [conn("vllm", ["qwen-a", "qwen-b"]), conn("other", ["m1"])], main: { connection: "vllm", model: "qwen-a", thinking: "off" } };
+    writeFileSync(join(dir, "llm.json"), JSON.stringify(llm));
+    render();
+    assert.deepEqual([st().defaultProvider, st().defaultModel], ["oxy-vllm", "qwen-a"]);
+    assert.equal(JSON.parse(readFileSync(join(dir, RENDERED_DEFAULTS), "utf8")).defaultModel, "qwen-a");
+    // pi 에서 Ctrl+S: 다른 연결의 모델 · thinking 을 기본으로 → 업데이트(render) 뒤에도 그대로
+    piSaves({ defaultProvider: "oxy-other", defaultModel: "m1", defaultThinkingLevel: "low" });
+    render();
+    assert.deepEqual([st().defaultProvider, st().defaultModel, st().defaultThinkingLevel], ["oxy-other", "m1", "low"]);
+    render();
+    assert.deepEqual([st().defaultProvider, st().defaultModel], ["oxy-other", "m1"], "여러 번 render 해도 그대로");
+    // Tweak 에서 기본 모델을 바꾸면(llm.json main) 그것이 이긴다
+    llm.main = { connection: "vllm", model: "qwen-b", thinking: "high" };
+    writeFileSync(join(dir, "llm.json"), JSON.stringify(llm));
+    render();
+    assert.deepEqual([st().defaultProvider, st().defaultModel, st().defaultThinkingLevel], ["oxy-vllm", "qwen-b", "high"]);
+    // 없는 연결의 값은 지키지 않는다
+    piSaves({ defaultProvider: "oxy-gone", defaultModel: "x" });
+    render();
+    assert.deepEqual([st().defaultProvider, st().defaultModel], ["oxy-vllm", "qwen-b"]);
+    // 기록 파일이 없던 설치본(이 수정 전)도 pi 의 값을 지킨다
+    piSaves({ defaultProvider: "oxy-other", defaultModel: "m1" });
+    rmSync(join(dir, RENDERED_DEFAULTS));
+    render();
+    assert.deepEqual([st().defaultProvider, st().defaultModel], ["oxy-other", "m1"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("oxy-flow 세션 넘기기 안내: 5초를 세는 두 줄 (Oxygen · Pi 는 브랜드 색)", async () => {
+  const F = await import("../agent/extensions/oxy-flow/rollover.ts");
+  assert.equal(F.ROLLOVER_WAIT_SEC, 5);
+  assert.deepEqual(F.rolloverLines(5), [" Summarize and rollover this session to new Oxygen Pi session,", " Please wait ... 5 sec"]);
+  assert.ok(F.rolloverLines(5).every((l: string) => l.length <= 80), "80칸에서 줄이 밀리지 않는다");
+  const tag = (t: string) => (x: string) => `<${t}>${x}</${t}>`;
+  assert.deepEqual(F.rolloverLines(1, { warn: tag("w"), oxygen: tag("o"), pi: tag("p") }),
+    [" <w>Summarize and rollover this session to new </w><o>Oxygen</o> <p>Pi</p><w> session,</w>", " <w>Please wait ... 1 sec</w>"]);
+});
+
 test("모델 계열 추정 (id)", async () => {
   const { detectFamily } = await import("../scripts/render-config.mjs");
   assert.equal(detectFamily("qwen3.6-coder-30b"), "qwen-coder");
@@ -1075,7 +1125,7 @@ test("oxy-monitor 보기 모델: flow (Current · Next · Overall, [i/n] 트리,
   assert.equal(M.nextItem([nx[2]])!.text, "c1");
 });
 
-test("oxy-monitor 보기 모델: Job Monitor (Main · Sub Context, 진행 중만, 빈 영역의 - 는 가운데, subagent 화면, 팝업, jobs-view-spec §2)", async () => {
+test("oxy-monitor 보기 모델: Job Monitor (Main Background · Subagent, 진행 중만, 빈 영역의 - 는 가운데, subagent 화면, 팝업, jobs-view-spec §2)", async () => {
   const M = await import("../agent/extensions/oxy-monitor/model.ts");
   const L = await import("../agent/extensions/oxy-monitor/live.ts");
   const { displayWidth: w } = await import("../installer/tui.mjs");
@@ -1092,7 +1142,7 @@ test("oxy-monitor 보기 모델: Job Monitor (Main · Sub Context, 진행 중만
     const m = M.jobsModel(state, subs, live, ui, width, height, now, w);
     assert.ok(M.modelHeight(m) <= height, tag + ": " + M.modelHeight(m) + " 줄");
     assert.deepEqual([m.title, m.right], [width < 30 ? "Jobs" : "Job Monitor", "Processing 2"], tag);
-    assert.deepEqual(m.sections.map((x) => x.title), ["Main Context", "Sub Context"]);
+    assert.deepEqual(m.sections.map((x) => x.title), ["Main Background", "Subagent"]);
     const keyed = m.sections.map((x) => x.rows.filter((r) => r.key).map((r) => r.key));
     assert.deepEqual(keyed, [["m:job-4"], ["s:job-2"]], tag);                                   // 끝난 작업은 없다 (J4)
     const sub = m.sections[1].rows.find((r) => r.key === "s:job-2")!;
@@ -1123,7 +1173,7 @@ test("oxy-monitor 보기 모델: Job Monitor (Main · Sub Context, 진행 중만
   const area = sv0.sections[0].rows.slice(1);
   assert.equal(area.findIndex((r) => r.text === "-"), Math.floor((area.length - 1) / 2));
   // 끝난 subagent 를 보고 있었으면 목록으로
-  assert.deepEqual(M.jobsModel(state, subs, live, { ...ui, mode: "sub", sub: "job-5" }, 35, 15, now, w).sections.map((x) => x.title), ["Main Context", "Sub Context"]);
+  assert.deepEqual(M.jobsModel(state, subs, live, { ...ui, mode: "sub", sub: "job-5" }, 35, 15, now, w).sections.map((x) => x.title), ["Main Background", "Subagent"]);
   // 로그 화면
   const log = M.jobsModel(state, subs, live, { ...ui, mode: "log", log: { scope: "child", id: "job-1", sub: "job-2" }, back: "sub" }, 23, 11, now, w, Array.from({ length: 30 }, (_, i) => "line " + i));
   assert.equal(log.title, "npm test 로그"); assert.ok(M.modelHeight(log) <= 11); assert.equal(log.sections[0].rows.at(-1)?.text, "line 29");

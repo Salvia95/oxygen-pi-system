@@ -19,7 +19,7 @@ export interface Row {
   since?: number;        // 경과 시작 시각 (ms). exe 가 1초마다 m:ss 로 그린다
   indent: number;
   prefix?: string;
-  badge?: string;        // 오른쪽 열 앞에 붙는 짧은 표시 (Sub Context 의 "셸 N"). 폭이 모자라면 exe 가 뺀다       // 트리 바 ("├ " · "└ " · "│ "). 들여쓰기 다음, 기호 앞에 흐린 색으로 (flow-view-spec §2)
+  badge?: string;        // 오른쪽 열 앞에 붙는 짧은 표시 (Subagent 구역의 "셸 N"). 폭이 모자라면 exe 가 뺀다       // 트리 바 ("├ " · "└ " · "│ "). 들여쓰기 다음, 기호 앞에 흐린 색으로 (flow-view-spec §2)
   emphasis?: boolean;    // 진행 중 · 제목 줄
   error?: boolean;       // 실패 · 오류색
 }
@@ -342,7 +342,7 @@ export function jobsModel(state: JobsState | null, subs: Map<string, JobsState>,
       selected: sel, keys, ...popup };
   }
 
-  // 목록: Main Context · Sub Context
+  // 목록: Main Background · Subagent
   const mainRows = L.main.map((j) => jobRow(`m:${j.id}`, j));
   const subRows = L.agents.map((j) => { const n = L.children(j.id).length; return jobRow(`s:${j.id}`, j, n && !narrow ? `셸 ${n}` : undefined); });
   const keyList = [...mainRows, ...subRows].map((r) => r.key!);
@@ -354,7 +354,7 @@ export function jobsModel(state: JobsState | null, subs: Map<string, JobsState>,
   const [hm, hs] = splitAreas(room, mainRows.length, subRows.length);
   return {
     op: "monitor", kind: "jobs", title: titled(JOBS_TITLE, right), right, now: [stateRow(live, now)], nowAt: "bottom",
-    sections: [{ title: "Main Context", rows: areaRows(mainRows, hm, width, sel) }, { title: "Sub Context", rows: areaRows(subRows, hs, width, sel) }],
+    sections: [{ title: "Main Background", rows: areaRows(mainRows, hm, width, sel) }, { title: "Subagent", rows: areaRows(subRows, hs, width, sel) }],
     selected: sel, keys, ...popup,
   };
 }

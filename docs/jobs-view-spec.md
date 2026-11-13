@@ -1,6 +1,6 @@
 # Job Monitor 구성 개편 명세
 
-psmux 오른쪽 열의 jobs 모니터를 **Main Context**(본 대화가 띄운 백그라운드 셸)와 **Sub Context**(본 대화가 띄운 subagent)로 나누고, subagent 를 골라 Enter 를 누르면 그 subagent 가 띄운 백그라운드 셸을 보인다.
+psmux 오른쪽 열의 jobs 모니터를 **Main Background**(본 대화가 띄운 백그라운드 셸)와 **Subagent**(본 대화가 띄운 subagent)로 나누고, subagent 를 골라 Enter 를 누르면 그 subagent 가 띄운 백그라운드 셸을 보인다.
 `docs/monitor-tui-spec.md` §3 의 jobs 화면을 바꾼다. 맨 윗줄 띠 · Tokyo Night 팔레트 · 그리기 규칙은 `docs/flow-view-spec.md` 를 그대로 따른다.
 진행 상태: [진행판](dev-board.md) 의 `jobs-view` 행.
 
@@ -20,6 +20,10 @@ psmux 오른쪽 열의 jobs 모니터를 **Main Context**(본 대화가 띄운 �
 - 이 명세를 승인했다. J4 (a) 끝난 작업은 바로 목록에서 뺀다, J3-1 (a) 중지 팝업의 처음 포커스는 `취소`.
 - 빈 영역의 `-` 는 그 영역의 가로 · 세로 가운데에 둔다. 맨 윗줄 오른쪽은 `Processing {n}`.
 
+바뀜 (2026-11-13, 사용자: "Job Monitor의 Main Context와 Sub Context를 각 각 Main Backgroud, Subagent로 변경해달라고 요청해")
+- 구역 제목 `Main Context` → `Main Background`(원문의 `Backgroud` 는 오타로 보고 이렇게 쓴다), `Sub Context` → `Subagent`. 제목 글자만 바뀌고 구역 순서 · 내용 · 행 모양 · 키 · 색과 subagent 화면의 `<agent>: <일>` 제목은 그대로다.
+- 위 요청 · 결정 · 구현 기록 · 4단계 실측 기록은 그때의 이름 그대로 둔다. 화면 · 규칙을 설명하는 본문 (§2 이하)은 새 이름이다.
+
 ## 1. 확인된 사실
 
 - 지금 jobs 화면은 본 대화의 작업 목록 하나에 `bg`(백그라운드 셸)와 `sub`(subagent)를 섞어 보이고, Enter 는 고른 작업의 로그를 연다 (`agent/extensions/oxy-monitor/model.ts` 의 `jobsModel`).
@@ -37,9 +41,9 @@ psmux 오른쪽 열의 jobs 모니터를 **Main Context**(본 대화가 띄운 �
 
 ```
 Job Monitor            Processing 2      ← 맨 윗줄 띠 (flow 와 같은 띠)
-── Main Context ───────────────────
+── Main Background ────────────────
 ⠹ npm run build                 0:41      ← 본 대화의 백그라운드 셸 (진행 중인 것만, J4)
-── Sub Context ────────────────────
+── Subagent ───────────────────────
 ⠹ worker: 결제 모듈 수정  셸 1  2:12      ← 본 대화의 subagent. 실행 중인 셸이 있으면 `셸 N`
 ───────────────────────────────────
 ⠹ 응답 생성 중                  0:05      ← 본 대화의 지금 상태 (지금과 같다)
@@ -50,11 +54,11 @@ Job Monitor            Processing 2      ← 맨 윗줄 띠 (flow 와 같은 띠
 
 ```
 Job Monitor            Processing 0
-── Main Context ───────────────────
+── Main Background ────────────────
 
                  -                       ← 영역의 가로 · 세로 가운데
 
-── Sub Context ────────────────────
+── Subagent ───────────────────────
                  -
 
 ───────────────────────────────────
@@ -63,13 +67,13 @@ Job Monitor            Processing 0
 ```
 
 - 맨 윗줄: 왼쪽 `Job Monitor`, 오른쪽 `Processing {n}` (n = 본 대화의 진행 중인 작업 수, 실행 중 · 대기, Main 과 Sub 를 합친 수. subagent 의 셸은 세지 않는다. 없으면 `Processing 0`). 23칸에서 넘치면 왼쪽을 `Jobs` 로 줄인다.
-- **Main Context**: 본 대화가 `background` 로 띄운 셸만. 상태 기호 · 명령 · 경과(끝난 것은 걸린 시간). 종류 열(`bg` · `sub`)은 영역이 나뉘므로 뺀다.
-- **Sub Context**: 본 대화가 `subagent` 로 띄운 것만. 상태 기호 · `<agent>: <일>` · 실행 중인 셸 수(`셸 N`, 없으면 비움, 30칸 미만이면 뺌) · 경과.
+- **Main Background**: 본 대화가 `background` 로 띄운 셸만. 상태 기호 · 명령 · 경과(끝난 것은 걸린 시간). 종류 열(`bg` · `sub`)은 영역이 나뉘므로 뺀다.
+- **Subagent**: 본 대화가 `subagent` 로 띄운 것만. 상태 기호 · `<agent>: <일>` · 실행 중인 셸 수(`셸 N`, 없으면 비움, 30칸 미만이면 뺌) · 경과.
 - 영역에 진행 중인 작업(실행 중 · 대기)이 없으면 그 영역의 **가로 · 세로 가운데**에 `-` 하나 (사용자 결정). 고를 수 있는 줄이 아니다. 가운데는 위 · 왼쪽으로 내림한다 (영역 h 줄 중 `floor((h-1)/2)` 번째 줄, 폭 w 칸 중 `floor((w-1)/2)` 번째 칸).
 - 영역 높이: 두 영역이 남는 줄을 반씩 나눈다 (홀수면 Main 이 한 줄 더). 작업이 있는 영역이 자기 몫보다 짧으면 남는 줄을 다른 영역에 넘긴다. 빈 영역(`-`)은 몫을 그대로 가져 `-` 가 가운데에 보인다. 영역보다 작업이 많으면 고른 줄이 늘 보이게 스크롤한다.
 - 순서는 지금과 같다 (실행 중 · 대기 → 최근에 끝난 것).
 
-### subagent 를 열었을 때 (Sub Context 에서 Enter)
+### subagent 를 열었을 때 (Subagent 구역에서 Enter)
 
 ```
 worker               Processing 1     ← 맨 윗줄 띠: subagent 이름 · 그 subagent 의 진행 중인 셸 수
@@ -85,15 +89,15 @@ worker               Processing 1     ← 맨 윗줄 띠: subagent 이름 · 그
 - 맨 위 줄 `대화 로그` 를 고르고 Enter 면 그 subagent 자신의 로그(지금 jobs 화면에서 subagent 를 Enter 했을 때와 같은 로그) (J2).
 - `s` 면 고른 셸을 중지 확인 팝업을 거쳐 멈춘다 (J3). subagent 자신을 멈추는 것은 목록 화면에서 그 subagent 를 골라 `s`.
 - 진행 중인 셸이 없으면 `대화 로그` 아래 남은 영역의 가로 · 세로 가운데에 `-`.
-- 그 subagent 가 끝나면 목록 화면의 Sub Context 에서 빠지고(J4), 이 화면을 보고 있었다면 목록으로 돌아간다.
+- 그 subagent 가 끝나면 목록 화면의 Subagent 구역에서 빠지고(J4), 이 화면을 보고 있었다면 목록으로 돌아간다.
 
 ### 23칸 (80×24, 모니터 둘)
 
 ```
 Jobs        Processing 2
-── Main Context ───────
+── Main Background ────
 ⠹ npm run build   0:41
-── Sub Context ────────
+── Subagent ───────────
 ⠹ worker: 결제…   2:12
 ───────────────────────
 ⠹ 응답 생성 중    0:05

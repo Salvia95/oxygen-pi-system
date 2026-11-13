@@ -21,6 +21,8 @@ import { Type } from "typebox";
 import { enabled, envInt, textOf } from "../_lib/common.ts";
 import { FileFlowEngine, type FlowNode, commandDirs, git, renderContext, renderMarkdown, renderNode, traceDecisions } from "./store.ts";
 import { PLAN_STATUSES, type PlanItem, nextStep, progress, renderPlanLines } from "./plan.ts";
+import { brandEnv, brandFg } from "../oxygen-pi-tui/brand.ts";
+import { ROLLOVER_KEY, ROLLOVER_WAIT_SEC, type RolloverCarry, rolloverLines } from "./rollover.ts";
 
 /** 커밋 노드가 붙은 계획 항목 (할 일 우선) */
 const findLinked = (plan: PlanItem[], nodeId: string): PlanItem | null => {
@@ -92,6 +94,18 @@ export default function (pi: ExtensionAPI) {
     try { sid = String(ctx.sessionManager?.getSessionId?.() ?? ""); } catch { /* 세션 정보 없음 */ }
     engine.bindSession(sid);
     status(ctx);
+    // 세션 넘기기로 시작한 세션이면 넘기기 전의 모델 · thinking 으로 맞춘다 (1분 넘게 지난 값은 버린다)
+    const carry = (globalThis as any)[ROLLOVER_KEY] as RolloverCarry | undefined;
+    if (carry && _e?.reason === "new") {
+      delete (globalThis as any)[ROLLOVER_KEY];
+      if (Date.now() - carry.at < 60000) {
+        try {
+          const model = ctx.modelRegistry?.find?.(carry.provider, carry.modelId);
+          if (model && (ctx.model?.provider !== model.provider || ctx.model?.id !== model.id)) await pi.setModel(model);
+          if (carry.thinking) pi.setThinkingLevel(carry.thinking as any);
+        } catch { /* 모델을 못 맞추면 기본 모델로 이어 간다 */ }
+      }
+    }
   });
   pi.on("session_shutdown", async () => { engine?.release(); engine = null; });
 
@@ -188,11 +202,26 @@ export default function (pi: ExtensionAPI) {
       await ctx.waitForIdle();
       const e = eng(ctx);
       if (e.writable) e.syncCommits(true);
-      const u = ctx.getContextUsage?.();
       const kickoff = args.trim() || "Continue the task from the recorded state. Start with the Next step.";
       e.markContinue(); // 새 세션의 첫 요청은 같은 작업의 연속으로 표시한다
       const parentSession = ctx.sessionManager.getSessionFile();
-      if (ctx.hasUI) ctx.ui.notify(`[oxy-flow] 컨텍스트 ${u?.percent != null ? `${Math.round(u.percent)}% ` : ""}→ 작업 기록을 가지고 새 세션에서 이어갑니다`, "info");
+      // 넘어가기 전 5초 동안 입력창 위에 안내를 세며 보인다 (사용자가 새 세션으로 넘어간다는 것을 알 수 있게)
+      if (ctx.hasUI) {
+        const th = ctx.ui.theme;
+        const be = brandEnv(th);
+        const paint = { warn: (x: string) => th?.fg ? th.fg("warning", x) : x, oxygen: (x: string) => brandFg("sage", x, be), pi: (x: string) => brandFg("purple", x, be) };
+        for (let sec = ROLLOVER_WAIT_SEC; sec > 0; sec--) {
+          ctx.ui.setWidget("oxy-rollover", rolloverLines(sec, paint));
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        ctx.ui.setWidget("oxy-rollover", undefined);
+      }
+      // 지금 모델 · thinking 을 새 세션에 넘긴다 (새 세션은 settings.json 의 기본 모델로 시작한다)
+      if (ctx.model) {
+        let thinking: string | undefined;
+        try { thinking = pi.getThinkingLevel(); } catch { /* 없음 */ }
+        (globalThis as any)[ROLLOVER_KEY] = { provider: ctx.model.provider, modelId: ctx.model.id, thinking, at: Date.now() } satisfies RolloverCarry;
+      }
       await ctx.newSession({
         parentSession,
         withSession: async (next: any) => { await next.sendUserMessage(kickoff); },

@@ -47,7 +47,7 @@ export function flowKey(ui: FlowUiState, flow: FlowLike | null, width: number, k
 export interface JobsKeyResult { ui: JobsUiState; scroll: number; stop?: StopTarget }
 
 /**
- * jobs 화면 (docs/jobs-view-spec.md §2): 목록(Main · Sub Context) ▲▼ 이동, Enter 셸 로그 · subagent 화면, s 중지 확인 팝업.
+ * jobs 화면 (docs/jobs-view-spec.md §2): 목록(Main Background · Subagent) ▲▼ 이동, Enter 셸 로그 · subagent 화면, s 중지 확인 팝업.
  * subagent 화면: 대화 로그 · 그 셸, Enter 로그, Esc 목록. 로그: ▲▼ 스크롤, Esc 돌아가기. 팝업: ←→ 이동, Enter 선택, Esc · q 취소 (처음 포커스 취소)
  */
 export function jobsKey(ui: JobsUiState, scroll: number, state: JobsState | null, subs: Map<string, JobsState>, key: MonitorKey): JobsKeyResult {

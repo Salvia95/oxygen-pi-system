@@ -15,7 +15,7 @@
   "nowAt": "bottom",
   "sections": [
     {
-      "title": "Main Context",
+      "title": "Main Background",
       "rows": [
         {
           "key": "m:job-1",
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "title": "Sub Context",
+      "title": "Subagent",
       "rows": [
         {
           "key": "s:job-2",

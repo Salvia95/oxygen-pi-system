@@ -57,6 +57,27 @@ pi 세션이 시작될 때(`session_start`) 위에서부터 처음 맞는 것을
 - 이유: 사용자 요청으로 Flow Monitor 의 `Before Commit Task` 는 커밋하면 사라져야 한다 (`docs/flow-view-spec.md`). 커밋했다면 그 전의 실패는 대개 해결되었다.
 - 구현: `oxy-flow/store.ts` 의 `syncCommits`. 단위: 커밋 뒤 `failures` 0, 커밋 뒤 새 실패는 같은 명령이 성공하면 풀린다.
 
+## 1-4. 세션 넘기기: 5초 안내 · 모델 · 작업을 잇는다 (2026-11-13)
+
+요청 (사용자, 2026-11-13): "넘어갈때는 "Summerize and rollover this session to new Oxygen Pi session, Please wait ... 5 sec"로 표시하고 카운팅 한 후 넘어가면 사용자가 직관적으로 알 수 있을 것 같아" · "기존 세션에서 ctrl + s를 이용해 haiku를 기본 모델로 설정했음에도 이렇게 다시 돌아간거였어"
+
+조사한 사실 (설치본 cozy-example 세션 기록, 2026-11-13)
+- 자동 compaction 은 같은 세션에서 앞부분을 작업 기록으로 바꾼다 (화면은 그대로 이어진다). 컨텍스트 50% 이상에서 사용자가 메시지를 보내면 oxy-flow 가 **새 세션**을 만든다 (`/oxy-rollover`). 새 세션이라 환영 카드부터 다시 그려져 pi 가 다시 뜬 것처럼 보였다.
+- 새 세션은 pi 가 `settings.json` 의 기본 모델로 시작한다. 그런데 설치본 업데이트(render-config)가 `settings.json` 의 기본 모델을 `llm.json` 값으로 다시 써서, pi 에서 Ctrl+S 로 저장한 기본 모델(Haiku)을 qwen 으로 되돌렸다 (22:42 업데이트 → 23:11 넘기기가 qwen 으로 시작, 첫 요청 413).
+- 넘기기 때 oxy-jobs 는 실행 중인 작업을 모두 멈췄고, 늦게 끝난 작업이 예전 세션의 pi 로 알림을 보내다 "ctx is stale" 예외로 pi 가 죽었다 (crashes.json 21:48).
+
+정한 것
+- 안내: 넘어가기 전 입력창 위에 5초 동안 두 줄을 세며 보인다 (`oxy-flow/rollover.ts` `rolloverLines`). 사용자 문구의 `Summerize` 는 `Summarize` 로 썼다. 한 줄이면 80칸에서 `N sec` 만 다음 줄로 밀려(실측) 쉼표 뒤에서 나눴다.
+  ```
+   Summarize and rollover this session to new Oxygen Pi session,
+   Please wait ... 5 sec
+  ```
+  색: 노랑(`warning`, 좋음도 나쁨도 아님), `Oxygen` 은 o2.sage, `Pi` 는 pi.purple (`.claude/rules/oxygen-design.md`).
+- 모델: 넘기기 직전의 모델 · thinking 을 새 세션에 넘긴다 (전역 표시 `Symbol.for("oxy.rollover")` → 새로 불린 oxy-flow 가 session_start 에서 `pi.setModel` · `setThinkingLevel`). 기본 모델 저장은 바꾸지 않는다.
+- 작업: 넘기기면 oxy-jobs 가 작업을 멈추지 않고 작업 관리자를 새 세션에 넘긴다 (번호 · 실행 중 작업 · 모니터 폴더가 이어진다). 알림은 늘 지금 세션의 pi 로 보내고, 실패해도 예외로 pi 가 죽지 않는다. 끝내기 · `/new` 등은 전처럼 멈춘다.
+- 기본 모델 저장: `docs/tui-spec.md` §11 (render 가 pi 에서 저장한 기본 모델을 지킨다).
+- 실측 (2026-11-13, mock pi mintty D2Coding): `/model qwen3.8-27b` → `scenario:bg-long`(60초 작업) → `/oxy-rollover`. 안내 색 `232;194;107` · Oxygen `169;203;164` · Pi `167;152;215`, 새 세션(부모 있음)의 첫 메시지 전에 `model_change qwen3.8-27b`, 입력창 `vllm · qwen3.8-27b · off`, job-1 이 새 세션에서 끝나 `Job-1 done!, print 2 lines` 알림, crashes.json 없음. 증거: scratchpad `caps/rollover-countdown.png` (한 줄 시절 캡처, 이후 두 줄로 고침).
+
 ## 2. 구현 순서와 확인 방법
 
 1. 세션 단위 기록 (§1) — 자동 검증: 단위(`tests/unit-extensions.test.ts` 의 "oxy-flow: 작업 기록은 세션 단위") + E2E(`tests/e2e-mock.sh` 의 flow 검사: 새 세션은 빈 기록, 다시 연 세션은 기록과 계획 · 다음 할 일 주입) / 실측: 대화형 pi 로 새로 시작 · `/resume`

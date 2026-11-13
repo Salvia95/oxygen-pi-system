@@ -25,6 +25,7 @@
 /agent/connections.json
 /agent/secrets.json
 /agent/llm.json
+/agent/.oxy-llm-default.json
 /agent/mcp.json
 /agent/mcp.log*
 /agent/mcp-auth.json

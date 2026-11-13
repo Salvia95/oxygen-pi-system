@@ -46,6 +46,17 @@ function psmuxExe(): string | null {
 
 const ok = (text: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text" as const, text }], details });
 
+/**
+ * 세션이 바뀌어도 작업을 잇는다 (oxy-flow 세션 넘기기, docs/ui-unify-spec.md §2.5).
+ * pi 는 세션을 바꿀 때 확장을 새로 불러 새 pi 객체를 준다. 예전 pi 로 알림을 보내면 "ctx is stale" 예외로 pi 가 죽었다 (2026-11-13 crashes.json).
+ *   handoff: 넘기기 중이면 끝내는 쪽이 작업 관리자를 여기에 두고, 새로 불린 쪽이 받아 쓴다 (실행 중인 작업 · 번호가 이어진다)
+ *   current: 지금 세션의 알림 함수. 예전 세션에서 시작한 작업이 끝나면 이것으로 알린다
+ */
+interface JobsShared { handoff?: JobManager; current?: { report: (j: Job) => void } }
+const SHARED: JobsShared = ((globalThis as any)[Symbol.for("oxy.jobs.shared")] ??= {});
+/** oxy-flow 가 세션 넘기기 직전에 두는 표시 (oxy-flow/index.ts ROLLOVER_KEY) */
+const rollingOver = () => Boolean((globalThis as any)[Symbol.for("oxy.rollover")]);
+
 export default async function (pi: ExtensionAPI) {
   if (!enabled("JOBS")) return;
   const agentDir = process.env.PI_CODING_AGENT_DIR || getAgentDir();
@@ -59,7 +70,9 @@ export default async function (pi: ExtensionAPI) {
   const levels: Array<{ id: string; use?: string }> = llm?.levels ?? [];
   // subagent 로 실행되면 본 대화의 실행 폴더 아래에 상태를 쓴다 (docs/jobs-view-spec.md §3)
   const subRun = subRunFromEnv();
-  const mgr = new JobManager(join(agentDir, "jobs"), {
+  const adopted = !subRun ? SHARED.handoff : undefined;
+  SHARED.handoff = undefined;
+  const mgr = adopted ?? new JobManager(join(agentDir, "jobs"), {
     maxBash: envInt("OXY_JOBS_MAX_CONCURRENT", 4),
     maxAgents: envInt("OXY_LLM_MAX_CONCURRENT", 2),
     ...(subRun ? { runDir: subRun } : {}),
@@ -90,7 +103,7 @@ export default async function (pi: ExtensionAPI) {
     if (act.length && !timer) timer = setInterval(render, 1000);
     if (!act.length && timer) { clearInterval(timer); timer = null; }
   };
-  mgr.onChange(render);
+  const offs = [mgr.onChange(render)];
 
   // 하단 바(oxy-monitor)가 쓰는 요약과 변경 알림. psmux 안이면 입력창 위 작업 목록 대신 하단 바를 쓴다
   const barMode = Boolean(process.env.TMUX && process.env.TMUX_PANE && psmuxExe()) && enabled("MONITOR");
@@ -120,7 +133,7 @@ export default async function (pi: ExtensionAPI) {
   let inbox: ControlInbox | null = null;
   let lastControl: ControlResult | null = null;
   let stateCwd = process.cwd();
-  mgr.onChange(() => writer?.changed());
+  offs.push(mgr.onChange(() => writer?.changed()));
   const startMonitorState = (ctx: any) => {
     if (writer || (!ctx?.hasUI && !subRun)) return;
     stateCwd = ctx.cwd ?? stateCwd;
@@ -143,11 +156,16 @@ export default async function (pi: ExtensionAPI) {
     const tail = j.tail.filter((l) => l.trim()).slice(-15).join("\n");
     return `[oxy-jobs] ${j.id} ${j.state} (exit ${j.exitCode ?? "-"}) after ${dur}: ${j.label}\nlast output:\n${clip(tail, max, "Use background action=output for more.")}`;
   };
-  const report = (j: Job) => {
+  const reportHere = (j: Job) => {
     if (j.reported || !interactive) return;   // 비대화형은 agent_before_settle 에서 모아서 알린다
     j.reported = true;
-    pi.sendMessage({ customType: "oxy-jobs", content: summary(j), display: true }, { triggerTurn: true, deliverAs: "followUp" });
+    try {
+      pi.sendMessage({ customType: "oxy-jobs", content: summary(j), display: true }, { triggerTurn: true, deliverAs: "followUp" });
+    } catch { j.reported = false; }           // 바뀐 세션의 pi 면 다음 세션이 알린다 (예외로 pi 가 죽지 않게)
   };
+  const self = { report: reportHere };
+  // 예전 세션에서 시작한 작업도 지금 세션으로 알린다
+  const report = (j: Job) => (SHARED.current && SHARED.current !== self ? SHARED.current.report(j) : reportHere(j));
 
   // ---------------------------------------------------------------- bash 작업
   async function runBash(job: Job, command: string, cwd: string) {
@@ -287,7 +305,7 @@ export default async function (pi: ExtensionAPI) {
           const baseEnv: Record<string, string> = Object.keys(keys).length ? { [INHERIT_ENV]: Buffer.from(JSON.stringify(keys)).toString("base64") } : {};
           const runs = jobs.map((j, i) => {
             const conn = connectionOf(j.target?.provider);
-            // 자식은 자기 작업(백그라운드 셸)을 본 대화의 실행 폴더 아래 sub/<작업 id> 에 쓴다 (모니터의 Sub Context)
+            // 자식은 자기 작업(백그라운드 셸)을 본 대화의 실행 폴더 아래 sub/<작업 id> 에 쓴다 (모니터의 Subagent 구역)
             const childEnv = { ...baseEnv, OXY_JOBS_PARENT: mgr.runDir, OXY_JOBS_PARENT_JOB: j.id };
             return runSubagent(mgr, j, defs[i], items[i].task, ctx.cwd, {
               parent, target: targets[i], childEnv, shell: shellPath(agentDir),
@@ -362,13 +380,22 @@ export default async function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_e: any, ctx: any) => {
     remember(ctx);
+    if (!subRun) SHARED.current = self;
+    // 넘겨받은 작업 가운데 세션이 바뀌는 사이에 끝나 아직 알리지 못한 것을 알린다
+    if (adopted) for (const j of mgr.list()) if (j.notify && j.endedAt && !j.reported) reportHere(j);
     if (!subRun) { try { pruneRuns(mgr.jobsDir, 20, [mgr.runDir]); mgr.pruneLogs(); } catch { /* 정리 실패는 무시 */ } }
     startMonitorState(ctx);
     render();
   });
   pi.on("turn_start", async (_e: any, ctx: any) => { remember(ctx); startMonitorState(ctx); });
-  pi.on("session_shutdown", async () => {
-    mgr.stopAll();
+  pi.on("session_shutdown", async (e: any) => {
+    if (SHARED.current === self) SHARED.current = undefined;
+    // 세션 넘기기(새 세션)면 작업을 멈추지 않고 새 세션에 넘긴다. 끝내기 · /new 등은 전처럼 멈춘다
+    if (!subRun && e?.reason === "new" && rollingOver()) {
+      SHARED.handoff = mgr;
+      for (const off of offs) off();
+      uiCtx = null;
+    } else mgr.stopAll();
     if (timer) clearInterval(timer);
     inbox?.close(); inbox = null;
     writer?.close(); writer = null;

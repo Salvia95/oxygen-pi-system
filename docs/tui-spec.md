@@ -300,6 +300,7 @@ LLM 연결은 여러 개를 함께 등록해 쓴다 (사내 vLLM 여러 대, 외
   - 실측 (2026-11-12, pi 1.5.0): `oxy-claude` 로 등록한 Claude 모델이 `--list-models` 에 131.1K · 16.4K 로 보이고, 요청에 키가 그대로 실리며 `thinking: adaptive` · `effort: low` · `max_tokens: 16384` 로 나갔다.
 - 모델 정보: 계열 프리셋(지금 `render-config.mjs` 의 `MODEL_FAMILIES`)이나 pi 내장 카탈로그를 바탕으로, 연결에 입력한 컨텍스트 길이와 응답 최대 길이를 덮어쓴다 (pi 내장값 1M · 128K 를 그대로 쓰지 않는다).
 - `settings.json`: `defaultProvider` · `defaultModel` · `defaultThinkingLevel` 은 `main`, `enabledModels` 는 모든 연결의 모델 (`/model` 로 오간다). configure 가 `llm.json` 으로 만든다.
+  - pi 에서 저장한 기본값을 지킨다 (2026-11-13, 사용자: "ctrl + s를 이용해 haiku를 기본 모델로 설정했음에도 이렇게 다시 돌아간거였어"). render 는 마지막으로 넣은 `main` 을 `agent/.oxy-llm-default.json` 에 적어 두고, 다음 render 때 `settings.json` 의 값이 그것과 다르고(pi `/model` Ctrl+S 로 바꿈) `llm.json` 의 `main` 은 그대로이며 등록된 연결의 모델이면 그 값을 둔다. Tweak 에서 기본 모델을 바꾸면 Tweak 값이 이긴다. 모델과 thinking 은 따로 본다. 기록 파일이 없던 설치본도 pi 의 값을 지킨다. 단위: `renderConfig: pi 에서 Ctrl+S 로 저장한 기본 모델을…`.
 - subagent 의 자식 pi 에는 부모가 띄울 때만 키를 `OXY_LLM_INHERIT_KEYS` 로 넘기고, 자식의 extension 이 받자마자 `process.env` 에서 지운다 (자식이 실행하는 bash · MCP 서버에 남지 않는다. E2E 로 확인).
   처음 설계는 자식도 직접 복호화하는 것이었지만, 새 프로세스의 첫 DPAPI 복호화가 약 2초 걸려(같은 프로세스의 두 번째부터 0.4초, 2026-11-12 실측) subagent 마다 2초가 붙어서 바꿨다.
   같은 Windows 사용자는 어차피 secrets.json 을 복호화할 수 있으므로 노출 범위는 늘지 않는다.

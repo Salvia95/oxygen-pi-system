@@ -96,7 +96,7 @@ const SCENARIOS = {
   // 여러 연결: deep 은 Claude 연결로 (E2E 가 llm.json 에 연결 claude 를 더한 뒤)
   "sub-claude": [{ tool: "subagent", args: { tasks: [{ agent: "scout", task: "claude-task review", level: "deep" }, { agent: "scout", task: "scenario:env vllm-task", level: "light" }] } }],
   "sub-async": [{ tool: "subagent", args: { agent: "scout", task: "scenario:env async check", wait: false } }, { text: "Delegated; waiting." }],
-  // Job Monitor 의 Sub Context: worker(subagent)가 백그라운드 셸을 띄운다 → 본 대화의 실행 폴더 sub/<작업 id>/state.json (docs/jobs-view-spec.md §3)
+  // Job Monitor 의 Subagent 구역: worker(subagent)가 백그라운드 셸을 띄운다 → 본 대화의 실행 폴더 sub/<작업 id>/state.json (docs/jobs-view-spec.md §3)
   "sub-bg": [{ tool: "subagent", args: { agent: "worker", task: "scenario:bg-child run", wait: false } }, { text: "Delegated with a shell." }],
   "bg-child": [{ tool: "background", args: { action: "start", command: `echo child-bg-started; sleep ${process.env.MOCK_SLEEP ?? "41"}; echo child-bg-never` } }, { text: "child waiting" }],
 };

@@ -41,7 +41,7 @@ pub struct MRow {
     pub prefix: Option<String>,
     pub emphasis: bool,
     pub error: bool,
-    /// 오른쪽 열(경과 · right) 바로 앞에 두 칸 띄워 그리는 짧은 글 (Sub Context 의 `셸 1`). 줄이 모자라면 글을 먼저 줄이고, 그래도 안 되면 뺀다
+    /// 오른쪽 열(경과 · right) 바로 앞에 두 칸 띄워 그리는 짧은 글 (Subagent 구역의 `셸 1`). 줄이 모자라면 글을 먼저 줄이고, 그래도 안 되면 뺀다
     pub badge: Option<String>,
 }
 
@@ -573,13 +573,13 @@ mod tests {
             let (body, _) = lines(m, *width as usize, 0, at);
             assert_eq!(line_text(&body[1]), format!("── Current Task {}", "─".repeat(*width as usize - 16)), "{name}: 맨 윗줄 바로 아래가 구역 0 가로줄");
         }
-        // jobs 의 목록은 Main Context · Sub Context 두 구역이고, subagent 화면은 `<agent>: <일>` 한 구역이다 (jobs-view-spec §2)
+        // jobs 의 목록은 Main Background · Subagent 두 구역이고, subagent 화면은 `<agent>: <일>` 한 구역이다 (jobs-view-spec §2)
         for (name, width, _, _, m) in fx.iter().filter(|(n, ..)| n.starts_with("jobs-")) {
             let titles: Vec<_> = m.sections.iter().map(|s| s.title.as_deref()).collect();
             if name.starts_with("jobs-sub-") {
                 assert!(titles.len() == 1 && titles[0].is_some_and(|t| t.starts_with("scout: ")), "{name}: {titles:?}");
             } else {
-                assert_eq!(titles, [Some("Main Context"), Some("Sub Context")], "{name}");
+                assert_eq!(titles, [Some("Main Background"), Some("Subagent")], "{name}");
             }
             let (body, _) = lines(m, *width as usize, 0, at);
             assert!(line_text(&body[1]).starts_with("── "), "{name}: 맨 윗줄 바로 아래가 구역 0 가로줄");
@@ -900,7 +900,7 @@ mod tests {
         with_look(look(Variant::Light, false), || {
             assert_eq!(*style_of(&row_line(&r, false, 35, 0, NOW), "셸 1"), theme::text());
         });
-        // 예시 모델: Sub Context 의 첫 행
+        // 예시 모델: Subagent 구역의 첫 행
         let (at, fx) = fixtures();
         let (_, _, _, _, m) = fx.iter().find(|(n, ..)| n.starts_with("jobs-35x14")).unwrap();
         let (body, _) = lines(m, 35, 0, at + 10_000);
@@ -964,7 +964,7 @@ mod tests {
         // 팝업 위아래로 팝업 아래 화면이 비친다: 구역 제목과 지금 줄이 남는다
         let (_, w14, h14, m14) = get("jobs-popup-35x14");
         let rows = dump(m14, *w14, *h14, 0, at);
-        assert!(rows.iter().any(|r| r.starts_with("── Main Context")) && rows.iter().any(|r| r.contains("도구 실행 중")));
+        assert!(rows.iter().any(|r| r.starts_with("── Main Background")) && rows.iter().any(|r| r.contains("도구 실행 중")));
     }
 
     #[test]

@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as secrets from "../installer/secrets.mjs";
-import { loadLlm, migrateAgentDir, settingsFromLlm, validateLlm } from "./llm-connections.mjs";
+import { loadLlm, migrateAgentDir, providerId, settingsFromLlm, validateLlm } from "./llm-connections.mjs";
 
 /** 비어 있어도 되는 템플릿 변수 */
 const OPTIONAL = new Set([]);
@@ -65,16 +65,47 @@ const LLM_SETTING_KEYS = ["defaultProvider", "defaultModel", "defaultThinkingLev
  * 재시도: 연결 중 가장 큰 request.retries (pi 의 재시도 설정은 하나다). 서버가 알려 준 대기 시간(Retry-After)을 지킨다.
  *   rate limit 메시지에 "billing" 같은 말이 섞인 게이트웨이(Groq 등)는 pi 가 할당량 소진으로 보고 재시도하지 않으므로 필요하다.
  */
-function applyLlmSettings(json, llm) {
+function applyLlmSettings(json, llm, agentDir) {
   for (const k of LLM_SETTING_KEYS) delete json[k];
   if (!llm) return json;
   const s = settingsFromLlm(llm);
   for (const k of LLM_SETTING_KEYS) if (s[k] !== undefined) json[k] = s[k];
+  if (agentDir) keepPiDefaults(json, s, agentDir, llm);
   if (s.retries) {
     json.retry ??= {};
     json.retry.provider = { ...json.retry.provider, maxRetries: s.retries, maxRetryDelayMs: 90000 };
   }
   return json;
+}
+
+/** render 가 마지막으로 llm.json 에서 넣은 기본값 (pi 에서 바꾼 것인지 Tweak 에서 바꾼 것인지 가리는 기준) */
+export const RENDERED_DEFAULTS = ".oxy-llm-default.json";
+const MODEL_KEYS = ["defaultProvider", "defaultModel"];
+
+/**
+ * pi 에서 고른 기본값을 지킨다 (사용자, 2026-11-13: "ctrl + s를 이용해 haiku를 기본 모델로 설정했음에도 이렇게 다시 돌아간거였어").
+ * pi 의 /model 목록 Ctrl+S 는 settings.json 의 defaultProvider · defaultModel 을 바꾸는데, 설치 · 업데이트 · Tweak 저장이
+ * settings.json 을 llm.json 으로 다시 써서 되돌렸다. 이제 지금 settings.json 의 값이
+ *   - 마지막 render 값과 다르고 (pi 에서 바꿈),
+ *   - llm.json 의 기본값은 마지막 render 뒤로 그대로이며 (Tweak 에서 안 바꿈. 처음이라 기록이 없으면 그대로로 본다),
+ *   - 등록된 연결의 모델이면 (모델 · thinking 은 각각)
+ * 그 값을 둔다. Tweak 에서 기본 모델을 바꾸면 그것이 이긴다.
+ */
+function keepPiDefaults(json, s, agentDir, llm) {
+  let cur = {}, last = null;
+  try { cur = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")); } catch { /* 처음 설치 */ }
+  try { last = JSON.parse(readFileSync(join(agentDir, RENDERED_DEFAULTS), "utf8")); } catch { /* 기록 없음 */ }
+  const same = (a, b, keys) => keys.every((k) => (a?.[k] ?? "") === (b?.[k] ?? ""));
+  const providers = new Set(llm.connections.map((c) => providerId(c.id)));
+  const piChanged = (keys) => !same(cur, s, keys) && (!last || !same(cur, last, keys)) && (!last || same(s, last, keys));
+  if (cur.defaultProvider && cur.defaultModel && providers.has(cur.defaultProvider) && piChanged(MODEL_KEYS)) {
+    for (const k of MODEL_KEYS) json[k] = cur[k];
+  }
+  if (cur.defaultThinkingLevel && piChanged(["defaultThinkingLevel"])) json.defaultThinkingLevel = cur.defaultThinkingLevel;
+  try {
+    writeFileSync(join(agentDir, RENDERED_DEFAULTS), JSON.stringify(Object.fromEntries(
+      [...MODEL_KEYS, "defaultThinkingLevel"].map((k) => [k, s[k] ?? ""])), null, 2) + "\n");
+  } catch { /* 기록 실패는 다음 render 에서 다시 */ }
 }
 
 /**
@@ -122,7 +153,7 @@ export function renderConfig(agentDir, vars, opts = {}) {
   const outputs = {};
   for (const file of readdirSync(tplDir).filter((f) => f.endsWith(".json"))) {
     let json = JSON.parse(substitute(readFileSync(join(tplDir, file), "utf8"), vars, file));
-    if (file === "settings.json") json = applyTheme(applyLlmSettings(json, llm), agentDir, root);
+    if (file === "settings.json") json = applyTheme(applyLlmSettings(json, llm, agentDir), agentDir, root);
     outputs[file] = json;
   }
   for (const [file, json] of Object.entries(outputs)) {
