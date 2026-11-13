@@ -16,6 +16,8 @@
 | `monitor-tui` | `docs/monitor-tui-spec.md` 모니터 화면 개편 (Ratatui) · 실시간 활동 | 완료 | – | 없음 (flow · jobs 화면은 `flow-view` · `jobs-view` 가 이어 바꿨다) | 2026-11-12 | 96de47e d5e23e7 2de77ce d096c67 f9ce774 5271186 | 2026-11-13 (`oxygen-pi-20261113.zip`) |
 | `flow-view` | `docs/flow-view-spec.md` flow 모니터 구성 개편 (Current · Next · Overall) · Tokyo Night | 완료 | – | 없음 | 2026-11-13 | f8b4b5c 4ce6514 | 2026-11-13 (`oxygen-pi-20261113.zip`, oxy-tui 0.3.0) |
 | `jobs-view` | `docs/jobs-view-spec.md` Job Monitor 구성 개편 (Main · Sub Context, subagent 의 셸) | 완료 | – | 없음. 후속: 업데이트가 WT 프로필을 다시 쓰지 않음 (아래 메모) | 2026-11-13 | f8b4b5c 4ce6514 | 2026-11-13 (`oxygen-pi-20261113.zip`, oxy-tui 0.3.0) |
+| `tui-fix` | `docs/tui-spec.md` §10 업데이트가 등록 항목을 다시 씀 · §6 값 열의 경로 | 검증 | 사용자: 커밋 · 다음 번들에 반영 | 커밋 후 다음 번들 · 설치본 업데이트 때 반영 (부모) | 2026-11-13 | – | 안 됨 |
+| `skill-combo` | `docs/skill-combo-spec.md` 여러 skill 상황 시험 · CI 계획 | 구현 | 사용자: C4 비밀 등록 · 월 한도 (`skill-combo/4` 실행 전) | `skill-combo/2` (부모) | 2026-11-13 | – | 해당 없음 |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -57,6 +59,12 @@
 | `jobs-view/3` | 화면 프로그램: 팝업 · 배지 · ←→ (tui-implementer) | 완료 | `just tui-test` `45 passed; 0 failed` · 단위 `# pass 72` · `tests/installer-sandbox.sh` 통과 (부모가 다시 실행, 기준 `HEAD 4c0d4e8 + 미커밋`, 2026-11-13) | mintty 80×24 · 120×30 (tokyo-night · 기본) · WT 팝업 캡처 (2026-11-13) | `docs/jobs-view-spec.md` §4 |
 | `jobs-view/4` | 실제 LLM 실측 (하이쿠) | 완료 | 해당 없음 (실측만) | 대화형 pi + claude-haiku-5-5, mintty 120×30: worker 의 셸 표시 · subagent 화면 · 팝업으로 그 셸만 중지 · 빈 영역 `-`, 모니터 pane 이 닫히던 결함을 찾아 고침 (2026-11-13) | `docs/jobs-view-spec.md` §4 |
 | `jobs-view/5` | 릴리스 · 번들 · 설치본 (`flow-view/6` 과 함께, 승인 필요) | 완료 | 릴리스 워크플로 `oxy-tui-v0.3.0` 성공, sha256 `20e22ba9…228fbf` 를 `manifest/tools.lock.tsv` 에 고정, 받은 exe 로 단위 `# pass 72` `# fail 0` (2026-11-13 부모) | 설치본 업데이트 후 `verify.sh` `PASS 47 / WARN 1 / FAIL 0` (WARN 은 SQLcl 미설치), 설치본 pi 의 테마 tokyo-night, `/monitor flow` · `/monitor jobs` 가 Flow Monitor · Job Monitor 로 열림, WT 프로필은 업데이트가 다시 쓰지 않아 부모가 설치본 코드로 다시 씀 (2026-11-13) | 4ce6514 `docs/jobs-view-spec.md` |
+| `tui-fix/1` | 업데이트가 등록된 WT 프로필 · 바로가기를 다시 씀 (§10) | 완료 | `tests/installer-sandbox.sh` 통과 (새 검사 6개: 낡게 만든 WT 조각 · 바로가기가 업데이트로 돌아옴, 등록하지 않은 바로가기는 만들지 않음, 기록된 셸) · 단위 `# pass 72` (부모가 다시 실행, 2026-11-13) | mintty 80×24 업데이트 화면 캡처 (작업 줄 두 개, tui-implementer 2026-11-13) | `docs/tui-spec.md` §10 |
+| `tui-fix/2` | 점검 화면 `번들 구성요소` 줄: 설명을 경로 앞에 (§6) | 완료 | `tests/installer-sandbox.sh` 통과 (2026-11-13) | mintty 80×24 점검 화면 캡처: `필수 5개 확인 · C:\Users\…\workspace\oxygen-pi-system` (2026-11-13) | `docs/tui-spec.md` §6 |
+| `skill-combo/1` | combo 시나리오 · 기록 (§2 §3) | 완료 | LLM 없이 판정 검사: 손대지 않은 자료 4 FAIL · 정답 4 PASS (2026-11-13 부모) | claude-haiku-5-5 두 번 (`combo-r1` · `combo-r2`), 합격 1/4 · 1/4, SKILL.md 읽음 0 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
+| `skill-combo/2` | `report.mjs --gate` · `run.mjs --key-env` (§4) | 예정 | – | – | – |
+| `skill-combo/3` | `ci.yml` (mock 시험, 승인 필요) | 예정 | – | – | – |
+| `skill-combo/4` | `skill-eval.yml` (하이쿠, 승인 필요) | 예정 | – | – | – |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |

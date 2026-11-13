@@ -90,7 +90,7 @@ async function stepCheck(state) {
   rows.push(java.ok ? row(c.green("✓"), `Java ${java.major}`, c.gray(java.detail))
     : row(c.yellow("!"), "Java", `${java.detail} (SQLcl만 사용할 수 없습니다)`));
   const required = readLock(ROOT).filter((e) => e.required).length;
-  if (missing.length === 0) rows.push(row(c.green("✓"), "번들 구성요소", `${c.gray(ROOT)} (필수 ${required}개 확인)`));
+  if (missing.length === 0) rows.push(row(c.green("✓"), "번들 구성요소", `필수 ${required}개 확인 · ${c.gray(ROOT)}`));
   else {
     rows.push(row(c.red("×"), "번들 구성요소", `${missing.length}개 없음: ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? " …" : ""}`));
     fatal ??= { cause: "번들에 필수 파일이 없습니다", fix: "인터넷 PC에서 번들을 다시 만들어 반입하세요" };
@@ -1464,6 +1464,10 @@ async function manage(reg) {
       try {
         await copyFiles(state);
         await ui.task("설정 파일 다시 생성", async () => `${writeSiteConfig(state.installDir, state)}개 파일`);
+        // 등록해 둔 Windows Terminal 프로필 · 바탕화면 바로가기는 이 번들의 내용으로 다시 쓴다 (등록하지 않은 것은 만들지 않는다)
+        const shell = normShell(state.terminalShell);
+        if (reg.terminalProfile) await ui.task("Windows Terminal 프로필 갱신", async () => { reg.terminalProfile = sys.addTerminalProfile(state.installDir, state.gitBash, shell); });
+        if (reg.shortcut) await ui.task("바탕화면 바로가기 갱신", async () => { reg.shortcut = sys.addShortcut(state.installDir, state.gitBash, Boolean(reg.terminalProfile), shell); });
         reg.version = VERSION;
         sys.saveRegistry({ ...reg, updatedAt: new Date().toISOString() });
       } catch (e) {

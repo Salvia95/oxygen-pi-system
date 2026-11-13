@@ -65,7 +65,14 @@ chk "oxy --no-mux: 바로 실행 ($ver2)"            '[[ "$ver2" == "$ver" ]]'
 # 2) 업데이트: 설치 관리 메뉴 3 업데이트 / 1 업데이트 시작 (덮어쓰기 확인) / 2 상태 점검 건너뛰기 / 종료
 #    (번들에 새로 들어온 구성요소가 없으므로 구성요소 화면은 나오지 않는다)
 echo "OXY_CUSTOM_KEEP=1" >> "$I/agent/oxy.env"
+#    등록해 둔 WT 프로필 · 바로가기가 낡은 내용이면 업데이트가 이 번들의 내용으로 다시 쓴다 (colorScheme 을 지우고 바로가기를 비워 둔다)
+SHORTCUT="$SB/Desktop/Oxygen Pi.lnk.json"
+jq 'del(.profiles[0].colorScheme) | del(.schemes)' "$WTF" > "$SB/wt.stale" && cp "$SB/wt.stale" "$WTF"
+echo '{}' > "$SHORTCUT"
 run "업데이트" "$NODE" 3 1 2 ""
+chk "업데이트: WT 프로필 다시 씀 (colorScheme 복원 · 셸 유지)"   '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Tokyo Night (Oxygen Pi) #1A1B26" ]] && grep -q "bash.exe.*env.sh" "$WTF"'
+chk "업데이트: 바탕화면 바로가기 다시 씀"            '[[ -n $(jq -r ".target // empty" "$SHORTCUT") ]]'
+chk "업데이트: 작업 줄 (WT 프로필 갱신 · 바로가기 갱신)"   'grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt" && grep -q "바탕화면 바로가기 갱신" "$SB/out.txt"'
 chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_KEEP=1$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env"'
 chk "업데이트 후 LLM 연결 · 키 유지"           '[[ $(lj ".connections[0].models | length") == 2 ]] && has_key site'
 
@@ -80,6 +87,11 @@ chk "모델 하나만 선택 → llm.json 모델 1개 · 키 유지"   '[[ "$(lj
 chk "다시 설정: 저장된 키 유지 화면 · 요약에 (변경됨)"    'grep -q "저장된 API 키를 유지할까요?" "$SB/out.txt" && grep -q "qwen3.6-coder-30b · 128K · thinking off (변경됨)" "$SB/out.txt"'
 chk "바로가기만 해제"                       '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" && -f "$SB/user-path.txt" ]]'
 chk "셸 변경: WT 프로필이 cmd.exe /k 로, OXY_MUX=none"  'grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && ! grep -q "env.sh" "$WTF" && grep -q "^OXY_TERMINAL_SHELL=cmd$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=none$" "$I/agent/oxy.env"'
+#    바로가기를 해제한 뒤의 업데이트: 등록하지 않은 바로가기는 새로 만들지 않고, 프로필은 기록된 셸(cmd)로 다시 쓴다
+jq 'del(.profiles[0].colorScheme)' "$WTF" > "$SB/wt.stale" && cp "$SB/wt.stale" "$WTF"
+run "업데이트 (바로가기 없음)" "$NODE" 3 1 2 ""
+chk "업데이트: 등록하지 않은 바로가기는 만들지 않음"   '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" ]] && ! grep -q "바탕화면 바로가기 갱신" "$SB/out.txt"'
+chk "업데이트: WT 프로필 다시 씀 (기록된 셸 cmd)"      '[[ $(jq -r ".profiles[0].colorScheme" "$WTF") == "Tokyo Night (Oxygen Pi)" ]] && grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt"'
 
 # 3-1) 설치된 복사본의 Tweak TUI: SQLite 연결 추가 (usql + dbhub) → 설치 위치 기준 파일 생성
 "$I/bin/usql.exe" "sqlite:$(winpath "$SB/t.db")" -c "create table t(a int); insert into t values (5),(6);" >/dev/null 2>&1
