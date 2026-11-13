@@ -37,6 +37,20 @@ pi 세션이 시작될 때(`session_start`) 위에서부터 처음 맞는 것을
 - 구현 (2026-11-12): `agent/extensions/oxy-flow/store.ts` (`bindSession` · `findArchived` · `archiveCurrent` · `fresh`), `index.ts` 의 `session_start`. 커밋 `acd4aac`.
 - 실측 (2026-11-12, 대화형 pi 1.5.0 · mock LLM `qwen3.6-coder-30b`): 새로 시작하면 빈 기록, `/resume` 으로 이전 세션을 열면 그 기록을 되살림. 실제 LLM 으로는 확인하지 않았다.
 
+## 1-2. 작업 저장소 (pi 를 시작한 폴더와 실제 작업 저장소가 다를 때)
+
+요청 (사용자, 2026-11-13): "pi를 실제 작업 폴더가 아닌 곳에서 시작했더라도 현재 메인컨텍스트의 작업을 기준으로 플로우 모니터를 보여줘야지"
+결정된 사항 (사용자, 2026-11-13): 위 요청대로 고치고 설치본에 반영한다.
+
+본 일 (2026-11-13, 사용자 프로젝트 cozy-example 의 flow.json): pi 를 `cozy-example` (git 저장소 아님)에서 시작하고 실제 작업은 옆 폴더 `library-rental` 에서 했다.
+기록은 `cozy-example/.oxy/flow` 에 묶여 커밋을 하나도 찾지 못했고 (노드 0개, `baseCommit: null`), 고친 파일은 `../library-rental/pom.xml` 로 "커밋 전 작업" 에 계속 남았다. `git status` 를 `cozy-example` 에서 돌려 `not a git repository` 실패도 쌓였다.
+
+- 기록을 두는 곳은 지금처럼 pi 를 시작한 폴더(의 git 최상위)다. 모니터가 pi 의 폴더로 기록을 찾기 때문이다.
+- **작업 저장소**(`flow.work = { root, baseCommit }`)를 따로 둔다. 메인 컨텍스트가 `edit` · `write` 로 고친 파일, `bash` 의 `cd <폴더>` (앞 cd 기준으로 이어서 푼다) · `git -C <폴더>` 가 다른 git 저장소면 그 저장소의 최상위로 옮기고, 옮긴 때의 HEAD 부터 커밋을 찾는다. 기록을 둔 저장소로 돌아오면 `work` 를 지운다.
+- 커밋 → 노드 (`syncCommits`), 고친 파일의 상대 경로, `/flow rollback` 의 `git status` 는 작업 저장소에서 한다. 다른 저장소의 노드에는 `repo` 를 남기고, 되돌리기는 그 노드의 저장소에서 한다.
+- 모델에게 넣는 작업 상태 맨 위에 `Work repository: <경로> (pi was started elsewhere; run git and builds there)` 를 넣는다.
+- 구현 (2026-11-13): `oxy-flow/store.ts` (`repoOf` · `commandDirs` · `workRoot` · `noteWorkPath` · `syncCommits` · `renderContext`), `oxy-flow/index.ts` (`tool_result` · `/flow rollback`). 단위: git 이 아닌 시작 폴더 + 옆 저장소에서 커밋 → `n1 feat: events` (`repo` = 옆 저장소), 기록은 시작 폴더의 `.oxy/flow`, `cd` · `git -C` 풀기.
+
 ## 2. 구현 순서와 확인 방법
 
 1. 세션 단위 기록 (§1) — 자동 검증: 단위(`tests/unit-extensions.test.ts` 의 "oxy-flow: 작업 기록은 세션 단위") + E2E(`tests/e2e-mock.sh` 의 flow 검사: 새 세션은 빈 기록, 다시 연 세션은 기록과 계획 · 다음 할 일 주입) / 실측: 대화형 pi 로 새로 시작 · `/resume`

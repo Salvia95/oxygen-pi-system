@@ -19,7 +19,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { enabled, envInt, textOf } from "../_lib/common.ts";
-import { FileFlowEngine, type FlowNode, git, renderContext, renderMarkdown, renderNode, traceDecisions } from "./store.ts";
+import { FileFlowEngine, type FlowNode, commandDirs, git, renderContext, renderMarkdown, renderNode, traceDecisions } from "./store.ts";
 import { PLAN_STATUSES, type PlanItem, nextStep, progress, renderPlanLines } from "./plan.ts";
 
 /** 커밋 노드가 붙은 계획 항목 (할 일 우선) */
@@ -118,7 +118,12 @@ export default function (pi: ExtensionAPI) {
     const name = event.toolName;
     if ((name === "edit" || name === "write") && !event.isError) {
       const p = String(event.input?.path ?? "");
-      if (p) e.recordFile(relative(e.root, toAbs(p, ctx.cwd)).replace(/\\/g, "/") || p);
+      if (p) {
+        // 실제 작업 저장소를 따라간다 (pi 를 다른 폴더에서 시작했어도, docs/flow-spec.md "작업 저장소")
+        const abs = toAbs(p, ctx.cwd);
+        e.noteWorkPath(abs);
+        e.recordFile(relative(e.workRoot(), abs).replace(/\\/g, "/") || p);
+      }
       status(ctx);
       return undefined;
     }
@@ -129,6 +134,10 @@ export default function (pi: ExtensionAPI) {
     }
     if (name !== "bash") return undefined;
     const command = String(event.input?.command ?? "");
+    // cd · git -C 로 들어간 폴더가 다른 git 저장소면 작업 저장소를 옮긴다 (cd 는 앞 cd 기준으로 이어서 푼다)
+    let dir = ctx.cwd as string;
+    for (const d of commandDirs(command)) dir = toAbs(d, dir);
+    if (dir !== ctx.cwd) e.noteWorkPath(dir);
     e.recordCommand(command, !event.isError, textOf(event.content));
     if (event.isError || !COMMIT_RE.test(command)) { status(ctx); return undefined; }
     const made: FlowNode[] = e.syncCommits(false);
@@ -302,15 +311,15 @@ export default function (pi: ExtensionAPI) {
       if (sub === "rollback") {
         const n = e.findNode(arg);
         if (!n) return void ctx.ui.notify(`단계 "${arg}" 없음`, "warning");
-        const dirty = git(e.root, ["status", "--porcelain"]);
+        const dirty = git(e.workRoot(), ["status", "--porcelain"]);
         if (dirty) return void ctx.ui.notify("커밋하지 않은 변경이 있어 되돌릴 수 없습니다. 먼저 커밋하거나 정리하세요.", "warning");
-        const after = (git(e.root, ["rev-list", `${n.commit}..HEAD`]) ?? "").split("\n").filter(Boolean);
+        const after = (git(n.repo ?? e.root, ["rev-list", `${n.commit}..HEAD`]) ?? "").split("\n").filter(Boolean);
         if (!after.length) return void ctx.ui.notify(`${n.id} 이후 커밋이 없습니다`, "info");
         const yes = await ctx.ui.confirm(`${n.id} 로 되돌리기`,
           `${n.id} 이후의 커밋 ${after.length}개를 git revert 로 되돌립니다 (이력은 지우지 않고 되돌리는 커밋을 추가).\n계속할까요?`);
         if (!yes) return;
-        const r = git(e.root, ["revert", "--no-edit", `${n.commit}..HEAD`]);
-        if (r == null) { git(e.root, ["revert", "--abort"]); return void ctx.ui.notify("git revert 실패 (충돌 등) — 되돌리기를 취소했습니다", "error"); }
+        const r = git(n.repo ?? e.root, ["revert", "--no-edit", `${n.commit}..HEAD`]);
+        if (r == null) { git(n.repo ?? e.root, ["revert", "--abort"]); return void ctx.ui.notify("git revert 실패 (충돌 등) — 되돌리기를 취소했습니다", "error"); }
         e.note("decision", `Rolled back to ${n.id} (${n.commit.slice(0, 8)}) by reverting ${after.length} commit(s)`, "user request via /flow rollback");
         e.syncCommits(false);
         status(ctx);

@@ -6,7 +6,7 @@
 // 엔진 경계(FlowEngine)를 두어 나중에 flowout 으로 바꿀 수 있게 한다. pi 에 의존하지 않아 단위 테스트가 가능하다.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { writeAtomic } from "../_lib/common.ts";
 import { type PlanInput, type PlanItem, addItem, currentItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
 
@@ -19,6 +19,7 @@ export interface FlowNode {
   title: string;         // 커밋 제목
   at: number;
   external?: boolean;    // pi 밖에서 만든 커밋 (나중에 발견)
+  repo?: string;         // 커밋이 있는 저장소 (기록을 둔 곳과 다를 때만, docs/flow-spec.md "작업 저장소")
   decisions: Decision[];
   files: string[];
 }
@@ -39,6 +40,11 @@ export interface Flow {
   startedAt: number;
   updatedAt: number;
   baseCommit: string | null; // 작업을 시작할 때의 HEAD
+  /**
+   * 메인 컨텍스트가 실제로 작업하는 git 저장소 (pi 를 시작한 폴더와 다를 때). 고친 파일 · cd 한 폴더로 정한다 (noteWorkPath).
+   * 커밋 찾기 · 되돌리기는 이 저장소에서 한다. 없으면 기록을 둔 곳(root)
+   */
+  work?: { root: string; baseCommit: string | null };
   continueAt?: number;       // 세션 넘기기 표시 (store.markContinue)
   continueBy?: string;       // 그 표시를 이어받은 세션 (bindSession). 한 세션만 이어받는다
   sessions?: string[];       // 이 작업을 한 pi 세션 id (세션 넘기기로 이어진 세션 포함). 예전 파일에는 없다
@@ -73,6 +79,33 @@ export function git(cwd: string, args: string[]): string | null {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
   } catch { return null; }
+}
+
+/** 경로 비교용 (Windows 는 대소문자 · 구분자 무시) */
+const samePath = (a: string, b: string) => {
+  const n = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? n(a).toLowerCase() === n(b).toLowerCase() : n(a) === n(b);
+};
+
+/** 경로(파일 · 폴더, 아직 없는 것 포함)가 속한 git 저장소의 최상위 (없으면 null) */
+export function repoOf(path: string): string | null {
+  let dir = path;
+  for (let i = 0; i < 40 && dir && !existsSync(dir); i++) dir = dirname(dir);
+  try { if (existsSync(dir) && !statSync(dir).isDirectory()) dir = dirname(dir); } catch { return null; }
+  return dir && existsSync(dir) ? git(dir, ["rev-parse", "--show-toplevel"]) : null;
+}
+
+/**
+ * bash 명령이 들어가는 폴더들: `cd <폴더>` (&& · ; · || 뒤 포함)와 `git -C <폴더>`. 따옴표를 벗긴다. 나온 순서대로
+ */
+export function commandDirs(command: string): string[] {
+  const out: string[] = [];
+  const re = /(?:^|&&|\|\||;|\n)\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)|\bgit\s+-C\s+("[^"]*"|'[^']*'|\S+)/g;
+  for (const m of command.matchAll(re)) {
+    const raw = (m[1] ?? m[2] ?? "").replace(/^["']|["']$/g, "");
+    if (raw && raw !== "-" && !raw.startsWith("$")) out.push(raw);
+  }
+  return out;
 }
 
 /** 기록을 둘 프로젝트 루트: git 저장소면 최상위, 아니면 cwd */
@@ -317,18 +350,41 @@ export class FileFlowEngine implements FlowEngine {
     this.save();
   }
 
+  /** 커밋을 찾을 저장소: 메인 컨텍스트가 작업하는 곳 (없으면 기록을 둔 곳) */
+  workRoot(): string {
+    return this.load().work?.root ?? this.root;
+  }
+
+  /**
+   * 메인 컨텍스트가 건드린 경로(고친 파일 · cd 한 폴더)로 작업 저장소를 정한다. 다른 git 저장소로 옮겨 가면 그 저장소의 HEAD 부터
+   * 커밋을 찾는다 (pi 를 다른 폴더에서 시작해도 실제 작업을 따라간다). 바뀌었으면 true
+   */
+  noteWorkPath(absPath: string): boolean {
+    const top = repoOf(absPath);
+    if (!top || samePath(top, this.workRoot())) return false;
+    const f = this.load();
+    if (samePath(top, this.root)) delete f.work;
+    else f.work = { root: top, baseCommit: git(top, ["rev-parse", "HEAD"]) };
+    this.save();
+    return true;
+  }
+
   /**
    * 마지막 노드 이후 git 에 생긴 커밋을 노드로 만든다. 버퍼의 결정 사항·파일은 가장 최근 커밋 노드로 옮긴다.
    * pi 밖에서 사람이 한 커밋도 다음 호출 때 잡힌다 (external).
    */
   syncCommits(external = false): FlowNode[] {
     const f = this.load();
-    const head = git(this.root, ["rev-parse", "HEAD"]);
+    const repo = this.workRoot();
+    const other = !samePath(repo, this.root);
+    const head = git(repo, ["rev-parse", "HEAD"]);
     if (!head) return [];
-    const last = f.nodes.at(-1)?.commit ?? f.baseCommit;
+    // 같은 저장소의 마지막 노드부터 (저장소를 옮겨 왔으면 옮긴 때의 HEAD 부터)
+    const lastNode = [...f.nodes].reverse().find((n) => samePath(n.repo ?? this.root, repo));
+    const last = lastNode?.commit ?? (other ? f.work?.baseCommit ?? null : f.baseCommit);
     if (last === head) return [];
     let hashes: string[] = [];
-    const range = last ? git(this.root, ["rev-list", "--reverse", "--first-parent", `${last}..${head}`]) : null;
+    const range = last ? git(repo, ["rev-list", "--reverse", "--first-parent", `${last}..${head}`]) : null;
     if (range != null) hashes = range.split("\n").filter(Boolean);
     if (!hashes.length) hashes = [head]; // 브랜치 전환·rebase 등으로 이전 커밋이 조상이 아니면 HEAD 만 기록
     hashes = hashes.slice(-20);
@@ -336,11 +392,11 @@ export class FileFlowEngine implements FlowEngine {
     for (const [i, h] of hashes.entries()) {
       const isLast = i === hashes.length - 1;
       const node: FlowNode = {
-        id: `n${f.nodes.length + 1}`, commit: h, title: git(this.root, ["log", "-1", "--format=%s", h]) ?? "", at: Date.now(),
-        ...(external ? { external: true } : {}),
+        id: `n${f.nodes.length + 1}`, commit: h, title: git(repo, ["log", "-1", "--format=%s", h]) ?? "", at: Date.now(),
+        ...(external ? { external: true } : {}), ...(other ? { repo } : {}),
         decisions: isLast ? f.buffer.decisions : [],
         // 커밋에 실제로 들어간 파일 (bash 로 만든 파일 포함)
-        files: (git(this.root, ["show", "--name-only", "--format=", h]) ?? "").split("\n").filter(Boolean).slice(0, MAX_FILES),
+        files: (git(repo, ["show", "--name-only", "--format=", h]) ?? "").split("\n").filter(Boolean).slice(0, MAX_FILES),
       };
       f.nodes.push(node);
       made.push(node);
@@ -386,6 +442,8 @@ export function renderContext(f: Flow, maxChars = 6000, mode: "continue" | "refe
       `Last task goal: ${f.goal || "(not set)"}`,
       "If the user's request is a different task, first call flow_note(kind=\"goal\") with the new goal."];
   if (f.status === "done") head.push("Status: done");
+  // pi 를 시작한 폴더와 다른 저장소에서 작업 중이면 알린다 (cd 를 잊고 엉뚱한 폴더에서 git · 빌드를 하지 않게)
+  if (f.work) head.push(`Work repository: ${f.work.root} (pi was started elsewhere; run git and builds there)`);
   const next = nextStep(f.plan) ?? f.next;   // 계획이 있으면 첫 doing(없으면 todo) 할 일
   if (next) head.push(`Next: ${next}`);
   if (f.blocked) head.push(`Blocked: ${f.blocked}`);

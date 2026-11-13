@@ -37,6 +37,13 @@ function stack(parts: (Component | undefined)[]): Component {
 const statusFrom = (c: any): ToolStatus => (c?.isError ? "fail" : c?.isPartial ? "running" : "ok");
 const expandKey = (c: any): string => { try { return c?.keyText?.("app.tools.expand") || "ctrl+o"; } catch { return "ctrl+o"; } };
 
+/** 접기 키 (입력창이 비어 있을 때만, index.ts 의 onTerminalInput). 입력 중의 Ctrl+K 는 pi 의 "줄 끝까지 지우기" 그대로 */
+export const FOLD_KEY = "ctrl+k";
+/** 접음 상태: 모든 도구 줄이 요약 줄만 보인다 (docs/pi-tui-spec.md §4). 그릴 때마다 읽는다 */
+let folded = false;
+export const isFolded = (): boolean => folded;
+export function setFolded(v: boolean): void { folded = v; }
+
 type Summarizer = {
   call(args: any, ctx: any): { title: string; args: string };
   result(r: { content: unknown; details: any }, o: { expanded: boolean; isPartial: boolean }, ctx: any, p: ToolPaint, g: Glyphs): { view: ResultView; extra?: "base" };
@@ -45,7 +52,7 @@ type Summarizer = {
 /** 오류 결과 공통: 첫 줄을 요약, 나머지를 본문 */
 function errorView(text: string, p: ToolPaint): ResultView {
   const e = errorLines(text);
-  return { summary: p.fg("error", e.first), body: e.rest.map((l) => p.fg("toolOutput", l)), keep: "head", max: 200, unit: "줄" };
+  return { summary: p.fg("error", e.first), body: e.rest.map((l) => p.fg("toolOutput", l)), keep: "head", max: 200, unit: "line" };
 }
 
 export const SUMMARIZERS: Record<string, Summarizer> = {
@@ -56,7 +63,7 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       const text = textOf(r.content);
       if (c?.isError) return { view: errorView(text, p) };
       const v = backgroundView(String(c?.args?.action ?? ""), text);
-      return { view: { summary: p.fg(v.level, v.summary), body: v.body.map((l) => p.fg("toolOutput", l)), keep: v.keep, max: 200, unit: "줄" } };
+      return { view: { summary: p.fg(v.level, v.summary), body: v.body.map((l) => p.fg("toolOutput", l)), keep: v.keep, max: 200, unit: "line" } };
     },
   },
   grep: {
@@ -65,14 +72,14 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       const text = textOf(r.content);
       if (c?.isError) return { view: errorView(text, p) };
       const parsed = parseGrep(text);
-      if (!parsed) return { view: { summary: p.fg("text", "결과"), body: text.split("\n").map((l) => p.fg("toolOutput", l)), keep: "head", max: 200, unit: "줄" } };
+      if (!parsed) return { view: { summary: p.fg("text", "결과"), body: text.split("\n").map((l) => p.fg("toolOutput", l)), keep: "head", max: 200, unit: "line" } };
       const s = grepSummary(parsed, r.details);
       const summary = p.fg(parsed.matches ? "success" : "text", s.text) + (s.warn ? p.fg("warning", ` · ${s.warn}`) : "");
       const a = c?.args ?? {};
       const body = o.expanded
         ? grepExpanded(measure, parsed, matcher(a.pattern, { literal: a.literal, ignoreCase: a.ignoreCase }), g.vbar, p)
         : grepCollapsed(measure, parsed, p);
-      return { view: { summary, body, keep: "head", max: 200, unit: o.expanded ? "줄" : "개 파일" } };
+      return { view: { summary, body, keep: "head", max: 200, unit: o.expanded ? "line" : "file" } };
     },
   },
   bash: {
@@ -87,8 +94,8 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       }
       const s = bashSummary(b, o.isPartial);
       let summary = p.fg(s.level, s.text);
-      if (b.truncated) summary += p.fg("warning", ` · 잘림 · 전체 ${b.truncated.total}줄${b.truncated.fullPath ? ` · ${b.truncated.fullPath}` : ""}`);
-      return { view: { summary, body: b.lines.map((l) => p.fg("toolOutput", l)), keep: "tail", max: 200, unit: "줄" } };
+      if (b.truncated) summary += p.fg("warning", `, truncated (${b.truncated.total} lines in total${b.truncated.fullPath ? `: ${b.truncated.fullPath}` : ""})`);
+      return { view: { summary, body: b.lines.map((l) => p.fg("toolOutput", l)), keep: "tail", max: 200, unit: "line" } };
     },
   },
   read: {
@@ -100,7 +107,7 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       const n = lineCount(text);
       const total = r.details?.truncation?.totalLines;
       const summary = img ? p.fg("success", "이미지") : p.fg("success", total && total > n ? `전체 ${total}줄 중 ${n}줄` : `${n}줄`);
-      return { view: { summary, body: [], keep: "head", max: 0, unit: "줄" }, extra: o.expanded ? "base" : undefined };
+      return { view: { summary, body: [], keep: "head", max: 0, unit: "line" }, extra: o.expanded ? "base" : undefined };
     },
   },
   edit: {
@@ -110,7 +117,7 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
       if (c?.isError) return { view: errorView(text, p) };
       const d = diffStats(r.details?.diff);
       const summary = d.added || d.removed ? `${p.fg("success", `+${d.added}`)} ${p.fg("error", `-${d.removed}`)}` : p.fg("success", "고침");
-      return { view: { summary, body: [], keep: "head", max: 0, unit: "줄" }, extra: o.expanded ? "base" : undefined };
+      return { view: { summary, body: [], keep: "head", max: 0, unit: "line" }, extra: o.expanded ? "base" : undefined };
     },
   },
   write: {
@@ -118,7 +125,7 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
     result: (r, _o, c, p) => {
       const text = textOf(r.content);
       if (c?.isError) return { view: errorView(text, p) };
-      return { view: { summary: p.fg("success", `${lineCount(String(c?.args?.content ?? ""))}줄 씀`), body: [], keep: "head", max: 0, unit: "줄" } };
+      return { view: { summary: p.fg("success", `${lineCount(String(c?.args?.content ?? ""))}줄 씀`), body: [], keep: "head", max: 0, unit: "line" } };
     },
   },
 };
@@ -138,8 +145,8 @@ export function registerToolRows(pi: ExtensionAPI, isOn: () => boolean, glyphMod
       renderResult(result: any, options: any, theme: any, context: any) {
         const g = glyphs(glyphMode());
         const { view, extra } = s.result(result, { expanded: Boolean(options?.expanded), isPartial: Boolean(options?.isPartial) }, context, theme, g);
-        const own = lines((w) => resultLines(measure, g, w, view, Boolean(options?.expanded), expandKey(context), theme));
-        if (extra !== "base" || !base?.renderResult) return own;
+        const own = lines((w) => resultLines(measure, g, w, view, Boolean(options?.expanded), { open: expandKey(context), fold: FOLD_KEY }, theme, folded));
+        if (extra !== "base" || !base?.renderResult || folded) return own;
         let more: Component | undefined;
         try { more = base.renderResult(result, options, theme, { ...context, lastComponent: undefined }) as Component; } catch { more = undefined; }
         return stack([own, indented(more)]);

@@ -140,7 +140,10 @@ pi 를 띄울 때 대화 맨 위에 한 번 나오고 대화와 함께 위로 �
 - 첫 줄(`renderCall`): 상태 기호 · 도구 제목(`toolTitle` + `bold`) · 인자 요약(`accent`) · 오른쪽 끝 걸린 시간(`muted`, 끝난 뒤에만).
 - 상태 기호: 실행 중 `○` (`warning`), 성공 `✓` (`success`), 실패 `×` (`error`, 설치 TUI 의 실패 기호와 같음). 성공은 처음에 `●` 였고 `docs/ui-unify-spec.md` D1 (2026-11-13) 로 모든 화면의 `✓` 에 맞췄다.
 - 둘째 줄(`renderResult`): `└ ` 뒤에 한 줄 요약. 본문은 둘째 줄 아래에 2칸 들여 쓴다.
-- 접힌 상태(기본)는 본문을 최대 8줄 보이고, 넘치면 `  … <n>개 더 (<펼치기 키> 펼치기)` 한 줄을 둔다. 펼치기 키 글은 렌더러에 주입된 `context.keyText("app.tools.expand")` 로 쓴다 (사용자가 바꾼 키를 따른다).
+- 바뀜 (사용자, 2026-11-13: "종료 0 · 출력 25줄 … Jobs done!, print 25 lines … 실패하면 Jobs failled.., print 25 line … 앞 34줄 더는 ...34 more lines … 최초 노출되는 것은 3줄 … Ctrl + O for opening, Ctrl + K to fold … fold 상태에서는 출력 자체가 안됐으면"):
+  - 처음(기본)은 본문 3줄. 넘치면 `...<n> more lines (Ctrl + O for opening, Ctrl + K to fold)` (단위 line · file · folder, 1 이면 단수). 펼친 뒤 상한을 넘으면 `...<n> more lines`. 로그(tail)는 이 줄이 본문 위에 온다.
+  - 펼치기 키 글은 `context.keyText("app.tools.expand")` 를 `Ctrl + O` 모양으로 (사용자가 바꾼 키를 따른다).
+  - 접음(fold): Ctrl+K 로 켜고 끈다. 모든 도구 줄이 첫 줄과 요약 줄만 보인다. Ctrl+K 는 pi 입력창의 "줄 끝까지 지우기"(`tui.editor.deleteToLineEnd`)이기도 해서 **입력창이 비어 있을 때만** 접기로 쓴다. Ctrl+O 는 접힌 것도 풀고 펼친다. pi 의 `setToolsExpanded` 는 같은 값이면 다시 그리지 않아, 한 번 뒤집었다 되돌려 모든 도구 줄을 다시 그린다.
 - 펼친 상태는 본문을 모두 보이되 도구별 상한(§7)을 둔다.
 - 우리가 그리기를 정하지 않은 도구(MCP 도구 · 다른 extension 도구)는 `next()` 그대로 둔다.
 - pi 의 도구 상자(배경색 · 위아래 여백)는 쓰지 않는다 (`renderShell: "self"`). 도구마다 빈 줄 하나 + 첫 줄 + 요약 + 본문이다. 24줄 창에서 도구 하나에 2줄씩 아낀다.
@@ -280,7 +283,7 @@ pi 기본 입력창의 윗줄 · 아랫줄 가로선을 상태가 들어간 테�
 
 | 도구 | 첫 줄 | 요약 줄 | 펼침 |
 | --- | --- | --- | --- |
-| `bash` (위에 해당하지 않음) | `$ <명령 첫 줄>` (넘치면 `…`) | `종료 0 · 출력 <n>줄` (`success`) / `종료 <c>` (`error`) / `잘림 · 전체 출력 <파일>` | 마지막 8줄 → 펼치면 마지막 200줄 |
+| `bash` (위에 해당하지 않음) | `$ <명령 첫 줄>` (넘치면 `…`) | `Jobs done!, print <n> lines` (`success`) / `Jobs failed.., print <n> lines` (`error`) / `Jobs running.., print <n> lines` / `Jobs aborted..` · `Jobs timed out after <s>s..` / 잘리면 `, truncated (<N> lines in total: <파일>)` | 마지막 3줄 → 펼치면 마지막 200줄 |
 | `read` | `read <경로>[:<시작>-<끝>]` | `<n>줄` · 잘리면 `전체 <m>줄 중` | pi 기본 (코드 강조) |
 | `edit` | `edit <경로>` | `+<추가> -<삭제>` | pi 기본 diff |
 | `write` | `write <경로>` | `<n>줄 씀` | 없음 |

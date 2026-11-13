@@ -213,6 +213,8 @@ flow 화면
 | 번들 Node 22.23.4 로 `.ts` 실행, `store.ts` import | 동작 (`file:///` URL 로 import) |
 | 시험용 extension 으로 하단 바 키 조작 (pi 1.5.0, psmux 100×30) | 빈 입력창 `↓` → 바 강조, `→` 이동, `Enter` 실행, `↑` 복귀, 글자 키는 입력창으로 들어감. 입력창에 글이 있으면 `↓` 를 가로채지 않음. `/settings` 대화상자 안의 `↓` 는 대화상자 목록으로 감 (포커스 `SettingsList`) |
 
+- **psmux 서버 · 세션 못 박기 (2026-11-13 버그 수정)**: psmux 는 세션마다 서버 프로세스를 두고 pane 의 `$TMUX` 는 그 세션 서버의 pid · port 를 담는다. `$TMUX` 의 서버에 닿지 못하면 psmux 는 **오류 없이 기본 서버로** 넘어가 `split-window -t %1` 이 기본 서버의 다른 세션(같은 %1)에 pane 을 만든다 (재현: 닿지 않는 `$TMUX` + 기본 서버 세션 → 그 세션에 pane, 종료 코드 0). 사용자 세션(`-L oxy`)에서 연 모니터가 화면에 안 보이고 개발 PC 의 캡처 세션에 쌓인 원인. `-L <이름>` 만 주면 같은 이름의 세션이 여럿일 때 가장 최근 세션을 고르고, `-t <세션>:%1` 은 안 되며 `-t <세션>:.%1` 은 된다 (psmux 3.4.0). 수정: `agent/extensions/_lib/psmux.ts` 가 서버(`$TMUX` 의 이름)와 세션(런처가 넘기는 `OXY_MUX_SESSION`, 없으면 `$TMUX` 로 묻되 대답한 socket 이 같은 이름일 때만)을 정하고, 모든 psmux 호출에 `-L <서버>` · `-t <세션>:.%N` 을 쓴다 (모니터 pane · oxy-jobs 의 로그 pane). 세션을 못 찾으면 열지 않고 알린다. 사용자 pi 의 `$TMUX` 가 왜 닿지 않게 됐는지는 확인하지 못했다 (미리 띄워 둔 `__warm__` 서버를 넘겨받는 과정이 의심된다).
+
 ## 7. 구현 순서와 확인 방법
 
 1. oxy-jobs 상태 파일과 요청 처리 (§3) — `tests/unit-extensions.test.ts`, `tests/rpc-jobs.mjs`

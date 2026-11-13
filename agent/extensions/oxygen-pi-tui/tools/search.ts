@@ -140,14 +140,14 @@ export function searchView(m: Measure, kind: SearchKind, b: BashParsed, expanded
   if (b.reason) return null;
   const noMatch = kind.tool === "rg" && b.exit === 1 && b.lines.length === 0;
   if (b.exit !== 0 && !noMatch) return null;
-  const warn = b.truncated ? p.fg("warning", ` · 잘림 · 전체 ${b.truncated.total}줄`) : "";
-  if (noMatch) return { view: { summary: p.fg("text", "결과 없음"), body: [], keep: "head", max: 0, unit: "줄" }, ok: true };
+  const warn = b.truncated ? p.fg("warning", ` · truncated (${b.truncated.total} lines in total)`) : "";
+  if (noMatch) return { view: { summary: p.fg("text", "결과 없음"), body: [], keep: "head", max: 0, unit: "line" }, ok: true };
   if (kind.tool === "fd" || kind.mode === "paths") {
     const parsed = groupPaths(b.lines);
     return { view: {
       summary: p.fg(parsed.files || parsed.dirs ? "success" : "text", pathsSummary(parsed)) + warn,
       body: expanded ? pathsExpanded(m, parsed, p) : pathsCollapsed(m, parsed, p),
-      keep: "head", max: 200, unit: expanded ? "줄" : "개 폴더",
+      keep: "head", max: 200, unit: expanded ? "line" : "folder",
     } };
   }
   const parsed = kind.mode === "count" ? parseRgCount(b.lines) : parseRgLines(b.lines);
@@ -156,7 +156,7 @@ export function searchView(m: Measure, kind: SearchKind, b: BashParsed, expanded
   return { view: {
     summary: p.fg(parsed.matches ? "success" : "text", s.text) + warn,
     body: expanded && kind.mode === "lines" ? grepExpanded(m, parsed, null, vbar, p) : grepCollapsed(m, parsed, p),
-    keep: "head", max: 200, unit: expanded && kind.mode === "lines" ? "줄" : "개 파일",
+    keep: "head", max: 200, unit: expanded && kind.mode === "lines" ? "line" : "file",
   } };
 }
 

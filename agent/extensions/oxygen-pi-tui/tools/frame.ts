@@ -13,8 +13,8 @@ export interface ToolPaint { fg(token: string, s: string): string; bold(s: strin
 /** 본문 한 줄: 글, 또는 쓸 수 있는 칸 수를 받아 글을 만드는 함수 (오른쪽 맞춤 등) */
 export type BodyLine = string | ((width: number) => string);
 
-/** 접힌 상태에서 보이는 본문 줄 수 */
-export const COLLAPSED_LINES = 8;
+/** 처음(펼치기 전) 보이는 본문 줄 수 (사용자, 2026-11-13: "화면에 최초 노출되는 것은 3줄이면 충분") */
+export const COLLAPSED_LINES = 3;
 
 /** 0.4s · 12.4s · 1m 3s */
 export function fmtDuration(ms: number | undefined): string {
@@ -50,20 +50,37 @@ export interface ResultView {
   keep: "head" | "tail";
   /** 펼쳤을 때의 상한 */
   max: number;
-  /** "개" · "줄" · "개 파일" 등 숨은 수의 단위 */
+  /** 숨은 수의 단위 (영어 단수): line · file · folder */
   unit: string;
 }
 
-/** 요약 줄 + 본문. 접힘은 COLLAPSED_LINES 줄, 넘치면 `… <n><단위> 더 (<키> 펼치기)` */
-export function resultLines(m: Measure, g: Glyphs, width: number, v: ResultView, expanded: boolean, expandKey: string, p: ToolPaint): string[] {
+/** 키 이름을 안내 글로: `ctrl+o` → `Ctrl + O` */
+export function keyLabel(key: string): string {
+  return key.split("+").map((k) => (k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))).join(" + ");
+}
+
+/** 단위의 단 · 복수: `line` · `lines` */
+export function plural(n: number, unit: string): string {
+  return `${unit}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * 요약 줄 + 본문 (docs/pi-tui-spec.md §4).
+ *   기본: 본문 COLLAPSED_LINES 줄, 넘치면 `...34 more lines (Ctrl + O for opening, Ctrl + K to fold)`
+ *   펼침(Ctrl + O): 본문 max 줄까지, 넘치면 `...34 more lines`
+ *   접음(Ctrl + K, folded): 요약 줄만 (본문을 그리지 않는다)
+ */
+export function resultLines(m: Measure, g: Glyphs, width: number, v: ResultView, expanded: boolean,
+  keys: { open: string; fold: string }, p: ToolPaint, folded = false): string[] {
   const out = [m.trunc(` ${p.fg("muted", g.elbow)} ${v.summary}`, width, "…")];
+  if (folded) return out;
   const inner = Math.max(1, width - 3);
   const all = typeof v.body === "function" ? v.body(inner) : v.body.map((l) => (typeof l === "function" ? l(inner) : l));
   const limit = expanded ? v.max : COLLAPSED_LINES;
   const body = v.keep === "tail" ? all.slice(-limit) : all.slice(0, limit);
   const hidden = all.length - body.length;
   const more = hidden > 0
-    ? `   ${p.fg("text", `${g.more} ${v.keep === "tail" ? "앞 " : ""}${hidden}${v.unit} 더${expanded ? "" : ` (${expandKey} 펼치기)`}`)}`
+    ? `   ${p.fg("text", `...${hidden} more ${plural(hidden, v.unit)}${expanded ? "" : ` (${keyLabel(keys.open)} for opening, ${keyLabel(keys.fold)} to fold)`}`)}`
     : "";
   if (more && v.keep === "tail") out.push(m.trunc(more, width, ""));
   for (const line of body) out.push(m.trunc(`   ${line}`, width, "…"));

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { enabled, harnessHome } from "../_lib/common.ts";
+import { resolveMuxTarget } from "../_lib/psmux.ts";
 import { brandEnv, brandFg } from "../oxygen-pi-tui/brand.ts";
 import { glyphs, spinnerFrame } from "../oxygen-pi-tui/glyphs.ts";
 import { type BarKind, type BarRange, type FlowSummary, type JobsSummary, barItems, barLine, itemAt } from "./bar.ts";
@@ -36,7 +37,10 @@ export function paneManager(): { mgr: PaneManager | null; why?: string } {
   if (!process.env.TMUX || !process.env.TMUX_PANE) return { mgr: null, why: "psmux 세션 안에서 실행할 때만 모니터 pane을 열 수 있습니다." };
   const exe = psmuxExe();
   if (!exe) return { mgr: null, why: "psmux가 설치되지 않았습니다." };
-  return { mgr: new PaneManager(psmuxRunner(exe), process.env.TMUX_PANE) };
+  // 서버 · 세션을 못 박는다 (_lib/psmux.ts): 못 찾으면 다른 세션에 여는 대신 알린다
+  const pin = resolveMuxTarget(exe);
+  if (!pin) return { mgr: null, why: "psmux 세션을 찾지 못했습니다. 잠시 뒤 다시 열어 보세요." };
+  return { mgr: new PaneManager(psmuxRunner(exe, [], pin), process.env.TMUX_PANE) };
 }
 
 const shared = <T>(name: string): T | undefined => (globalThis as any)[Symbol.for(name)];

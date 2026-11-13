@@ -11,7 +11,8 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { enabled } from "../_lib/common.ts";
 import { type ChromeState, installEditor, installFooter, installHeader, restoreChrome, sessionCost } from "./chrome.ts";
 import { type TuiConfig, loadConfig, saveConfig } from "./config.ts";
-import { registerToolRows } from "./tools/index.ts";
+import { FOLD_KEY, isFolded, registerToolRows, setFolded } from "./tools/index.ts";
+import { matchesKey } from "@earendil-works/pi-tui";
 
 export default function (pi: ExtensionAPI) {
   if (!enabled("PI_TUI")) return;
@@ -20,17 +21,42 @@ export default function (pi: ExtensionAPI) {
   let applied = false;
   const state: ChromeState = { workingSince: null, cost: 0 };
 
+  let offKeys: (() => void) | undefined;
+  /**
+   * 도구 줄 접기 (docs/pi-tui-spec.md §4): 입력창이 비어 있을 때 Ctrl+K 는 접기 · 풀기. 입력 중의 Ctrl+K 는 pi 의
+   * "줄 끝까지 지우기" 그대로 둔다. Ctrl+O(펼치기)는 접힌 것도 푼다 (pi 의 펼치기 동작은 그대로 이어진다).
+   * 바꾼 뒤 pi 의 펼침 값을 다시 넣어 모든 도구 줄을 다시 그리게 한다.
+   */
+  const watchKeys = (ctx: ExtensionContext) => {
+    offKeys?.();
+    offKeys = ctx.ui.onTerminalInput((data: string) => {
+      if (matchesKey(data, FOLD_KEY) && ctx.ui.getEditorText() === "") {
+        setFolded(!isFolded());
+        // pi 는 같은 값이면 다시 그리지 않는다 (setToolsExpanded 가 그냥 돌아감). 한 번 뒤집었다 되돌려 모든 도구 줄을 다시 그린다
+        const target = isFolded() ? false : ctx.ui.getToolsExpanded();
+        ctx.ui.setToolsExpanded(!target);
+        ctx.ui.setToolsExpanded(target);
+        return { consume: true };
+      }
+      if (matchesKey(data, "ctrl+o") && isFolded()) setFolded(false);
+      return undefined;
+    });
+  };
+
   const apply = (ctx: ExtensionContext) => {
     if (ctx.mode !== "tui" || !cfg.enabled) return;
     state.cost = sessionCost(ctx);
     installHeader(pi, ctx, cfg);
     installEditor(pi, ctx, cfg, state);
     installFooter(ctx, cfg);
+    watchKeys(ctx);
     applied = true;
   };
   const restore = (ctx: ExtensionContext) => {
     if (ctx.mode !== "tui") return;
     restoreChrome(ctx);
+    offKeys?.(); offKeys = undefined;
+    setFolded(false);
     applied = false;
   };
 

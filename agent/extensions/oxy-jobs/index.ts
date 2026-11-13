@@ -19,6 +19,7 @@ import { pathToFileURL } from "node:url";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { blocked, enabled, envInt, harnessHome } from "../_lib/common.ts";
+import { pinArgs, resolveMuxTarget } from "../_lib/psmux.ts";
 import { inspect } from "../oxy-bash-guard.ts";
 import { clip } from "../oxy-context-budget.ts";
 import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration } from "./manager.ts";
@@ -344,7 +345,10 @@ export default async function (pi: ExtensionAPI) {
         await ctx.ui.editor(`${job.id} 로그 (마지막 300줄 · 편집 내용은 저장되지 않음)`, text);
       } else if (act?.startsWith("옆 pane") && psmux) {
         // pane 셸(Git Bash)이 명령을 해석한다. -d: 포커스는 pi 에 둔다
-        spawn(psmux, ["split-window", "-h", "-d", "-l", "40%", `tail -n 100 -f '${posix}'`],
+        // 서버 · 세션을 못 박는다 (_lib/psmux.ts: $TMUX 의 서버에 닿지 못하면 psmux 가 기본 서버의 다른 세션에 연다)
+        const pin = resolveMuxTarget(psmux);
+        if (!pin) { ctx.ui.notify("psmux 세션을 찾지 못했습니다. 잠시 뒤 다시 열어 보세요.", "warning"); return; }
+        spawn(psmux, pinArgs(["split-window", "-t", process.env.TMUX_PANE ?? "", "-h", "-d", "-l", "40%", `tail -n 100 -f '${posix}'`], pin),
           { detached: true, stdio: "ignore", windowsHide: true }).unref();
       } else if (act?.startsWith("옆 창")) {
         spawn("wt.exe", ["-w", "0", "split-pane", "--title", job.id, shellPath(agentDir), "-c", `tail -n 100 -f '${posix}'`],

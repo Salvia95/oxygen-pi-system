@@ -5,13 +5,17 @@
 //   - 모니터 종류마다 pane 하나: pane 옵션 @oxy_monitor=<종류>
 // psmux 의 resize-pane -x/-y 는 크기를 절대값으로 맞추지 않으므로 쓰지 않는다.
 import { spawnSync } from "node:child_process";
+import { type MuxTarget, pinArgs } from "../_lib/psmux.ts";
 
 export type Run = (args: string[]) => { status: number; stdout: string; stderr: string };
 
-/** psmux.exe 를 부른다. pane 안이면 환경변수 TMUX 로 같은 서버를 쓴다 (extra: 테스트용 -L 서버 등) */
-export function psmuxRunner(exe: string, extra: string[] = []): Run {
+/**
+ * psmux.exe 를 부른다 (extra: 시험용 -L 서버 등). pin 을 주면 서버(-L)와 세션을 못 박는다:
+ * $TMUX 의 서버에 닿지 못하면 psmux 가 기본 서버로 조용히 넘어가 다른 세션에 pane 을 만들기 때문이다 (_lib/psmux.ts).
+ */
+export function psmuxRunner(exe: string, extra: string[] = [], pin?: MuxTarget): Run {
   return (args) => {
-    const r = spawnSync(exe, [...extra, ...args], { encoding: "utf8", windowsHide: true, timeout: 10000 });
+    const r = spawnSync(exe, [...extra, ...(pin ? pinArgs(args, pin) : args)], { encoding: "utf8", windowsHide: true, timeout: 10000 });
     return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   };
 }

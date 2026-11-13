@@ -30,9 +30,9 @@ export function parseBash(text: string, isError: boolean): BashParsed {
   if (status) {
     t = t.slice(0, status.index);
     if (status[2] != null) exit = Number(status[2]);
-    else if (status[1] === "Command aborted") reason = "중단됨";
-    else if (status[3] != null) reason = `${status[3]}초 제한으로 멈춤`;
-    else reason = "종료 코드 없이 끝남";
+    else if (status[1] === "Command aborted") reason = "Jobs aborted..";
+    else if (status[3] != null) reason = `Jobs timed out after ${status[3]}s..`;
+    else reason = "Jobs ended without an exit code..";
   }
   let truncated: BashParsed["truncated"];
   const tr = t.match(/\n\n\[Showing (lines (\d+)-(\d+) of (\d+)[^\]]*?|last [^\]]*?)\. Full output: ([^\]]+)\]\s*$/);
@@ -53,12 +53,17 @@ export function parseBash(text: string, isError: boolean): BashParsed {
 }
 
 /** bash 요약 글 (색 없이) 과 수준 */
+/**
+ * bash 요약 (사용자, 2026-11-13): 끝남 `Jobs done!, print 25 lines` · 실패 `Jobs failed.., print 25 lines`.
+ * 실행 중 `Jobs running.., print 3 lines`. 중단 · 시간 제한 · 막힘은 그 사유 한 줄.
+ */
 export function bashSummary(b: BashParsed, partial: boolean): { text: string; level: "success" | "error" | "text" | "warning" } {
-  const out = b.lines.length ? `출력 ${b.lines.length}줄` : "출력 없음";
-  if (partial) return { text: `실행 중 · ${out}`, level: "text" };
+  const n = b.lines.length;
+  const out = `print ${n} ${n === 1 ? "line" : "lines"}`;
+  if (partial) return { text: `Jobs running.., ${out}`, level: "text" };
   if (b.reason) return { text: b.reason, level: "error" };
-  if (b.exit !== 0) return { text: `종료 ${b.exit ?? "?"} · ${out}`, level: "error" };
-  return { text: `종료 0 · ${out}`, level: "success" };
+  if (b.exit !== 0) return { text: `Jobs failed.., ${out}`, level: "error" };
+  return { text: `Jobs done!, ${out}`, level: "success" };
 }
 
 /** `$ <명령 첫 줄>` 의 인자 부분. 여러 줄이면 ` …` */

@@ -1480,24 +1480,29 @@ test("oxygen-pi-tui 도구 줄: 첫 줄 · 요약 · 접힘 · bash 결과 읽�
     assert.ok(t.visibleWidth(cl) <= w && cl.replace(/\x1b\[[0-9;]*m/g, "").endsWith("1.2s "), `넘쳐도 시간은 남긴다: ${cl}`);
   }
   const body = Array.from({ length: 20 }, (_, i) => `줄 ${i + 1}`);
-  const head = Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "head", max: 15, unit: "개" }, false, "ctrl+o", p);
-  assert.deepEqual(head.map(plain), [" └ 요약", ...body.slice(0, 8).map((l) => `   ${l}`), "   … 12개 더 (ctrl+o 펼치기)"]);
-  const tail = Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "tail", max: 15, unit: "줄" }, true, "ctrl+o", p);
-  assert.deepEqual(tail.map(plain), [" └ 요약", "   … 앞 5줄 더", ...body.slice(-15).map((l) => `   ${l}`)], "로그는 뒤를 보이고, 펼쳐도 상한을 넘으면 앞을 줄인다");
-  assert.deepEqual(Fr.resultLines(m, g, 80, { summary: "s", body: ["a"], keep: "head", max: 5, unit: "개" }, false, "ctrl+o", p).map(plain), [" └ s", "   a"]);
+  // 처음엔 3줄, 넘치면 "...N more lines (Ctrl + O for opening, Ctrl + K to fold)" (사용자, 2026-11-13)
+  const head = Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "head", max: 15, unit: "line" }, false, { open: "ctrl+o", fold: "ctrl+k" }, p);
+  assert.deepEqual(head.map(plain), [" └ 요약", ...body.slice(0, 3).map((l) => `   ${l}`), "   ...17 more lines (Ctrl + O for opening, Ctrl + K to fold)"]);
+  const tail = Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "tail", max: 15, unit: "line" }, true, { open: "ctrl+o", fold: "ctrl+k" }, p);
+  assert.deepEqual(tail.map(plain), [" └ 요약", "   ...5 more lines", ...body.slice(-15).map((l) => `   ${l}`)], "로그는 뒤를 보이고, 펼쳐도 상한을 넘으면 앞을 줄인다");
+  assert.deepEqual(Fr.resultLines(m, g, 80, { summary: "s", body: ["a"], keep: "head", max: 5, unit: "line" }, false, { open: "ctrl+o", fold: "ctrl+k" }, p).map(plain), [" └ s", "   a"]);
+  assert.deepEqual(Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "tail", max: 15, unit: "line" }, false, { open: "ctrl+o", fold: "ctrl+k" }, p, true).map(plain), [" └ 요약"], "접음: 요약 줄만");
+  assert.equal(plain(Fr.resultLines(m, g, 80, { summary: "s", body: ["a", "b", "c", "d"], keep: "head", max: 9, unit: "file" }, false, { open: "ctrl+o", fold: "ctrl+k" }, p).at(-1)!), "   ...1 more file (Ctrl + O for opening, Ctrl + K to fold)", "1 이면 단수");
+  assert.deepEqual([Fr.keyLabel("ctrl+o"), Fr.keyLabel("ctrl+shift+e"), Fr.keyLabel("alt+enter")], ["Ctrl + O", "Ctrl + Shift + E", "Alt + Enter"]);
   // bash 결과 글 (pi 1.5.0 bash.js 형식)
   assert.deepEqual(B.parseBash("hello\nworld\n", false), { exit: 0, reason: undefined, lines: ["hello", "world"], truncated: undefined });
   assert.deepEqual(B.parseBash("(no output)", false).lines, []);
   const e1 = B.parseBash("oops\n\nCommand exited with code 2", true);
   assert.deepEqual([e1.exit, e1.lines], [2, ["oops"]]);
-  assert.deepEqual(B.bashSummary(e1, false), { text: "종료 2 · 출력 1줄", level: "error" });
-  assert.equal(B.parseBash("Command aborted", true).reason, "중단됨");
-  assert.equal(B.parseBash("partial\n\nCommand timed out after 30 seconds", true).reason, "30초 제한으로 멈춤");
+  assert.deepEqual(B.bashSummary(e1, false), { text: "Jobs failed.., print 1 line", level: "error" });
+  assert.equal(B.parseBash("Command aborted", true).reason, "Jobs aborted..");
+  assert.equal(B.parseBash("partial\n\nCommand timed out after 30 seconds", true).reason, "Jobs timed out after 30s..");
   assert.equal(B.parseBash("BLOCKED by oxy-bash-guard: npm install is not available offline\nmore", true).reason, "BLOCKED by oxy-bash-guard: npm install is not available offline");
   const tr = B.parseBash("29999\n30000\n\n[Showing lines 28001-30000 of 30000. Full output: C:/tmp/pi-bash-1.log]", false);
   assert.deepEqual([tr.lines, tr.truncated], [["29999", "30000"], { shown: "28001-30000", total: 30000, fullPath: "C:/tmp/pi-bash-1.log" }]);
-  assert.deepEqual(B.bashSummary(B.parseBash("", false), false), { text: "종료 0 · 출력 없음", level: "success" });
-  assert.deepEqual(B.bashSummary(B.parseBash("a\nb", false), true), { text: "실행 중 · 출력 2줄", level: "text" });
+  assert.deepEqual(B.bashSummary(B.parseBash("", false), false), { text: "Jobs done!, print 0 lines", level: "success" });
+  assert.deepEqual(B.bashSummary(B.parseBash(Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n"), false), false), { text: "Jobs done!, print 25 lines", level: "success" });
+  assert.deepEqual(B.bashSummary(B.parseBash("a\nb", false), true), { text: "Jobs running.., print 2 lines", level: "text" });
   assert.equal(B.commandHead("echo a\necho b"), "echo a …");
   assert.equal(B.commandHead("  ls -la  "), "ls -la");
   assert.equal(B.commandHead(`cd "C:/Users/kim/workspace/proj/agent/extensions" && fd -e ts`), "cd …/extensions && fd -e ts");
@@ -1556,14 +1561,14 @@ test("oxygen-pi-tui grep: 결과 글 읽기 · 파일별 묶음 · 강조 · 접
   assert.equal(G.grepArgs({ pattern: "a.b", literal: true, glob: "*.ts", context: 2, limit: 50 }, "src"), '"a.b" in src (*.ts) ±2 limit 50');
   assert.equal(G.grepArgs({ pattern: "x", ignoreCase: true }, "src"), "/x/i in src");
   // 접힘: 파일마다 한 줄, 오른쪽 끝에 결과 수 / 펼침: 줄 번호 │ 내용
-  const col = Fr.resultLines(m, g, 60, { summary: "s", body: G.grepCollapsed(m, r, p), keep: "head", max: 200, unit: "개 파일" }, false, "ctrl+o", p);
+  const col = Fr.resultLines(m, g, 60, { summary: "s", body: G.grepCollapsed(m, r, p), keep: "head", max: 200, unit: "file" }, false, { open: "ctrl+o", fold: "ctrl+k" }, p);
   assert.equal(col[1], "   oxy-flow/index.ts" + " ".repeat(60 - 3 - 17 - 1) + "2");
   for (const l of col) assert.ok(t.visibleWidth(l) <= 60);
   const exp = G.grepExpanded(m, r, null, g.vbar, p).map((l) => (typeof l === "function" ? l(77) : l));
   assert.deepEqual(exp.slice(0, 3), ["oxy-flow/index.ts", "  195 │   pi.registerTool({", "  218 │   pi.registerTool({"]);
   const many = { files: Array.from({ length: 11 }, (_, i) => ({ path: `f${i}.ts`, matches: 1, lines: [{ n: 1, text: "x", match: true }] })), matches: 11 };
-  const c11 = Fr.resultLines(m, g, 60, { summary: "s", body: G.grepCollapsed(m, many, p), keep: "head", max: 200, unit: "개 파일" }, false, "ctrl+o", p);
-  assert.equal(c11.at(-1), "   … 3개 파일 더 (ctrl+o 펼치기)");
+  const c11 = Fr.resultLines(m, g, 60, { summary: "s", body: G.grepCollapsed(m, many, p), keep: "head", max: 200, unit: "file" }, false, { open: "ctrl+o", fold: "ctrl+k" }, p);
+  assert.equal(c11.at(-1), "   ...8 more files (Ctrl + O for opening, Ctrl + K to fold)");
   const narrow = G.grepCollapsed(m, { files: [{ path: "agent/extensions/oxygen-pi-tui/tools/아주긴폴더이름/grep.ts", matches: 12, lines: [] }], matches: 12 }, p);
   const nl = (narrow[0] as (w: number) => string)(30);
   assert.ok(t.visibleWidth(nl) <= 30 && nl.includes("…") && nl.endsWith("12"), `좁으면 경로 가운데를 줄인다: ${nl}`);
@@ -1682,4 +1687,74 @@ test("oxygen-pi-tui background 도구 줄: 첫 줄 인자 · 결과 요약 (ui-u
   assert.deepEqual(v("output", "job-1 failed\nline a\nline b\n"), ["job-1 실패 · 출력 2줄", "error", ["line a", "line b"], "tail"]);
   assert.deepEqual(v("stop", "Stopped job-1."), ["job-1 중지함", "success", [], "head"]);
   assert.deepEqual(v("stop", "job-1 is not running (done)."), ["job-1: 실행 중이 아님 (끝남)", "warning", [], "head"]);
+});
+
+test("psmux 서버 · 세션 못 박기: $TMUX 의 서버 이름 · -t %N 에 세션 붙이기 · 기본 서버로 넘어간 대답은 버림 (_lib/psmux.ts)", async () => {
+  const M = await import("../agent/extensions/_lib/psmux.ts");
+  assert.equal(M.serverFromTmux("/tmp/psmux-12976/oxy,56571,0"), "oxy");
+  assert.equal(M.serverFromTmux("/tmp/psmux-1/default,1,0"), "default");
+  assert.equal(M.serverFromTmux(undefined), null);
+  assert.equal(M.serverFromTmux("garbage"), null);
+  const t = { server: "oxy", session: "oxy-app-1a2b" };
+  assert.deepEqual(M.pinArgs(["split-window", "-t", "%1", "-h", "-d", "-P", "-F", "#{pane_id}", "cmd"], t),
+    ["-L", "oxy", "split-window", "-t", "oxy-app-1a2b:.%1", "-h", "-d", "-P", "-F", "#{pane_id}", "cmd"]);
+  assert.deepEqual(M.pinArgs(["kill-pane", "-t", "%48"], t), ["-L", "oxy", "kill-pane", "-t", "oxy-app-1a2b:.%48"]);
+  assert.deepEqual(M.pinArgs(["-L", "x", "list-panes", "-t", "%1"], t), ["-L", "x", "list-panes", "-t", "oxy-app-1a2b:.%1"], "이미 -L 이 있으면 서버는 그대로");
+  assert.deepEqual(M.pinArgs(["set-option", "-p", "-t", "%3", "@oxy_monitor", "jobs"], t)[5], "oxy-app-1a2b:.%3");
+  // 세션 찾기: 런처가 넘긴 OXY_MUX_SESSION 이 먼저
+  const env = { TMUX: "/tmp/psmux-12976/oxy,56571,0", TMUX_PANE: "%1" };
+  const never = () => { throw new Error("psmux 를 부르지 않아야 함"); };
+  M.resetMuxCache();
+  assert.deepEqual(M.resolveMuxTarget("psmux.exe", { ...env, OXY_MUX_SESSION: "oxy-app-1a2b" }, never), t);
+  // 없으면 $TMUX 로 묻되, 기본 서버가 대답하면(넘어감) 버리고 다시 묻는다
+  M.resetMuxCache();
+  const answers = ["C:\\Users\\kim\\.psmux/default\tdecoy", "C:\\Users\\kim\\.psmux/oxy\toxy-app-1a2b"];
+  let calls = 0;
+  const spawn = (_exe: string, args: string[]) => { assert.ok(!args.includes("-L"), "세션은 $TMUX 로 묻는다"); return { status: 0, stdout: answers[calls++] + "\n" }; };
+  assert.deepEqual(M.resolveMuxTarget("psmux.exe", env, spawn), t);
+  assert.equal(calls, 2, "기본 서버의 대답(decoy)은 버렸다");
+  // 세 번 모두 기본 서버면 null (엉뚱한 세션에 열지 않는다)
+  M.resetMuxCache();
+  assert.equal(M.resolveMuxTarget("psmux.exe", env, () => ({ status: 0, stdout: "C:/x/.psmux/default\tdecoy" })), null);
+  assert.equal(M.resolveMuxTarget("psmux.exe", { TMUX_PANE: "%1" }, never), null, "psmux 밖");
+  M.resetMuxCache();
+});
+
+test("oxy-flow 작업 저장소: pi 를 다른 폴더(git 아님)에서 시작해도 실제로 고치는 저장소의 커밋을 노드로 (flow-spec 작업 저장소)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const S = await import("../agent/extensions/oxy-flow/store.ts");
+  const box = mkdtempSync(join(tmpdir(), "oxy-flow-work-"));
+  const g = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  try {
+    const start = join(box, "cozy-example"), app = join(box, "library-rental");
+    mkdirSync(start); mkdirSync(app);
+    g(app, "init", "-q"); g(app, "config", "user.email", "t@t"); g(app, "config", "user.name", "t");
+    writeFileSync(join(app, "pom.xml"), "<a/>\n"); g(app, "add", "."); g(app, "commit", "-qm", "init");
+    const e = new S.FileFlowEngine(start);
+    try {
+      assert.equal(e.load().baseCommit, null, "시작한 폴더는 git 저장소가 아니다");
+      assert.equal(S.repoOf(join(start, "x.txt")), null);
+      assert.ok(S.repoOf(join(app, "src", "new", "File.java"))?.toLowerCase().endsWith("library-rental"), "아직 없는 파일도 저장소를 찾는다");
+      // 다른 저장소의 파일을 고치면 작업 저장소가 그리로 옮겨 가고, 그때의 HEAD 부터 커밋을 찾는다
+      assert.equal(e.noteWorkPath(join(app, "pom.xml")), true);
+      assert.equal(e.noteWorkPath(join(app, "src", "A.java")), false, "같은 저장소면 그대로");
+      assert.ok(e.workRoot().toLowerCase().endsWith("library-rental"));
+      assert.equal(e.load().work?.baseCommit, g(app, "rev-parse", "HEAD"));
+      assert.deepEqual(e.syncCommits(false), [], "아직 새 커밋 없음");
+      writeFileSync(join(app, "pom.xml"), "<b/>\n"); g(app, "commit", "-qam", "feat: events");
+      const made = e.syncCommits(false);
+      assert.deepEqual(made.map((n) => [n.id, n.title, n.files]), [["n1", "feat: events", ["pom.xml"]]]);
+      assert.ok(made[0].repo?.toLowerCase().endsWith("library-rental"), "노드에 저장소를 남긴다");
+      assert.match(S.renderContext(e.load()), /Work repository: .*library-rental/);
+      // 기록은 pi 를 시작한 폴더에 남는다 (모니터는 그 폴더로 찾는다)
+      assert.ok(e.dir.replace(/\\/g, "/").includes("cozy-example/.oxy/flow"));
+    } finally { e.release(); }
+    // bash 의 cd · git -C 에서 폴더 찾기
+    assert.deepEqual(S.commandDirs("cd C:/w/library-rental && mvn -q verify"), ["C:/w/library-rental"]);
+    assert.deepEqual(S.commandDirs(`cd "/c/my dir/app" && git status; cd sub && ls`), ["/c/my dir/app", "sub"]);
+    assert.deepEqual(S.commandDirs("git -C ../lib commit -m x"), ["../lib"]);
+    assert.deepEqual(S.commandDirs("echo cd nope; abcd x; cd $HOME"), []);
+  } finally { rmSync(box, { recursive: true, force: true }); }
 });
