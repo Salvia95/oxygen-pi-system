@@ -403,24 +403,29 @@ test("oxy-monitor 화면: jobs · flow 가 좁은 폭(23칸)에서도 폭 · 줄
   check(flowView(fit, null, { sel: 0, open: new Set() }, 23, 8), 23, 8);
 });
 
-test("oxy-monitor 하단 바: 보일 항목 · 한 줄 · 클릭 범위 (monitor-spec §2)", async () => {
+test("oxy-monitor 하단 바: 보일 항목 · 상태 기호 · 한 줄 · 클릭 범위 (monitor-spec §2, ui-unify-spec §2.2)", async () => {
   const { barItems, barLine, itemAt } = await import("../agent/extensions/oxy-monitor/bar.ts");
   const none = new Set<string>();
   assert.deepEqual(barItems({ active: 0, recent: 0 }, { hasContent: false, done: 0, total: 0, node: "" }, none), []);   // 보일 것이 없으면 바도 없다
   const items = barItems({ active: 2, recent: 1 }, { hasContent: true, done: 3, total: 7, node: "n4" }, new Set(["flow"]));
-  assert.deepEqual(items.map((i) => [i.label, i.open]), [["jobs 2 실행 중 · 1 완료", false], ["flow 3/7", true]]);
-  assert.equal(barItems(null, { hasContent: true, done: 0, total: 0, node: "n4" }, none)[0].label, "flow n4");   // 계획이 없으면 마지막 단계
-  assert.equal(barItems({ active: 0, recent: 0 }, null, new Set(["jobs"]))[0].label, "jobs");                     // 열린 모니터는 닫을 수 있게 보인다
+  assert.deepEqual(items.map((i) => [i.label, i.open, i.state]), [["Jobs 2 실행 중 · 1 완료", false, "running"], ["Flow 3/7", true, "running"]]);
+  assert.deepEqual(barItems(null, { hasContent: true, done: 0, total: 0, node: "n4" }, none).map((i) => [i.label, i.state]), [["Flow n4", "idle"]]);   // 계획이 없으면 마지막 단계
+  assert.equal(barItems(null, { hasContent: true, done: 5, total: 5, node: "n9" }, none)[0].state, "ok");
+  assert.deepEqual(barItems({ active: 0, recent: 0 }, null, new Set(["jobs"])).map((i) => [i.label, i.state]), [["Jobs", "idle"]]);   // 열린 모니터는 닫을 수 있게 보인다
+  assert.equal(barItems({ active: 0, recent: 2, failed: 1 }, null, none)[0].state, "fail");
+  assert.equal(barItems({ active: 0, recent: 2 }, null, none)[0].state, "ok");
   const w = (s: string) => [...s].reduce((n, ch) => n + (/[가-힣]/.test(ch) ? 2 : 1), 0);
-  const st = { width: w, item: (s: string, o: boolean) => (o ? `<${s}>` : s), focus: (s: string) => `[${s}]`, hint: (s: string) => `{${s}}` };
+  const G = { running: "◐", ok: "✓", fail: "×", idle: "·" } as const;
+  const st = { width: w, glyph: (s: keyof typeof G) => G[s], item: (s: string, o: boolean) => (o ? `<${s}>` : s), focus: (s: string) => `[${s}]`, hint: (s: string) => `{${s}}` };
   const r = barLine(items, -1, 80, st);
-  assert.equal(r.line, "▸ jobs 2 실행 중 · 1 완료   <▸ flow 3/7>");
-  assert.deepEqual(r.ranges, [{ kind: "jobs", start: 0, end: 25 }, { kind: "flow", start: 28, end: 38 }]);
+  assert.equal(r.line, " ◐ Jobs 2 실행 중 · 1 완료   ◐ <Flow 3/7>");
+  assert.deepEqual(r.ranges, [{ kind: "jobs", start: 1, end: 26 }, { kind: "flow", start: 29, end: 39 }]);   // 왼쪽 여백 1칸
+  assert.equal(itemAt(r.ranges, 0), undefined);
   assert.equal(itemAt(r.ranges, 5), "jobs");
-  assert.equal(itemAt(r.ranges, 26), undefined);                        // 항목 사이
+  assert.equal(itemAt(r.ranges, 27), undefined);                        // 항목 사이
   assert.equal(itemAt(r.ranges, 30), "flow");
   const f = barLine(items, 1, 80, st);
-  assert.match(f.line, /\[▸ flow 3\/7\]    \{←→ 이동  Enter 열기·닫기  ↑ 입력창\}$/);   // 바에 들어오면 키 안내
+  assert.match(f.line, /\[◐ Flow 3\/7\]    \{←→ 이동  Enter 열기·닫기  ↑ 입력창\}$/);   // 바에 들어오면 키 안내
   assert.equal(barLine(items, 0, 30, st).ranges.length, 1);             // 좁으면 들어가는 항목까지만
 });
 
@@ -1234,7 +1239,7 @@ test("oxy-flow 걸린 시간: 시작 · 끝 시각 · 되돌림 · todo 에서 �
   assert.equal(itemDuration({ id: "p1", text: "x", status: "done", at: 1, nodes: [], children: [] }), null);
 });
 
-test("pi 테마: 번들의 테마 파일을 agent/themes 로 · settings 의 theme 기본값은 tokyo-night · 사용자가 고른 값은 둔다 · 모니터 팔레트 (flow-view-spec §4)", async () => {
+test("pi 테마: Oxygen 테마 파일을 agent/themes 로 · 기본값 oxygen · 예전 tokyo-night 는 oxygen 으로 · 사용자가 고른 값은 둔다 · 모니터 팔레트 (ui-unify-spec §2.0)", async () => {
   const { applyTheme } = await import("../scripts/render-config.mjs");
   const { monitorTheme } = await import("../agent/extensions/oxy-monitor/controller.ts");
   const { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } = await import("node:fs");
@@ -1242,18 +1247,32 @@ test("pi 테마: 번들의 테마 파일을 agent/themes 로 · settings 의 the
   const dir = mkdtempSync(join(tmpdir(), "oxy-theme-"));
   try {
     const root = join(dir, "root"), agent = join(dir, "agent");
-    mkdirSync(join(root, "vendor", "pi-themes"), { recursive: true }); mkdirSync(agent);
+    mkdirSync(join(root, "config", "pi-themes"), { recursive: true }); mkdirSync(join(agent, "themes"), { recursive: true });
     // 테마 파일이 없는 번들: theme 을 넣지 않는다
     assert.equal(applyTheme({ a: 1 }, agent, root).theme, undefined);
-    writeFileSync(join(root, "vendor", "pi-themes", "tokyo-night.json"), "{\"name\":\"tokyo-night\"}");
-    assert.deepEqual(applyTheme({ a: 1 }, agent, root), { a: 1, theme: "tokyo-night" });
-    assert.ok(existsSync(join(agent, "themes", "tokyo-night.json")));
+    writeFileSync(join(root, "config", "pi-themes", "oxygen.json"), "{\"name\":\"oxygen\"}");
+    assert.deepEqual(applyTheme({ a: 1 }, agent, root), { a: 1, theme: "oxygen" });
+    assert.ok(existsSync(join(agent, "themes", "oxygen.json")));
+    // 예전 기본값 tokyo-night 가 남은 설치본: oxygen 으로 바꾸고 테마 파일을 지운다
+    writeFileSync(join(agent, "settings.json"), JSON.stringify({ theme: "tokyo-night" }));
+    writeFileSync(join(agent, "themes", "tokyo-night.json"), "{}");
+    assert.equal(applyTheme({ a: 1 }, agent, root).theme, "oxygen");
+    assert.ok(!existsSync(join(agent, "themes", "tokyo-night.json")));
     // 사용자가 pi /settings 에서 고른 값은 다시 만들어도 둔다
     writeFileSync(join(agent, "settings.json"), JSON.stringify({ theme: "light/dark" }));
     assert.equal(applyTheme({ a: 1 }, agent, root).theme, "light/dark");
   } finally { rmSync(dir, { recursive: true, force: true }); }
-  assert.equal(monitorTheme(JSON.stringify({ theme: "tokyo-night" }), undefined), "tokyo-night");
-  assert.equal(monitorTheme(JSON.stringify({ theme: "dark" }), undefined), undefined);
+  // 저장소의 Oxygen 테마는 pi 의 테마 검증을 통과한다
+  const { pathToFileURL } = await import("node:url");
+  const td = join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "modes", "interactive", "theme");
+  const S: any = await import(pathToFileURL(join(td, "theme-schema.js")).href);
+  const T: any = await import(pathToFileURL(join(td, "theme.js")).href);
+  T.setThemeJsonValidator(S.validateThemeJson);
+  const th = T.loadThemeFromPath(join(import.meta.dirname, "..", "config", "pi-themes", "oxygen.json"), "truecolor");
+  assert.equal(th.fg("accent", "x"), "\x1b[38;2;127;184;214mx\x1b[39m", "accent 는 하늘색 (세이지가 아님)");
+  // 모니터 팔레트: 사용자가 정한 OXY_TUI_THEME 만, 그 밖에는 기본(세이지)
+  assert.equal(monitorTheme(JSON.stringify({ theme: "tokyo-night" }), undefined), undefined);
+  assert.equal(monitorTheme(JSON.stringify({ theme: "oxygen" }), undefined), undefined);
   assert.equal(monitorTheme(JSON.stringify({ theme: "tokyo-night" }), "light"), "light");       // 사용자가 정한 OXY_TUI_THEME 이 먼저
   assert.equal(monitorTheme(null, undefined), undefined);
 });
@@ -1314,4 +1333,353 @@ test("skill-library: 모든 SKILL.md 의 frontmatter 가 pi 의 파서로 읽히
     assert.equal(typeof frontmatter.description, "string", `${d}: description 있음`);
     assert.ok(frontmatter.description.trim().length > 0 && frontmatter.description.length <= 1024, `${d}: description 길이 ${frontmatter.description.length}`);
   }
+});
+
+test("oxygen-pi-tui 골격: 폭 단계 · 좌우 배치 · 가운데 말줄임 · 경로 (pi-tui-spec §2)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const L = await import("../agent/extensions/oxygen-pi-tui/layout.ts");
+  const m = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number, e = "…") => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, e)) };
+  assert.deepEqual([56, 63, 64, 80, 99, 100, 120].map(L.widthClass), ["narrow", "narrow", "normal", "normal", "normal", "wide", "wide"]);
+  for (const w of [10, 56, 80, 120]) {
+    const line = L.spread(m, " ◆ Oxygen Pi 0.1.0", "pi 1.5.0 · tokyo-night", w);
+    assert.equal(t.visibleWidth(line), w, `spread 폭 ${w}`);
+  }
+  assert.equal(L.spread(m, "왼쪽", "오른쪽", 20), "왼쪽" + " ".repeat(10) + "오른쪽");
+  const plain = (x: string) => x.replace(/\x1b\[[0-9;]*m/g, "");
+  assert.equal(plain(L.spread(m, "abcdefghij", "0123456789", 15)), "abcdefghij 012…");     // 오른쪽부터 줄인다
+  assert.equal(plain(L.spread(m, "abcdefghijklmnop", "xy", 12)), "abcdefghijk…");          // 오른쪽이 들어갈 자리가 없으면 빼고 왼쪽을 자른다
+  assert.equal(L.spread(m, "a", "b", 5, "─"), "a───b");
+  const p = "C:/Users/kim/workspace/한글폴더/src/db/schema.sql";
+  for (const w of [12, 20, 30]) {
+    const s = plain(L.middle(m, p, w));
+    assert.ok(t.visibleWidth(s) <= w && s.includes("…"), `middle ${w}: ${s}`);
+    assert.ok(s.startsWith("C:/") && s.endsWith(".sql"), s);
+  }
+  assert.equal(L.middle(m, "short", 10), "short");
+  assert.equal(L.homePath(String.raw`C:\Users\kim\OneDrive\x`, "C:/Users/kim"), "~/OneDrive/x");
+  assert.equal(L.homePath("c:/users/kim", String.raw`C:\Users\Kim`), "~");
+  assert.equal(L.homePath("D:/w", "C:/Users/kim"), "D:/w");
+  assert.equal(L.lastSegment("~/workspace/oxygen-pi-system"), "…/oxygen-pi-system");
+  assert.equal(L.lastSegment("~"), "~");
+});
+
+test("oxygen-pi-tui 골격: 기호 1칸 · ASCII 대체 · 시그니처 색 · 설정 (pi-tui-spec §2, oxygen-design)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const G = await import("../agent/extensions/oxygen-pi-tui/glyphs.ts");
+  const B = await import("../agent/extensions/oxygen-pi-tui/brand.ts");
+  const C = await import("../agent/extensions/oxygen-pi-tui/config.ts");
+  for (const mode of ["unicode", "ascii"] as const) {
+    const g = G.glyphs(mode) as any;
+    for (const [k, v] of Object.entries(g)) {
+      if (k === "more") continue;
+      for (const ch of Array.isArray(v) ? v : [v]) assert.equal(t.visibleWidth(ch), 1, `${mode}.${k} '${ch}' 는 1칸`);
+      if (mode === "ascii") for (const ch of Array.isArray(v) ? v : [v]) assert.match(ch, /^[\x20-\x7e]+$/, `ascii.${k}`);
+    }
+  }
+  const u = G.glyphs("unicode");
+  assert.ok(!u.spinner.some((f) => /[\u2800-\u28ff]/.test(f)), "점자 스피너는 D2Coding 에 없어 쓰지 않는다");
+  assert.deepEqual([0, 149, 150, 450, 600].map((ms) => G.spinnerFrame(u, ms)), ["◐", "◐", "◓", "◒", "◐"]);
+  // 시그니처 색: 규칙 파일의 값 그대로
+  assert.equal(B.brandFg("sage", "Oxygen", { mode: "truecolor", appearance: "dark" }), "\x1b[38;2;169;203;164mOxygen\x1b[39m");
+  assert.equal(B.brandFg("sage", "Oxygen", { mode: "truecolor", appearance: "light" }), "\x1b[38;2;58;102;82mOxygen\x1b[39m");
+  assert.equal(B.brandFg("purple", "Pi", { mode: "256color", appearance: "dark" }), "\x1b[38;5;140mPi\x1b[39m");
+  assert.equal(B.brandFg("sage", "x", { mode: "truecolor", appearance: "dark", noColor: true }), "x");
+  assert.deepEqual(B.brandEnv({ getColorMode: () => "truecolor", appearance: "light" }, {}), { mode: "truecolor", appearance: "light", noColor: false });
+  assert.deepEqual(B.brandEnv(undefined, { NO_COLOR: "1" }), { mode: "256color", appearance: "dark", noColor: true });
+  const rule = (await import("node:fs")).readFileSync(join(import.meta.dirname, "..", ".claude", "rules", "oxygen-design.md"), "utf8");
+  for (const [name, c] of Object.entries(B.BRAND)) {
+    assert.ok(rule.includes(`\`${c.dark}\``) && rule.includes(`\`${c.light}\``) && rule.includes(`${c.ansi256[0]} / ${c.ansi256[1]}`), `규칙 파일과 같은 값: ${name}`);
+  }
+  // 설정: 기본 켜짐, 깨진 파일은 기본값
+  assert.deepEqual(C.parseConfig(null), { enabled: true, glyphs: "unicode" });
+  assert.deepEqual(C.parseConfig("{broken"), { enabled: true, glyphs: "unicode" });
+  assert.deepEqual(C.parseConfig('{"enabled":false,"glyphs":"ascii"}'), { enabled: false, glyphs: "ascii" });
+  assert.deepEqual(C.parseConfig('{"enabled":"no","glyphs":"emoji"}'), { enabled: true, glyphs: "unicode" });
+});
+
+test("oxygen-pi-tui 입력창 · 푸터: 테두리 폭 · 글 줄이는 순서 · 컨텍스트 기준 · 상태 순서 (pi-tui-spec §5 §6)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const E = await import("../agent/extensions/oxygen-pi-tui/editor.ts");
+  const F = await import("../agent/extensions/oxygen-pi-tui/footer.ts");
+  const { glyphs } = await import("../agent/extensions/oxygen-pi-tui/glyphs.ts");
+  const m = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number, e = "…") => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, e)) };
+  const plain = (x: string) => x.replace(/\x1b\[[0-9;]*m/g, "");
+  const g = glyphs("unicode");
+  const id = (s: string) => s;
+  for (const w of [3, 10, 30, 56, 80, 120]) {
+    const top = E.borderLine(m, g, w, [g.tl, g.tr], "◓ 작업 중 12초", "vllm · qwen3.6-coder-30b · low", id);
+    assert.equal(t.visibleWidth(top), w, `윗줄 폭 ${w}: ${top}`);
+    const bot = E.borderLine(m, g, w, [g.bl, g.br], "", "ctx 23% · 29K/131K", id);
+    assert.equal(t.visibleWidth(bot), w, `아랫줄 폭 ${w}`);
+  }
+  assert.equal(E.borderLine(m, g, 30, [g.tl, g.tr], "입력", "a · b", id), "╭─ 입력 " + "─".repeat(13) + " a · b ─╮");
+  assert.equal(E.borderLine(m, g, 20, [g.bl, g.br], "", "", id), "╰" + "─".repeat(18) + "╯");
+  assert.equal(E.borderLine(m, g, 20, [g.bl, g.br], "\x1b[2m\x1b[22m", "", id), "╰" + "─".repeat(18) + "╯", "색 코드만 있는 글은 빈 글");
+  const narrow = plain(E.borderLine(m, g, 24, [g.tl, g.tr], "입력", "qwen3.6-coder-30b · low", id));
+  assert.match(narrow, /^╭─ 입력 ─* ?.*…/);                            // 오른쪽 글부터 줄인다, 왼쪽은 그대로
+  // 모델 · 사용량 글
+  assert.equal(E.modelLabel({ provider: "oxy-vllm", id: "qwen3-30b", thinking: "low" }, "normal"), "vllm · qwen3-30b · low");
+  assert.equal(E.modelLabel({ provider: "oxy-vllm", id: "qwen3-30b", thinking: "low" }, "narrow"), "qwen3-30b · low");
+  assert.equal(E.modelLabel({ provider: "oxy-anthropic-claude", id: "claude-haiku-5-5", thinking: "high", reasoning: false }, "wide"), "anthropic-claude · claude-haiku-5-5");
+  assert.deepEqual([0, 49.9, 50, 84.9, 85, 100, null].map(E.usageLevel), ["normal", "normal", "warning", "warning", "error", "error", "normal"]);
+  assert.equal(E.usageLabel({ tokens: 29_400, contextWindow: 131_072, percent: 22.6 }, "normal"), "ctx 23% · 29K/131K");
+  assert.equal(E.usageLabel({ tokens: 29_400, contextWindow: 131_072, percent: 22.6, cost: 0.0123 }, "wide"), "ctx 23% · 29K/131K · $0.012");
+  assert.equal(E.usageLabel({ tokens: 29_400, contextWindow: 131_072, percent: 22.6, cost: 0.5 }, "narrow"), "ctx 23%");
+  assert.equal(E.usageLabel({ tokens: 850, contextWindow: 8000, percent: 10 }, "normal"), "ctx 10% · 850/8K");
+  assert.equal(E.usageLabel({ percent: null }, "normal"), "ctx ?");
+  assert.equal(E.topLeftLabel(null, 0), "입력");
+  assert.equal(E.topLeftLabel({ frame: "◑", seconds: 12 }, 0), "◑ 작업 중 12초");
+  assert.equal(E.topLeftLabel(null, 3), "입력 · ▲ 3줄 더");
+  assert.equal(E.bottomLeftLabel(0), "");
+  assert.equal(E.bottomLeftLabel(2), "▼ 2줄 더");
+  assert.equal(E.withPrompt("   다음 할 일   ", "›"), " › 다음 할 일   ");
+  assert.equal(E.withPrompt("x", "›"), "x");
+  assert.equal(t.visibleWidth("▲") + t.visibleWidth("▼"), 2, "스크롤 표시는 1칸 기호 (↑↓ 는 mintty 에서 2칸)");
+  // 푸터 상태: oxy-ctx 는 빼고 flow → jobs → 나머지 이름순, psmux 하단 바가 있으면 flow · jobs 도 뺀다
+  const st = new Map([["zeta", "z 상태"], ["oxy-jobs", "작업 1개 실행 중"], ["oxy-ctx", "ctx 23%"], ["oxy-flow", "flow n4 · 할 일 2/5"], ["alpha", "a"], ["empty", " "]]);
+  assert.deepEqual(F.footerStatuses(st, false), ["flow n4 · 할 일 2/5", "작업 1개 실행 중", "a", "z 상태"]);
+  assert.deepEqual(F.footerStatuses(st, true), ["a", "z 상태"]);
+  const p = { muted: id, accent: id, sep: "·" };
+  const cwd = "~/workspace/oxygen-pi-system";
+  const s2 = ["flow n4 · 할 일 2/5", "작업 1개 실행 중"];
+  for (const w of [12, 30, 56, 80, 120]) assert.ok(t.visibleWidth(F.footerLine(m, w, cwd, "main", s2, p)) <= w, `푸터 폭 ${w}`);
+  const f80 = F.footerLine(m, 80, cwd, "main", s2, p);
+  assert.ok(f80.startsWith(` ${cwd}  main`) && f80.endsWith("작업 1개 실행 중") && t.visibleWidth(f80) === 80, f80);
+  const f56 = plain(F.footerLine(m, 56, cwd, "main", s2, p));
+  assert.equal(f56, " …/oxygen-pi-system  main  flow n4 · 할 일 2/5  ·  작업…", "56칸: 폴더를 먼저 줄인 뒤 상태를 뒤에서부터 자른다");
+  const f40 = plain(F.footerLine(m, 40, cwd, "main", s2, p));
+  assert.ok(f40.startsWith(" …/oxygen-pi-system  main") && f40.endsWith("…") && t.visibleWidth(f40) <= 40, `40칸: 그다음 상태를 자른다: ${f40}`);
+  const longCwd = "C:/Users/Public/Documents/SomeVendor/CreatorTemp/tmp.BCZef74wW5/work";
+  assert.ok(plain(F.footerLine(m, 80, longCwd, "main", ["jobs 1 · agents 0/2"], p)).endsWith("jobs 1 · agents 0/2"), "긴 폴더 때문에 상태가 사라지지 않는다 (2026-11-13 실측)");
+  const f30 = plain(F.footerLine(m, 30, cwd, "main", s2, p));
+  assert.equal(f30, " …/oxygen-pi-system  main", "좁으면 상태를 빼고 폴더를 마지막 단계로, 브랜치는 남긴다");
+  assert.equal(F.footerLine(m, 80, cwd, undefined, [], p), ` ${cwd}`);
+});
+
+test("oxygen-pi-tui 도구 줄: 첫 줄 · 요약 · 접힘 · bash 결과 읽기 (pi-tui-spec §4 §7.4)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const Fr = await import("../agent/extensions/oxygen-pi-tui/tools/frame.ts");
+  const B = await import("../agent/extensions/oxygen-pi-tui/tools/basic.ts");
+  const { glyphs } = await import("../agent/extensions/oxygen-pi-tui/glyphs.ts");
+  const m = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number, e = "…") => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, e)) };
+  const plain = (x: string) => x.replace(/\x1b\[[0-9;]*m/g, "");
+  const p = { fg: (_k: string, s: string) => s, bold: (s: string) => s };
+  const g = glyphs("unicode");
+  assert.deepEqual([undefined, 400, 12_430, 63_000].map(Fr.fmtDuration), ["", "0.4s", "12.4s", "1m 3s"]);
+  const c80 = Fr.callLine(m, g, 80, { status: "ok", title: "grep", args: "/registerTool/ in agent/extensions", durationMs: 200 }, p);
+  assert.equal(t.visibleWidth(c80), 80);
+  assert.match(c80, /^ ✓ grep \/registerTool\/ in agent\/extensions +0\.2s $/);
+  assert.match(Fr.callLine(m, g, 80, { status: "running", title: "$", args: "sleep 12", durationMs: 5 }, p), /^ ○ \$ sleep 12 *$/, "실행 중에는 시간을 보이지 않는다");
+  assert.match(Fr.callLine(m, g, 80, { status: "fail", title: "$", args: "false", durationMs: 30 }, p), /^ × \$ false/);
+  for (const w of [20, 56]) {
+    const cl = Fr.callLine(m, g, w, { status: "ok", title: "$", args: "echo 아주 긴 한글 명령 ".repeat(5), durationMs: 1234 }, p);
+    assert.ok(t.visibleWidth(cl) <= w && cl.replace(/\x1b\[[0-9;]*m/g, "").endsWith("1.2s "), `넘쳐도 시간은 남긴다: ${cl}`);
+  }
+  const body = Array.from({ length: 20 }, (_, i) => `줄 ${i + 1}`);
+  const head = Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "head", max: 15, unit: "개" }, false, "ctrl+o", p);
+  assert.deepEqual(head.map(plain), [" └ 요약", ...body.slice(0, 8).map((l) => `   ${l}`), "   … 12개 더 (ctrl+o 펼치기)"]);
+  const tail = Fr.resultLines(m, g, 80, { summary: "요약", body, keep: "tail", max: 15, unit: "줄" }, true, "ctrl+o", p);
+  assert.deepEqual(tail.map(plain), [" └ 요약", "   … 앞 5줄 더", ...body.slice(-15).map((l) => `   ${l}`)], "로그는 뒤를 보이고, 펼쳐도 상한을 넘으면 앞을 줄인다");
+  assert.deepEqual(Fr.resultLines(m, g, 80, { summary: "s", body: ["a"], keep: "head", max: 5, unit: "개" }, false, "ctrl+o", p).map(plain), [" └ s", "   a"]);
+  // bash 결과 글 (pi 1.5.0 bash.js 형식)
+  assert.deepEqual(B.parseBash("hello\nworld\n", false), { exit: 0, reason: undefined, lines: ["hello", "world"], truncated: undefined });
+  assert.deepEqual(B.parseBash("(no output)", false).lines, []);
+  const e1 = B.parseBash("oops\n\nCommand exited with code 2", true);
+  assert.deepEqual([e1.exit, e1.lines], [2, ["oops"]]);
+  assert.deepEqual(B.bashSummary(e1, false), { text: "종료 2 · 출력 1줄", level: "error" });
+  assert.equal(B.parseBash("Command aborted", true).reason, "중단됨");
+  assert.equal(B.parseBash("partial\n\nCommand timed out after 30 seconds", true).reason, "30초 제한으로 멈춤");
+  assert.equal(B.parseBash("BLOCKED by oxy-bash-guard: npm install is not available offline\nmore", true).reason, "BLOCKED by oxy-bash-guard: npm install is not available offline");
+  const tr = B.parseBash("29999\n30000\n\n[Showing lines 28001-30000 of 30000. Full output: C:/tmp/pi-bash-1.log]", false);
+  assert.deepEqual([tr.lines, tr.truncated], [["29999", "30000"], { shown: "28001-30000", total: 30000, fullPath: "C:/tmp/pi-bash-1.log" }]);
+  assert.deepEqual(B.bashSummary(B.parseBash("", false), false), { text: "종료 0 · 출력 없음", level: "success" });
+  assert.deepEqual(B.bashSummary(B.parseBash("a\nb", false), true), { text: "실행 중 · 출력 2줄", level: "text" });
+  assert.equal(B.commandHead("echo a\necho b"), "echo a …");
+  assert.equal(B.commandHead("  ls -la  "), "ls -la");
+  assert.equal(B.commandHead(`cd "C:/Users/kim/workspace/proj/agent/extensions" && fd -e ts`), "cd …/extensions && fd -e ts");
+  assert.equal(B.commandHead("cd src && rg -n x"), "cd src && rg -n x", "짧은 경로는 그대로");
+  // read · edit · write
+  assert.equal(B.readRange(undefined, undefined), "");
+  assert.equal(B.readRange(10, 5), ":10-14");
+  assert.equal(B.readRange(10, undefined), ":10-");
+  assert.equal(B.readRange(undefined, 20), ":1-20");
+  assert.equal(B.relPath(String.raw`C:\w\proj\src\a.ts`, "C:/w/proj"), "src/a.ts");
+  assert.equal(B.relPath("@src/a.ts", "C:/w/proj"), "src/a.ts");
+  assert.equal(B.relPath("D:/other/a.ts", "C:/w/proj", "C:/Users/kim"), "D:/other/a.ts");
+  assert.equal(B.relPath("C:/Users/kim/ws/agent", "C:/w/proj", "C:/Users/kim"), "~/ws/agent", "작업 폴더 밖은 홈을 ~ 로");
+  assert.deepEqual([B.lineCount(""), B.lineCount("a\nb\n"), B.lineCount("a\r\nb")], [0, 2, 2]);
+  assert.deepEqual(B.diffStats("--- a\n+++ b\n@@\n-x\n+y\n+z\n ctx"), { added: 2, removed: 1 });
+  assert.deepEqual(B.errorLines("Could not edit file: a.ts. not found.\n\ndetail"), { first: "Could not edit file: a.ts. not found.", rest: ["", "detail"] });
+  assert.equal(B.textOf([{ type: "text", text: "a" }, { type: "image" }, { type: "text", text: "b" }]), "a\nb");
+});
+
+test("oxygen-pi-tui grep: 결과 글 읽기 · 파일별 묶음 · 강조 · 접힘/펼침 (pi-tui-spec §7.1)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const G = await import("../agent/extensions/oxygen-pi-tui/tools/grep.ts");
+  const Fr = await import("../agent/extensions/oxygen-pi-tui/tools/frame.ts");
+  const { glyphs } = await import("../agent/extensions/oxygen-pi-tui/glyphs.ts");
+  const m = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number, e = "…") => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, e)) };
+  const p = { fg: (_k: string, s: string) => s, bold: (s: string) => s };
+  const g = glyphs("unicode");
+  assert.deepEqual(G.parseGrep("No matches found"), { files: [], matches: 0 });
+  const out = [
+    "oxy-flow/index.ts:195:   pi.registerTool({",
+    "oxy-flow/index.ts:218:   pi.registerTool({",
+    "oxy-jobs/index.ts:189:   pi.registerTool({ // 한글 주석",
+    "oxy-monitor/v2-1/a.ts:7: registerTool",
+  ].join("\n") + "\n\n[100 matches limit reached. Use limit=200 for more, or refine pattern]";
+  const r = G.parseGrep(out)!;
+  assert.deepEqual(r.files.map((f) => [f.path, f.matches]), [["oxy-flow/index.ts", 2], ["oxy-jobs/index.ts", 1], ["oxy-monitor/v2-1/a.ts", 1]]);
+  assert.equal(r.matches, 4);
+  assert.equal(r.files[2].lines[0].text, "registerTool", "경로 안의 -숫자- 를 줄 번호로 오해하지 않는다");
+  assert.deepEqual(G.grepSummary(r, { matchLimitReached: 100 }), { text: "3개 파일에서 4개 결과", warn: "결과 100개에서 멈춤" });
+  assert.deepEqual(G.grepSummary({ files: [], matches: 0 }, undefined), { text: "결과 없음", warn: "" });
+  assert.equal(G.grepSummary(r, { linesTruncated: true, truncation: { truncated: true } }).warn, "크기 제한으로 잘림 · 일부 줄 잘림");
+  // 문맥 줄: 겹친 블록의 같은 줄은 한 번, 일치가 이긴다
+  const ctx = G.parseGrep(["a.ts-9- x", "a.ts:10: hit", "a.ts-11- y", "a.ts-10- hit", "a.ts:11: y", "a.ts-12- z"].join("\n"))!;
+  assert.deepEqual(ctx.files[0].lines.map((l) => [l.n, l.match]), [[9, false], [10, true], [11, true], [12, false]]);
+  assert.equal(ctx.matches, 2);
+  assert.equal(G.parseGrep("이상한 모양의 글"), null, "모르는 모양이면 pi 기본 그리기로");
+  // 강조
+  const mark = (s: string) => `[${s}]`;
+  assert.equal(G.highlight("a registerTool b registerTool", G.matcher("registerTool", {}), mark), "a [registerTool] b [registerTool]");
+  assert.equal(G.highlight("A.B", G.matcher("a.b", { literal: true, ignoreCase: true }), mark), "[A.B]");
+  assert.equal(G.matcher("(unclosed", {}), null);
+  assert.equal(G.highlight("x", G.matcher("y*", {}), mark), "x", "빈 일치는 건너뛴다");
+  // 첫 줄 인자
+  assert.equal(G.grepArgs({ pattern: "registerTool" }, ""), "/registerTool/ in .");
+  assert.equal(G.grepArgs({ pattern: "a.b", literal: true, glob: "*.ts", context: 2, limit: 50 }, "src"), '"a.b" in src (*.ts) ±2 limit 50');
+  assert.equal(G.grepArgs({ pattern: "x", ignoreCase: true }, "src"), "/x/i in src");
+  // 접힘: 파일마다 한 줄, 오른쪽 끝에 결과 수 / 펼침: 줄 번호 │ 내용
+  const col = Fr.resultLines(m, g, 60, { summary: "s", body: G.grepCollapsed(m, r, p), keep: "head", max: 200, unit: "개 파일" }, false, "ctrl+o", p);
+  assert.equal(col[1], "   oxy-flow/index.ts" + " ".repeat(60 - 3 - 17 - 1) + "2");
+  for (const l of col) assert.ok(t.visibleWidth(l) <= 60);
+  const exp = G.grepExpanded(m, r, null, g.vbar, p).map((l) => (typeof l === "function" ? l(77) : l));
+  assert.deepEqual(exp.slice(0, 3), ["oxy-flow/index.ts", "  195 │   pi.registerTool({", "  218 │   pi.registerTool({"]);
+  const many = { files: Array.from({ length: 11 }, (_, i) => ({ path: `f${i}.ts`, matches: 1, lines: [{ n: 1, text: "x", match: true }] })), matches: 11 };
+  const c11 = Fr.resultLines(m, g, 60, { summary: "s", body: G.grepCollapsed(m, many, p), keep: "head", max: 200, unit: "개 파일" }, false, "ctrl+o", p);
+  assert.equal(c11.at(-1), "   … 3개 파일 더 (ctrl+o 펼치기)");
+  const narrow = G.grepCollapsed(m, { files: [{ path: "agent/extensions/oxygen-pi-tui/tools/아주긴폴더이름/grep.ts", matches: 12, lines: [] }], matches: 12 }, p);
+  const nl = (narrow[0] as (w: number) => string)(30);
+  assert.ok(t.visibleWidth(nl) <= 30 && nl.includes("…") && nl.endsWith("12"), `좁으면 경로 가운데를 줄인다: ${nl}`);
+});
+
+test("oxygen-pi-tui bash 안의 fd · rg: 명령 알아보기 · 폴더별 묶음 · rg 출력 읽기 (pi-tui-spec §7.2 §7.3)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const S = await import("../agent/extensions/oxygen-pi-tui/tools/search.ts");
+  const B = await import("../agent/extensions/oxygen-pi-tui/tools/basic.ts");
+  const m = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number, e = "…") => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, e)) };
+  const p = { fg: (_k: string, s: string) => s, bold: (s: string) => s };
+  const kinds: [string, any][] = [
+    ["fd -e sql", { tool: "fd" }],
+    ["cd src && fd Controller", { tool: "fd" }],
+    ['cd "my dir" && cd x && fd -t f . 2>/dev/null', { tool: "fd" }],
+    ["rg -n registerTool agent", { tool: "rg", mode: "lines" }],
+    ["rg -il todo", { tool: "rg", mode: "paths" }],
+    ["rg --files src", { tool: "rg", mode: "paths" }],
+    ["rg -c foo", { tool: "rg", mode: "count" }],
+    ["rg --count-matches foo", { tool: "rg", mode: "count" }],
+    ["rg --json foo", null],
+    ["fd -e ts | wc -l", null],
+    ["fd x; echo done", null],
+    ["fd x > out.txt", null],
+    ["ls && fd x", null],
+    ["echo $(fd x)", null],
+    ["fd a\nfd b", null],
+    ["grep -rn x .", null],
+    ["fdisk -l", null],
+  ];
+  for (const [cmd, want] of kinds) assert.deepEqual(S.searchCommand(cmd), want, cmd);
+  // fd: 바로 위 폴더별, 처음 나온 순서
+  const fd = S.groupPaths(["src/db/001_init.sql", "src/report/r.sql", "src/db/002_users.sql", "top.sql", "./src/db/003.sql", "src/db/sub/", ""]);
+  assert.deepEqual(fd.groups.map((g) => [g.dir, g.names.length]), [["src/db/", 4], ["src/report/", 1], ["./", 1]]);
+  assert.deepEqual([fd.files, fd.dirs], [5, 1]);
+  assert.equal(S.pathsSummary(fd), "폴더 3개에 파일 5개");
+  assert.equal(S.pathsSummary(S.groupPaths([])), "찾은 파일 없음");
+  assert.equal(S.pathsSummary(S.groupPaths(["a/", "b/"])), "폴더 2개");
+  const col = S.pathsCollapsed(m, fd, p).map((f) => (f as (w: number) => string)(40));
+  assert.equal(col[0], "src/db/" + " ".repeat(40 - 7 - 1) + "4");
+  const exp = S.pathsExpanded(m, fd, p)(40);
+  assert.equal(exp[0], "src/db/");
+  assert.ok(exp[1].startsWith("  001_init.sql") && exp.every((l) => t.visibleWidth(l) <= 40), JSON.stringify(exp));
+  assert.ok(S.pathsExpanded(m, fd, p)(20).length > exp.length, "좁으면 이름 줄이 늘어난다");
+  // rg 출력
+  const rl = S.parseRgLines(["a/oxy-flow/index.ts:195:  pi.registerTool({", "a/oxy-flow/index.ts-196-  name: x", "--", "b.ts:3:x"])!;
+  assert.deepEqual(rl.files.map((f) => [f.path, f.matches, f.lines.map((l) => [l.n, l.match])]), [["a/oxy-flow/index.ts", 1, [[195, true], [196, false]]], ["b.ts", 1, [[3, true]]]]);
+  const rn = S.parseRgLines(["a.ts:const x = {a:1}", "C:/w/b.ts:y"])!;
+  assert.deepEqual(rn.files.map((f) => [f.path, f.lines[0].n, f.lines[0].text]), [["a.ts", 0, "const x = {a:1}"], ["C:/w/b.ts", 0, "y"]]);
+  assert.deepEqual(S.parseRgCount(["a.ts:2", "b/c.ts:10"])!.matches, 12);
+  assert.equal(S.parseRgCount(["a.ts"]), null);
+  // bash 결과 → 보기. rg 가 결과 없이 1로 끝나면 실패가 아니다
+  const none = S.searchView(m, { tool: "rg", mode: "lines" }, B.parseBash("Command exited with code 1", true), false, p)!;
+  assert.deepEqual([none.view.summary, none.ok], ["결과 없음", true]);
+  assert.equal(S.searchView(m, { tool: "rg", mode: "lines" }, B.parseBash("regex parse error\n\nCommand exited with code 2", true), false, p), null, "rg 오류(2)는 일반 bash 그리기");
+  assert.equal(S.searchView(m, { tool: "fd" }, B.parseBash("Command aborted", true), false, p), null);
+  const fv = S.searchView(m, { tool: "fd" }, B.parseBash("src/a.ts\nsrc/b.ts\nlib/c.ts\n", false), false, p)!;
+  assert.equal(fv.view.summary, "폴더 2개에 파일 3개");
+  const cv = S.searchView(m, { tool: "rg", mode: "count" }, B.parseBash("a.ts:2\nb.ts:5", false), false, p)!;
+  assert.equal(cv.view.summary, "2개 파일에서 7개 결과");
+  assert.equal(S.searchView(m, { tool: "rg", mode: "lines" }, B.parseBash("이상한 줄", false), false, p), null, "읽을 수 없는 출력은 일반 bash 그리기");
+});
+
+test("oxygen-pi-tui 헤더 = 웰컴 카드: 폭 · 배너 · 부제 글자 두 줄 · 저장소 주소 · 푸터와 겹치는 것 없음 (pi-tui-spec §3)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const t: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const H = await import("../agent/extensions/oxygen-pi-tui/header.ts");
+  const { glyphs } = await import("../agent/extensions/oxygen-pi-tui/glyphs.ts");
+  const { widthClass } = await import("../agent/extensions/oxygen-pi-tui/layout.ts");
+  const m = { width: (s: string) => t.visibleWidth(s), trunc: (s: string, w: number, e = "…") => (t.visibleWidth(s) <= w ? s : t.truncateToWidth(s, w, e)) };
+  const plain = (x: string) => x.replace(/\x1b\[[0-9;]*m/g, "");
+  const id = (s: string) => s;
+  const env = { mode: "truecolor" as const, appearance: "dark" as const };
+  const p = { brand: id, pi: id, frame: id, text: id, muted: id, accent: id, sub: (s: string) => `<${s}>`, env };
+  const h = { version: "0.1.0" };
+  const g = glyphs("unicode");
+  // 배너: banner.rs 의 큰 배너와 같은 글자 (앞 여백 2칸 뺀 57칸, 6줄)
+  const banner = H.bannerLines({ ...env, noColor: true });
+  assert.equal(banner.length, 6);
+  for (const l of banner) assert.equal(t.visibleWidth(l), H.BANNER_WIDTH);
+  assert.ok(banner[0].startsWith(" ██████╗ ▀▀▄    ") && banner[0].endsWith("██████╗ ██╗") && banner[5].endsWith("╚═╝     ╚═╝"), `배너 글자: ${banner.join(" / ")}`);
+  assert.deepEqual(H.SUBTITLE, ["Lite Weight Coding Agent", "For Closed Network"]);
+  assert.equal(H.REPO_URL, "https://github.com/Salvia95/oxygen-pi-system");
+  for (const w of [30, 40, 56, 63, 64, 80, 99, 100, 120, 160]) {
+    const ls = H.headerLines(m, g, w, widthClass(w), h, p);
+    for (const l of ls) assert.equal(t.visibleWidth(l), w, `카드 폭 ${w}: ${plain(l)}`);
+    const all = ls.map(plain).join("\n");
+    assert.ok(plain(ls[0]).startsWith("╭─ ◆ Oxygen Pi 0.1.0 ") && plain(ls.at(-1)!).startsWith("╰"), `테두리 ${w}`);
+    assert.equal(all.includes("██████"), w >= 64, `배너는 64칸부터 ${w}`);
+    assert.ok(all.includes("<Lite Weight Coding Agent>") && all.includes("<For Closed Network>"), `부제 두 줄은 같은 색 ${w}`);
+    if (w >= 48) assert.ok(all.includes(H.REPO_URL), `저장소 주소 ${w}`);
+    assert.ok(!/[┬┴]/.test(all), `오른쪽 열은 두지 않는다 ${w}`);
+    assert.ok(!all.includes("무엇을 도와드릴까요") && !all.includes("/jobs"), `안내 · 명령은 넣지 않는다 ${w}`);
+  }
+  // 80×24: 13줄 (테두리 2 + 배너 6 + 빈 줄 + 부제 2 + 빈 줄 + 저장소)
+  assert.equal(H.headerLines(m, g, 80, "normal", h, p).length, 13);
+  assert.equal(H.headerLines(m, g, 56, "narrow", h, p).length, 6, "좁으면 배너 없이 부제 · 저장소");
+  assert.deepEqual(Object.keys(h), ["version"], "모델 · 폴더 · 브랜치는 받지 않는다 (푸터 · 입력창 테두리와 겹침)");
+  assert.deepEqual(H.headerLines(m, g, 29, "narrow", h, p), [], "너무 좁으면 그리지 않는다");
+  for (const l of H.headerLines(m, glyphs("ascii"), 120, "wide", h, p)) assert.equal(t.visibleWidth(l), 120);
+});
+
+test("oxygen-pi-tui background 도구 줄: 첫 줄 인자 · 결과 요약 (ui-unify-spec §2.5)", async () => {
+  const J = await import("../agent/extensions/oxygen-pi-tui/tools/jobs.ts");
+  assert.equal(J.backgroundArgs({ action: "start", command: "npm run build\nnpm test" }), "start npm run build …");
+  assert.equal(J.backgroundArgs({ action: "status" }), "status");
+  assert.equal(J.backgroundArgs({ action: "output", id: "job-2" }), "output job-2");
+  assert.equal(J.backgroundArgs({ action: "stop", id: "job-2" }), "stop job-2");
+  const v = (a: string, t: string) => { const x = J.backgroundView(a, t); return [x.summary, x.level, x.body, x.keep]; };
+  assert.deepEqual(v("start", "Started job-1: sleep 60\nYou will get a message when it finishes. Do not poll; continue with other work or end your turn."),
+    ["job-1 시작 · 끝나면 알림", "success", [], "head"]);
+  assert.deepEqual(v("status", "No jobs."), ["작업 없음", "text", [], "head"]);
+  assert.deepEqual(v("status", "job-1 bash running 0:41 npm run build\njob-2 agent done exit=0 2:12 scout: 찾기"),
+    ["작업 2개 · 1개 실행 중", "text", ["job-1 bash 실행 중 0:41 npm run build", "job-2 agent 끝남 exit=0 2:12 scout: 찾기"], "head"]);
+  assert.deepEqual(v("output", "job-1 failed\nline a\nline b\n"), ["job-1 실패 · 출력 2줄", "error", ["line a", "line b"], "tail"]);
+  assert.deepEqual(v("stop", "Stopped job-1."), ["job-1 중지함", "success", [], "head"]);
+  assert.deepEqual(v("stop", "job-1 is not running (done)."), ["job-1: 실행 중이 아님 (끝남)", "warning", [], "head"]);
 });

@@ -98,7 +98,9 @@ export default async function (pi: ExtensionAPI) {
       const now = Date.now();
       const list = mgr.list();
       return { active: list.filter((j) => j.state === "running" || j.state === "queued").length,
-        recent: list.filter((j) => j.state !== "running" && j.state !== "queued" && j.endedAt && now - j.endedAt < 120000).length };
+        recent: list.filter((j) => j.state !== "running" && j.state !== "queued" && j.endedAt && now - j.endedAt < 120000).length,
+        // 하단 바의 × (docs/ui-unify-spec.md §2.2): 최근 2분 안에 끝난 것 가운데 실패
+        failed: list.filter((j) => j.state === "failed" && j.endedAt && now - j.endedAt < 120000).length };
     },
     onChange: (fn: () => void) => mgr.onChange(fn),
     /** 이 실행의 폴더 (state.json · logs/ · oxy-monitor 의 live.json) */

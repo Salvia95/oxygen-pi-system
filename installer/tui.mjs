@@ -3,7 +3,7 @@
 //               여기서는 "이 목록을 보여 줘" 식의 지시를 이름 있는 파이프로 보낸 뒤 결과를 받는다 (규약: installer/oxy-tui/src/protocol.rs)
 //   줄 입력 모드 그 밖의 경우(파이프 입력, TERM=dumb, exe 없음, OXY_TUI=line). 번호를 입력받는다. 회귀 테스트가 이 모드로 돈다
 // 두 모드에서 같은 결정을 모두 내릴 수 있다. 문구 규칙은 docs/tui-spec.md.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import net from "node:net";
@@ -213,6 +213,12 @@ const EXE = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "oxy-tui.
 const RESTORE = "\x1b[?25h\x1b[?1049l";
 
 /**
+ * `oxy-tui --version` 출력으로 exe 가 작업 줄의 `warn` 상태(노란 `!`)를 그리는지 판단한다.
+ * 예전 exe 는 `task-warn` 낱말이 없다 (oxy-monitor 의 `supportsMonitor` 가 `monitor` 낱말을 보는 것과 같은 방식)
+ */
+export const supportsTaskWarn = (versionOutput) => /^oxy-tui \S+ .*\btask-warn\b/m.test(String(versionOutput ?? ""));
+
+/**
  * oxy-tui.exe 를 실행하고 파이프로 지시를 보낸다. exe 는 같은 이름에 두 번 접속한다 (지시용 · 결과용).
  * 지시용 연결이 붙기 전에 보낸 지시는 모아 두었다가 순서대로 보낸다.
  */
@@ -269,7 +275,7 @@ export class UI {
    * input/output/tty/remote/exe 는 테스트에서만 넣는다.
    * remote: 가짜 연결 { send(지시), onMessage(결과를 넣어 주는 함수가 여기에 꽂힌다) } — exe 없이 원격 모드를 테스트한다
    */
-  constructor({ input = process.stdin, output = process.stdout, tty, remote, exe = EXE } = {}) {
+  constructor({ input = process.stdin, output = process.stdout, tty, remote, exe = EXE, warnState } = {}) {
     this.in = input;
     this.out = output;
     this.tty = tty ?? Boolean(input.isTTY && output.isTTY && process.env.TERM !== "dumb");
@@ -280,6 +286,8 @@ export class UI {
     this.fallbackNote = this.tty && this.mode === "line" && !forcedLine ? "화면 프로그램(bin\\oxy-tui.exe)이 없어 줄 입력 모드로 진행합니다. 번호를 입력하세요." : "";
     colorOn = this.mode === "line" && wantsColor(output);
     this.exe = exe;
+    /** exe 가 작업 줄의 warn 상태를 아는가. null 이면 처음 필요할 때 `--version` 으로 알아본다 (가짜 연결은 모른다고 본다) */
+    this.warnState = warnState ?? (remote ? false : null);
     this.link = remote ?? null;
     if (remote) remote.onMessage = (m) => this.#receive(m);
     this.seq = 0;
@@ -364,12 +372,23 @@ export class UI {
   }
 
   // ---- 진행 화면 (원격 모드)
+  #exeKnowsWarn() {
+    if (this.warnState == null) {
+      let out = "";
+      try { out = spawnSync(this.exe, ["--version"], { encoding: "utf8", timeout: 5000, windowsHide: true }).stdout ?? ""; } catch { /* 실행하지 못함: 예전 exe 로 본다 */ }
+      this.warnState = supportsTaskWarn(out);
+    }
+    return this.warnState;
+  }
   #sendWork() {
     if (!this.work) return;
     const run = this.work.items.find((t) => t.state === "run" && t.percent != null);
     this.#frame();
     this.#send({ op: "task", title: this.work.title, lines: this.work.lines, percent: run ? Math.round(run.percent) : -1,
-      items: this.work.items.map((t) => ({ label: plain(t.label), state: t.state, extra: plain([t.target, t.extra].filter(Boolean).join("  ")) })) });
+      items: this.work.items.map((t) => (t.state === "warn" && !this.#exeKnowsWarn()
+        // 예전 exe(0.3.0)의 작업 줄은 ✓ × 만 그린다. 경고는 `!` 를 단 글 한 줄로 보낸다 (색은 없다)
+        ? { label: plain(`${SYM.warn} ${t.label}   ${t.extra}`), state: "text", extra: "" }
+        : { label: plain(t.label), state: t.state, extra: plain([t.target, t.extra].filter(Boolean).join("  ")) })) });
   }
   /** 진행률은 자주 바뀌므로 100ms 에 한 번만 보낸다 */
   #touchWork() {
@@ -454,7 +473,7 @@ export class UI {
   /** 마지막 화면이 진행 화면이었으면 그 내용을 본 화면에 남긴다 (완료 안내 · 오류의 원인과 해결 방법) */
   #workSummary() {
     if (!this.work) return [];
-    const mark = { done: SYM.ok, fail: SYM.err, run: SYM.busy, wait: "·" };
+    const mark = { done: SYM.ok, fail: SYM.err, warn: SYM.warn, run: SYM.busy, wait: "·" };
     const lines = [this.work.title, ...this.work.lines, ...this.work.items.map((t) => (t.state === "text" ? t.label : `${mark[t.state]} ${plain(t.label)}${t.extra ? "  " + plain(t.extra) : ""}`))];
     return lines.filter((l, i) => l.trim() || (i > 0 && i < lines.length - 1)).slice(-16).map((l) => "  " + l);
   }
@@ -703,8 +722,10 @@ export class UI {
    * 진행 표시와 함께 작업 실행. 시작하자마자(fn 을 부르기 전) 레이블을 보인다. 원격 모드에서는 진행 화면의 작업 목록에 쌓인다.
    * fn(update): update(text, pct) 로 진행 문구 변경 (pct 를 주면 원격 모드는 게이지, 줄 입력 모드는 25% 마다 한 줄)
    * 실패하면 원인 · 해결 방법을 출력하고 다시 던진다 (e.reported = true)
+   * warn: 실패해도 멈추지 않는 작업. 실패하면 던지지 않고 `! 작업  <warn>: <이유>` 줄을 남긴다
+   *   (한 줄이 74칸을 넘으면 이유를 다음 줄로 내린다). 화면 프로그램에는 `state:"warn"` 으로 보낸다 (노란 `!`. 예전 exe 에는 `!` 를 단 글 한 줄)
    */
-  async task(label, fn, { target = "" } = {}) {
+  async task(label, fn, { target = "", warn = "" } = {}) {
     const remote = this.mode === "remote";
     let lastStep = 0;
     const t = { state: "run", label, target, extra: "", percent: null };
@@ -725,6 +746,17 @@ export class UI {
       if (remote) { t.target = ""; this.#flushWork(); this.#sendWork(); } else this.print(`  ${SYM.ok} ${label}${t.extra ? "  " + t.extra : ""}`);
       return r;
     } catch (e) {
+      if (warn) {
+        const reason = String(explainError(e).cause ?? "").split("\n")[0].replace(/\s+/g, " ").trim() || "원인을 알 수 없습니다";
+        const oneLine = displayWidth(`  ${SYM.warn} ${label}   ${warn}: ${reason}`) <= 74;
+        t.state = "warn";
+        t.extra = oneLine ? `${warn}: ${reason}` : warn;
+        t.percent = null;
+        if (remote) { t.target = ""; this.#flushWork(); this.#sendWork(); } else this.print(`  ${SYM.warn} ${label}  ${t.extra}`);
+        if (!oneLine) wrapText(reason, 66).forEach((l) => this.print(`    ${l}`));
+        this.current = null;
+        return undefined;
+      }
       t.extra = e?.stoppedAt ?? "";
       t.state = "fail";
       t.percent = null;

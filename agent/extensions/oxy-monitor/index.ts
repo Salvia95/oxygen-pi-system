@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { enabled, harnessHome } from "../_lib/common.ts";
+import { brandEnv, brandFg } from "../oxygen-pi-tui/brand.ts";
+import { glyphs, spinnerFrame } from "../oxygen-pi-tui/glyphs.ts";
 import { type BarKind, type BarRange, type FlowSummary, type JobsSummary, barItems, barLine, itemAt } from "./bar.ts";
 import { PaneManager, closesMonitorsOnShutdown, monitorCommand, psmuxRunner } from "./pane.ts";
 import { reassertMouseWhenReady } from "./mouse.ts";
@@ -109,10 +111,15 @@ export default function (pi: ExtensionAPI) {
         const list = items();
         if (focus >= list.length) focus = list.length - 1;
         if (!list.length) { ranges = []; return []; }
+        // 기호 · 색은 Oxygen 기준 (docs/ui-unify-spec.md §2.2): 진행 중은 스피너(accent), 끝남 ✓, 실패 ×, 할 것 없음 ·.
+        // 열린 모니터는 시그니처 색(o2.sage) 굵게
+        const g = glyphs();
         const r = barLine(list, focus, width, {
           width: visibleWidth,
-          item: (s, isOpen) => (isOpen ? theme.fg("accent", theme.bold(s)) : theme.fg("text", s)),
-          focus: (s) => theme.bg("selectedBg", theme.fg("accent", theme.bold(s))),
+          glyph: (st) => st === "running" ? theme.fg("accent", spinnerFrame(g, Date.now()))
+            : st === "ok" ? theme.fg("success", g.ok) : st === "fail" ? theme.fg("error", g.fail) : theme.fg("muted", "·"),
+          item: (s, isOpen) => (isOpen ? theme.bold(brandFg("sage", s, brandEnv(theme))) : theme.fg("text", s)),
+          focus: (s) => theme.bg("selectedBg", theme.bold(s)),
           hint: (s) => theme.fg("text", s),
         });
         ranges = r.ranges;

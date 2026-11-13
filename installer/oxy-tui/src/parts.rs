@@ -93,7 +93,7 @@ fn key(k: &str, v: &str) -> (String, String) {
 pub fn keys_for(app: &App) -> Vec<(String, String)> {
     // 잠깐의 작업을 알리는 중: 키 안내 대신 돌아가는 표시 + 하는 일
     if let Some(label) = &app.busy {
-        return vec![(theme::SPINNER[app.tick % theme::SPINNER.len()].to_string(), label.clone())];
+        return vec![(app.spinner().to_string(), label.clone())];
     }
     if app.help {
         return vec![key("아무 키", "닫기")];

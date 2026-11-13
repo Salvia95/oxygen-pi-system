@@ -2,7 +2,7 @@
 # name	version	url(npm은 package spec)	sha256 ("-" = 미고정, fetch --update-lock 으로 채움)	license	role	group
 #   role=required : 하네스 동작에 필요. fetch 선택 화면에서 기본 체크(해제 불가), 번들링 시 없으면 실패
 #   role=optional : 사용자가 선택해서 받음. 오픈소스가 아닌 라이선스는 선택할 때 약관 동의를 받는다
-#   role=harness  : 하네스 자체의 프로그램 · 자료 (설치·설정 TUI 의 화면 프로그램 oxy-tui.exe, pi 테마 pi-tokyo-night). 선택 화면에 나오지 않고 fetch 가 늘 함께 받는다.
+#   role=harness  : 하네스 자체의 프로그램 · 자료 (설치·설정 TUI 의 화면 프로그램 oxy-tui.exe, 터미널 글꼴 d2coding. pi 테마 oxygen 은 저장소 파일 config/pi-themes). 선택 화면에 나오지 않고 fetch 가 늘 함께 받는다.
 #                   없어도 번들링·설치는 된다 (TUI 는 줄 입력 모드, pi 는 기본 테마로 동작). sha256 이 "-" 이면 아직 릴리스가 없는 것이라 받지 않고 알린다
 #   group         : 상위 계층 (core / dev-tools / repository / code-intel / internet-browsing / database). 표시 정보는 installer/components.mjs
 # 순서 중요: node 가 pi·dbhub(npm) 보다 먼저 와야 함
@@ -24,8 +24,8 @@ chrome	157.0.8103.38	https://storage.googleapis.com/chrome-for-testing-public/15
 usql	0.21.6	https://github.com/xo/usql/releases/download/v0.21.6/usql-0.21.6-windows-amd64.zip	9b5dd191fc13d2619e7cefd9f619093bf151381bc7eb4f01dce88d03bea02a99	MIT	optional	database
 sqlcl	26.3.1.301.1413	https://download.oracle.com/otn_software/java/sqldeveloper/sqlcl-26.3.1.301.1413.zip	f3f188ae06f17eb181f77ae0be54f2ae8c165e52056a7cb7401a974cace9e5f2	Oracle-FUTC	optional	database
 dbhub	1.5.0	@bytebase/dbhub@1.5.0	npm-lock	MIT	optional	database
-# pi 테마 (docs/flow-view-spec.md §4, T1): npm 패키지에서 테마 파일 themes/tokyo-night.json 만 vendor/pi-themes 에 둔다 (머리말 extension 은 쓰지 않는다)
-pi-tokyo-night	1.0.0	https://registry.npmjs.org/pi-tokyo-night/-/pi-tokyo-night-1.0.0.tgz	03a376bb0ffb20ef1ff6aacb653789ce45e24e67bc39cb0f6cf1e44df8b6fa77	MIT	harness	core
+# 터미널 글꼴 (docs/pi-tui-spec.md §8, .claude/rules/oxygen-design.md): 릴리스 zip 에서 D2Coding/ 의 일반 · 굵게 TTF 와 OFL.txt 만 vendor/fonts/d2coding 에 둔다
+d2coding	1.4.0	https://github.com/naver/d2-coding-font/releases/download/VER1.4.0/D2Coding-Ver1.4.0-20261003.zip	17e2da5e2879006eb725b87943f7988736ef8b6c9f8b84bc8e3bdbcb8dd46744	OFL-1.1	harness	core
 # 화면 프로그램: 이 저장소의 installer/oxy-tui 를 GitHub Actions(.github/workflows/oxy-tui-release.yml)가 빌드해 Release 에 올린 것.
 # 새 버전을 릴리스하면 version · url 을 올리고 sha256 을 다시 고정한다: bash scripts/fetch-bundle.sh --only=oxy-tui --update-lock
-oxy-tui	0.3.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.3.0/oxy-tui.exe	20e22ba9fd7c288e0b3a53ff6d7d8cdf4c1d9f36d9ce8d951cf425786f228fbf	Apache-2.0	harness	core
+oxy-tui	0.4.0	https://github.com/Salvia95/oxygen-pi-system/releases/download/oxy-tui-v0.4.0/oxy-tui.exe	-	Apache-2.0	harness	core

@@ -137,6 +137,14 @@ for f in settings.json models.json; do
     pass "agent/$f"
   else fail "agent/$f 없음 또는 JSON 오류 → just configure"; fi
 done
+# 터미널 글꼴 D2Coding (docs/tui-spec.md §12): 판정은 설치 TUI 와 같은 함수 (system.mjs 의 fontRegistered)
+font=$("$OXY_NODE" --input-type=module -e 'const { pathToFileURL } = await import("node:url"); const { createSystem } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(createSystem({ root: process.argv[2] }).fontRegistered() ?? "")' \
+  "$(winpath "$OXY_HOME/installer/system.mjs")" "$(winpath "$OXY_HOME")" 2>/dev/null || true)
+case "$font" in
+  system) pass "D2Coding 글꼴 (시스템 글꼴)" ;;
+  user)   pass "D2Coding 글꼴 (사용자 글꼴)" ;;
+  *)      wrn "D2Coding 글꼴 없음 → 터미널은 지금 글꼴로 동작합니다. install.cmd 의 업데이트로 설치하세요." ;;
+esac
 # LLM 연결 (agent/llm.json · 키는 secrets.json DPAPI): 설정 · 작업 수준 · compaction 여유분 · 키. 출력은 "<결과>\t<메시지>"
 llm_lines() { "$OXY_NODE" "$(winpath "$OXY_HOME/scripts/llm-check.mjs")" "$(winpath "$OXY_HOME")" "$(winpath "$OXY_HOME/agent")" "$1" 2>&1 | tr -d '\r'; }
 llm_show() { # 한 줄 표시. MAIN 줄은 기본 모델을 기억한다

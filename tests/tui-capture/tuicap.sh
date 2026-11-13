@@ -6,7 +6,7 @@
 #   tuicap.sh text   <세션> [파일]                    보이는 화면을 텍스트로 (무색). 창을 열지 않는다
 #   tuicap.sh ansi   <세션> [파일]                    보이는 화면을 색 코드 포함 텍스트로
 #   tuicap.sh back   <세션> [줄수]                    스크롤백(위로 밀려난 줄)까지 포함해 텍스트로
-#   tuicap.sh mintty <세션> <파일.png>                Git Bash 기본 창(mintty)에 세션을 붙여 실제 렌더링을 PNG 로
+#   tuicap.sh mintty <세션> <파일.png>                Git Bash 기본 창(mintty)에 세션을 붙여 실제 렌더링을 PNG 로 (글꼴 등: TUICAP_MINTTY_OPTS="-o Font=D2Coding")
 #   tuicap.sh wt     <세션> <파일.png>                Windows Terminal 새 창에 세션을 붙여 PNG 로
 #   tuicap.sh stop   <세션>                           세션 종료 (붙인 창도 닫힌다)
 # 주의: mintty · wt 는 바탕화면에 창을 실제로 연다. 반복 확인은 text 로 하고 PNG 는 화면당 한 장으로 아낀다. 세션은 반드시 stop 으로 정리한다.
@@ -37,7 +37,8 @@ case "$cmd" in
     file="${1:?파일.png}"
     if [[ ! -f "$STATE/$s.mintty" ]]; then
       read -r cols rows < "$STATE/$s.size"
-      "$MINTTY" -t "tuicap-m-$s" -s "$cols,$rows" "$P" attach -t "$s" &
+      read -ra mopts <<< "${TUICAP_MINTTY_OPTS:-}"
+      "$MINTTY" "${mopts[@]}" -t "tuicap-m-$s" -s "$cols,$rows" "$P" attach -t "$s" &
       touch "$STATE/$s.mintty"
     fi
     shot "tuicap-m-$s" "$file" ;;

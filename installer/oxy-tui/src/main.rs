@@ -4,7 +4,7 @@
 //!   oxy-tui demo colors | panic                  색 견본 · 비정상 종료 때 터미널 복구 확인
 //!   oxy-tui --pipe <이름> --mode monitor          psmux 오른쪽 열의 jobs · flow 모니터 화면 (monitor.rs, docs/monitor-tui-spec.md)
 //!   oxy-tui demo monitor --model <JSON> [--exit-after <ms>] [--size WxH] [--now <ms>]   보기 모델 파일을 그린다
-//!   oxy-tui --version                            `oxy-tui <버전> monitor` (모니터 모드를 아는 exe 는 monitor 를 덧붙인다)
+//!   oxy-tui --version                            `oxy-tui <버전> monitor task-warn` (아는 기능을 낱말로 덧붙인다: monitor = 모니터 모드, task-warn = 작업 줄의 warn 상태)
 //! 대체 화면 버퍼에 그리고, 어떤 경로로 끝나든(정상 · Ctrl+C · 오류 · panic · Node 와의 연결 끊김) raw mode 와 대체 화면에서 나온다.
 mod banner;
 mod demo;
@@ -187,8 +187,8 @@ fn main() -> ExitCode {
     } else if args.first().map(String::as_str) == Some("demo") {
         run_demo(args.get(1).map(String::as_str).unwrap_or("hub"), &args)
     } else if args.iter().any(|a| a == "--version") {
-        // 모니터 모드를 아는지 Node 가 이 출력으로 판단한다 (예전 exe 는 monitor 가 없다)
-        println!("oxy-tui {} monitor", env!("CARGO_PKG_VERSION"));
+        // 아는 기능을 Node 가 이 출력의 낱말로 판단한다 (예전 exe 에는 해당 낱말이 없다)
+        println!("oxy-tui {} monitor task-warn", env!("CARGO_PKG_VERSION"));
         Ok(0)
     } else {
         eprintln!(
@@ -322,7 +322,7 @@ fn run_colors() -> io::Result<i32> {
                 Span::styled("✓ ", theme::ok()),
                 Span::styled("× ", theme::err()),
                 Span::styled("! ", theme::warn()),
-                Span::raw("▲▼ ←→ · … [✓] [■] [·] [ ] ⠋ █▀▄ ░ │─┌┐└┘"),
+                Span::raw("▲▼ ←→ · … [✓] [■] [·] [ ] ◐◓◑◒ █▀▄ ░ │─┌┐└┘"),
             ]));
             f.render_widget(Paragraph::new(lines), f.area());
         })?;
@@ -464,15 +464,15 @@ fn monitor_key(k: &KeyEvent) -> Option<&'static str> {
     }
 }
 
-/// 스피너 모양: 시작한 뒤 지난 시간으로 (1초에 10번 바뀐다)
+/// 스피너 모양: 시작한 뒤 지난 시간으로 (150ms 마다 바뀐다)
 fn spinner_at(start: Instant) -> usize {
-    monitor::spinner_frame(start.elapsed().as_millis())
+    theme::spinner_frame(start.elapsed().as_millis())
 }
 
 /// `--pipe <이름> --mode monitor`: Node 가 보내는 보기 모델(`{"op":"monitor",…}`)을 그리고 키 · 창 크기를 이벤트로 돌려준다.
 /// 연결은 설치 화면과 같다 (protocol.rs). 지시 연결이 끊기면 터미널을 되돌리고 끝낸다
 fn run_monitor(name: &str) -> io::Result<i32> {
-    theme::set_monitor(); // OXY_TUI_THEME=tokyo-night 는 모니터 화면에서만 쓴다
+    theme::set_monitor(); // 모니터 화면에서 색을 껐을 때의 모양이 설치 화면과 다르다
     let mut link = protocol::connect(name)?;
     let mut model: Option<monitor::MonitorModel> = None;
     let mut term = enter()?;

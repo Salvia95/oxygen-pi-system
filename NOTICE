@@ -10,6 +10,8 @@ it into their network themselves. The components remain under their own licenses
 
 - Open source: Node.js, pi coding agent, fd, ripgrep, jq, just, hurl, glab, gh,
   agent-browser, obscura, Chromium, usql, dbhub.
+- Fonts: D2Coding (NAVER Corp., SIL Open Font License 1.1). The bundle carries the
+  font files and their license as vendor/fonts/d2coding/OFL.txt.
 - Not open source (license terms are shown and must be accepted at fetch time;
   a bundle containing them is for the user's own use): Oracle SQLcl (Oracle Free
   Use Terms and Conditions), Chrome for Testing (Google Chrome Terms of Service).

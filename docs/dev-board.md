@@ -21,6 +21,8 @@
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
+| `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 구현 | 사용자: 웰컴 카드 캡처 확인 (`pi-tui/6`) · 9단계 보류 | `pi-tui/8` 작업 줄 (tui-implementer) → 설치본 반영 승인 | 2026-11-13 | – | 안 됨 |
+| `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 커밋 · push · `oxy-tui-v0.4.0` 릴리스 승인 | 승인되면 Cargo 0.4.0 → 커밋 · push → 릴리스 워크플로 → sha 고정 → 설치본 업데이트 (부모) | 2026-11-13 | – | 안 됨 |
 
 ## 단계
 
@@ -71,6 +73,15 @@
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |
 | `agents/1` | 세 정의의 검증 명령 · 보고 항목 (A10 ~ A12) | 검증 | 위생 · 진행판 검사 통과 (2026-11-12) | – | `.claude/agents/harness-engineer.md` |
 | `dev-process/1` | §8 적용 (A1 ~ A15) | 검증 | `just test` (2026-11-12, 작업 트리 = `HEAD acd4aac` + 미커밋): 결과는 메모 | 새 E2E 표식이 다른 실행의 sleep 을 죽이지 않음 (메모) | `docs/dev-process.md` §8 |
+| `pi-tui/1` | 골격 · 사실 확인 F1–F4 (§1 §2), 이 PC 에 D2Coding (승인됨) | 완료 | 단위 `# tests 76` `# pass 76` `# fail 0` (새 시험 2개: 배치 · 기호/색/설정), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | 시험용 extension 으로 F1–F4 확인, mintty 80×24 D2Coding PNG (psmux 안), `/oxygen-pi-tui off` 저장 확인. WT 는 8단계 (2026-11-13) | `docs/pi-tui-spec.md` §1 |
+| `pi-tui/2` | 입력창 · 푸터 (§5 §6) | 완료 | 단위 `# tests 77` `# pass 77` `# fail 0` (새 시험: 테두리 폭 · 줄이는 순서 · 50/85% · 상태 순서 · 긴 폴더), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock pi: psmux 밖 · 안 80×24, 56×24, 작업 중 · bash 모드 · 백그라운드 작업, mintty D2Coding PNG 2장. 실측으로 푸터 규칙 2개 고침 (긴 폴더, 바는 psmux 밖에도 있음) (2026-11-13) | `docs/pi-tui-spec.md` §5 §6 |
+| `pi-tui/3` | 도구 줄 공통 틀 · bash/read/edit/write 요약 (§4 §7.4) | 완료 | 단위 `# tests 78` `# pass 78` `# fail 0` (새 시험: 첫 줄 · 접힘 · bash 결과 글 · read 범위 · diff), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock `tui-tools` 접힘 · 펼침, mintty D2Coding PNG (2026-11-13) | `docs/pi-tui-spec.md` §4 |
+| `pi-tui/4` | `grep` 구조화 (§7.1) | 완료 | 단위 `# tests 79` (새 시험: 결과 글 · 겹친 문맥 · 강조 · 접힘/펼침 · 좁은 경로), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock `tui-grep` 80×24 · 56×24 · 펼침, mintty D2Coding PNG 2장. 실측으로 긴 경로가 시간을 가리는 문제 고침 (2026-11-13) | `docs/pi-tui-spec.md` §7.1 |
+| `pi-tui/5` | `bash` 안의 `fd` · `rg` (§7.2 §7.3) | 완료 | 단위 `# tests 80` `# pass 80` `# fail 0` (새 시험: 명령 알아보기 17가지 · 폴더 묶음 · rg 출력 · 결과 없음), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock `tui-search` 80×24 · 펼침, mintty D2Coding PNG. 실측으로 `cd <긴 경로>` 줄임 · 한글 회색 없앰 (2026-11-13) | `docs/pi-tui-spec.md` §7.2 §7.3 |
+| `pi-tui/6` | 헤더(웰컴 카드) · 작업 표시 · 생각 라벨 (§3 §4) | 검증 | 단위 `# tests 81` `# pass 81` `# fail 0` (웰컴 카드: 30–160칸 폭 · 배너 64칸부터 · 오른쪽 열 100칸부터 · ASCII), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock pi mintty 80×24 · 56×24 D2Coding PNG. 사용자가 2줄 헤더를 웰컴 카드로 바꾸라고 함 → 다시 구현. 사용자 확인 대기 · 생각 라벨은 9단계 (2026-11-13) | `docs/pi-tui-spec.md` §3 |
+| `pi-tui/7` | 글꼴 반입 (§8) | 완료 | `fetch-bundle.sh --only=d2coding` sha256 확인 · 세 파일, `package-bundle.sh --check` 통과, `tests/repo-hygiene.sh` 통과, 단위 `# pass 81` (2026-11-13 부모) | 해당 없음 (반입만) | `docs/pi-tui-spec.md` §8 |
+| `pi-tui/8` | 글꼴 설치 · 터미널 적용 (§8, `docs/tui-spec.md` §12) | 검증 | 단위 `# tests 83` `# pass 83` `# fail 0` (부모가 다시 실행) · `just tui-test` `45 passed` · `tests/installer-sandbox.sh` PASS 73 (tui-implementer, 새 검사 8건) · 위생 통과, 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13) | mintty 80×24 sandbox 설치 · 업데이트 · 업데이트 실패(`!`) · 제거 진행 캡처 (tui-implementer). 남음: 설치본 반영 [승인 필요] · `!` 노란색은 다음 oxy-tui 릴리스 | `docs/tui-spec.md` §12 |
+| `pi-tui/9` | 실제 LLM 확인 (승인 필요: 과금 LLM) | 예정 | 사용자가 보류 (2026-11-13: "9단계는 나중에 생각하고") | – | – |
 
 ## 메모
 

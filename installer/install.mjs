@@ -1169,9 +1169,19 @@ function writeSiteConfig(installDir, state) {
   return n;
 }
 
-async function applyIntegrations(state, reg) {
+/** 터미널 글꼴 D2Coding (docs/tui-spec.md §12). 실패해도 설치를 멈추지 않는다: `!` 줄을 남기고 다음 작업으로 간다 */
+const FONT_TASK = "글꼴 설치 (D2Coding)";
+const FONT_WARN = "글꼴을 등록하지 못했습니다";
+async function installFontTask(reg) {
+  await ui.task(FONT_TASK, async () => { const r = sys.installFont(reg.font ?? null); reg.font = r.record ?? null; return r.text; }, { warn: FONT_WARN });
+}
+
+/** font: 설치 · 다시 설정만 글꼴 작업 줄을 둔다. Tweak 은 글꼴을 설치하지 않는다 (등록 항목만 바꾼다) */
+async function applyIntegrations(state, reg, { font = false } = {}) {
   const want = new Set(state.integrations ?? []);
   const dir = state.installDir;
+  // Windows Terminal 프로필 · 바로가기가 글꼴 이름을 가리키므로 등록 항목보다 앞에 둔다
+  if (font) await installFontTask(reg);
   if (want.has("path")) await ui.task("PATH 등록", async () => { sys.addUserPath(dir); reg.path = true; });
   else if (reg.path) await ui.task("PATH 등록 해제", async () => { sys.removeUserPath(dir); reg.path = false; });
   const shell = normShell(state.terminalShell);
@@ -1232,7 +1242,7 @@ async function install(state) {
     else await ui.task("설치 정보 기록", async () => sys.writeMarker(state.installDir));
     await applyOptional(state);
     await ui.task("설정 파일 생성", async () => `${writeSiteConfig(state.installDir, state)}개 파일`);
-    await applyIntegrations(state, reg);
+    await applyIntegrations(state, reg, { font: true });
     sys.saveRegistry({ ...reg, version: VERSION, installDir: state.installDir, copied: state.copy, gitBash: state.gitBash,
       integrations: state.integrations, installedAt: new Date().toISOString() });
   } catch (e) {
@@ -1303,7 +1313,7 @@ async function reconfigure(reg, { saveRegistry = true } = {}) {
   ui.screen(`  ${c.bold("설정을 적용하는 중입니다")}\n`);
   await applyOptional(state);
   await ui.task("설정 파일 생성", async () => `${writeSiteConfig(state.installDir, state)}개 파일`);
-  await applyIntegrations(state, reg);
+  await applyIntegrations(state, reg, { font: true });
   if (saveRegistry) sys.saveRegistry({ ...reg, integrations: state.integrations, updatedAt: new Date().toISOString() });
   const passed = await finishWithVerify(state, "설정을 적용했습니다.");
   await done(state, passed);
@@ -1385,6 +1395,8 @@ async function removeNow(reg, backup) {
   if (reg.path) await ui.task("PATH 등록 해제", async () => sys.removeUserPath(reg.installDir));
   if (reg.terminalProfile) await ui.task("Windows Terminal 프로필 해제", async () => sys.removeTerminalProfile(reg.terminalProfile));
   if (reg.shortcut) await ui.task("바탕화면 바로가기 해제", async () => sys.removeShortcut(reg.shortcut));
+  // 우리가 깐 글꼴만 (reg.font 가 있을 때). 이미 있던 글꼴은 건드리지 않는다
+  if (reg.font) await ui.task("글꼴 제거 (D2Coding)", async () => { const text = sys.removeFont(reg.font); reg.font = null; return text; });
   await ui.task("설치 기록 삭제", async () => sys.removeRegistry());
   if (backupText) {
     mkdirSync(dirname(backup), { recursive: true });
@@ -1464,6 +1476,7 @@ async function manage(reg) {
       try {
         await copyFiles(state);
         await ui.task("설정 파일 다시 생성", async () => `${writeSiteConfig(state.installDir, state)}개 파일`);
+        await installFontTask(reg);
         // 등록해 둔 Windows Terminal 프로필 · 바탕화면 바로가기는 이 번들의 내용으로 다시 쓴다 (등록하지 않은 것은 만들지 않는다)
         const shell = normShell(state.terminalShell);
         if (reg.terminalProfile) await ui.task("Windows Terminal 프로필 갱신", async () => { reg.terminalProfile = sys.addTerminalProfile(state.installDir, state.gitBash, shell); });

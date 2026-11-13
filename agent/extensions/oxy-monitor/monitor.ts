@@ -83,7 +83,7 @@ const NOTICE_MS = 5000;
 // ------------------------------------------------------------------ oxy-tui 모니터 모드
 async function runExe() {
   const { ExeLink, displayWidth } = await import(pathToFileURL(join(root, "installer", "tui.mjs")).href);
-  // pi 테마가 tokyo-night 면 모니터도 같은 팔레트로 (exe 는 OXY_TUI_THEME 을 읽는다)
+  // 모니터 팔레트: 사용자가 OXY_TUI_THEME 을 정했으면 그것, 아니면 exe 의 기본(Oxygen 세이지) 팔레트
   let settingsText: string | null = null;
   try { settingsText = readFileSync(join(agentDir, "settings.json"), "utf8"); } catch { /* 없음 */ }
   const theme = monitorTheme(settingsText, process.env.OXY_TUI_THEME);

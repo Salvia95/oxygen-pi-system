@@ -1,7 +1,7 @@
 {
   "op": "monitor",
   "kind": "flow",
-  "title": "Flow Monitor",
+  "title": "Flow",
   "right": "Total 2/6",
   "now": [],
   "nowAt": "top",

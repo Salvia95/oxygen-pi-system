@@ -1,50 +1,59 @@
-// 하단 바 (docs/monitor-spec.md §2): 입력창 아래 한 줄. 항목 jobs · flow 를 키보드(빈 입력창에서 ↓ → ←→ → Enter)나 클릭으로 켜고 끈다.
-// 상태 → 항목 · 줄 · 클릭 범위를 만드는 순수 함수만 둔다 (색과 폭 계산은 받는다).
+// 하단 바 (docs/monitor-spec.md §2, 모양은 docs/ui-unify-spec.md §2.2): 입력창 아래 한 줄.
+// 항목 Jobs · Flow 를 키보드(빈 입력창에서 ↓ → ←→ → Enter)나 클릭으로 켜고 끈다.
+//    ◐ Jobs 1 실행 중 · 1 완료   ✓ Flow 2/5
+// 상태 → 항목 · 줄 · 클릭 범위를 만드는 순수 함수만 둔다 (색 · 기호 · 폭 계산은 받는다).
 
 export type BarKind = "jobs" | "flow";
-export interface JobsSummary { active: number; recent: number }          // 실행 중 · 대기 / 최근 2분 안에 끝남
+/** 실행 중 · 대기 / 최근 2분 안에 끝남 / 그 가운데 실패 */
+export interface JobsSummary { active: number; recent: number; failed?: number }
 export interface FlowSummary { hasContent: boolean; done: number; total: number; node: string }
-export interface BarItem { kind: BarKind; label: string; open: boolean }
+/** 항목 앞 기호가 보일 상태: 진행 중(스피너) · 끝남(✓) · 실패(×) · 할 것 없음(·) */
+export type BarState = "running" | "ok" | "fail" | "idle";
+export interface BarItem { kind: BarKind; label: string; open: boolean; state: BarState }
 export interface BarRange { kind: BarKind; start: number; end: number }  // 표시 열 [start, end)
 
 /**
- * 바에 보일 항목. jobs: 실행 중이거나 최근 2분 안에 끝난 작업이 있을 때, flow: 기록이 있을 때.
- * 모니터가 열려 있으면 내용이 없어도 보인다 (닫을 수 있게).
+ * 바에 보일 항목. Jobs: 실행 중이거나 최근 2분 안에 끝난 작업이 있을 때, Flow: 기록이 있을 때.
+ * 모니터가 열려 있으면 내용이 없어도 보인다 (닫을 수 있게). 이름은 모니터 제목과 같게 첫 글자 대문자.
  */
 export function barItems(jobs: JobsSummary | null, flow: FlowSummary | null, open: Set<string>): BarItem[] {
   const items: BarItem[] = [];
   if (jobs && (jobs.active || jobs.recent) || open.has("jobs")) {
     const parts = [jobs?.active ? `${jobs.active} 실행 중` : "", jobs?.recent ? `${jobs.recent} 완료` : ""].filter(Boolean);
-    items.push({ kind: "jobs", label: `jobs${parts.length ? ` ${parts.join(" · ")}` : ""}`, open: open.has("jobs") });
+    const state: BarState = jobs?.active ? "running" : jobs?.failed ? "fail" : jobs?.recent ? "ok" : "idle";
+    items.push({ kind: "jobs", label: `Jobs${parts.length ? ` ${parts.join(" · ")}` : ""}`, open: open.has("jobs"), state });
   }
   if (flow?.hasContent || open.has("flow")) {
     const p = flow?.total ? `${flow.done}/${flow.total}` : flow?.node ?? "";
-    items.push({ kind: "flow", label: `flow${p ? ` ${p}` : ""}`, open: open.has("flow") });
+    const state: BarState = flow?.total ? (flow.done < flow.total ? "running" : "ok") : "idle";
+    items.push({ kind: "flow", label: `Flow${p ? ` ${p}` : ""}`, open: open.has("flow"), state });
   }
   return items;
 }
 
 export interface BarStyle {
   width: (s: string) => number;
-  item: (text: string, open: boolean) => string;   // 열린 모니터는 강조색
+  glyph: (state: BarState) => string;              // 색을 입힌 1칸 기호
+  item: (text: string, open: boolean) => string;   // 열린 모니터는 시그니처 색
   focus: (text: string) => string;                 // 키보드로 선택한 항목
   hint: (text: string) => string;
 }
 
 const GAP = "   ";
+const LEAD = 1;   // 왼쪽 여백 1칸 (푸터 · 도구 줄과 같은 시작 칸)
 
 /** 한 줄과 클릭 범위. focus: 키보드로 선택한 항목 (-1 = 없음). 바에 들어온 동안에는 오른쪽에 키 안내 */
 export function barLine(items: BarItem[], focus: number, width: number, s: BarStyle): { line: string; ranges: BarRange[] } {
   const ranges: BarRange[] = [];
-  let col = 0;
-  let line = "";
+  let col = LEAD;
+  let line = " ".repeat(LEAD);
   items.forEach((it, i) => {
-    const plain = `▸ ${it.label}`;
-    const w = s.width(plain);
+    const w = 2 + s.width(it.label);                // 기호 1칸 + 빈칸 + 이름
     if (col + (i ? GAP.length : 0) + w > width) return;
     if (i) { line += GAP; col += GAP.length; }
     ranges.push({ kind: it.kind, start: col, end: col + w });
-    line += i === focus ? s.focus(plain) : s.item(plain, it.open);
+    const text = `${s.glyph(it.state)} ${i === focus ? it.label : s.item(it.label, it.open)}`;
+    line += i === focus ? s.focus(text) : text;
     col += w;
   });
   if (focus >= 0) {

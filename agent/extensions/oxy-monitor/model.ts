@@ -92,6 +92,8 @@ export interface FlowLike {
 export interface FlowUiState { sel: string | null; open: Set<string>; manualAt: number }
 
 export const FLOW_TITLE = "Flow Monitor";
+/** 화면 프로그램이 제목 앞에 붙이는 `◆ ` 의 칸 수 (docs/ui-unify-spec.md §2.3). 제목을 줄일지 정할 때 함께 센다 */
+export const TITLE_MARK_WIDTH = 2;
 export const STATE_ROW_MIN_HEIGHT = 14;   // 이보다 낮으면 Current Task 아래 pi 상태 줄을 뺀다 (flow-view-spec §2, R1)
 
 const leavesOf = (plan: PlanItem[]) => plan.flatMap((p) => (p.children.length ? p.children : [p]));
@@ -203,7 +205,7 @@ export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: Flo
   const plan = flow?.plan ?? [];
   const leaves = leavesOf(plan).filter((x) => x.status !== "dropped");
   const right = leaves.length ? "Total " + leaves.filter((x) => x.status === "done").length + "/" + leaves.length : "";
-  const title = !right || w(FLOW_TITLE) + 1 + w(right) <= width ? FLOW_TITLE : "Flow";
+  const title = !right || TITLE_MARK_WIDTH + w(FLOW_TITLE) + 1 + w(right) <= width ? FLOW_TITLE : "Flow";
   const keys = keyLines(["▲▼ 이동", "Enter 펼치기", "q 닫기"], width, w);
   const top = currentRows(live, plan, height, now);
   const rows = flow ? planRows(flow, ui.open, width) : [{ marker: "none" as Marker, text: "작업 기록이 없습니다.", indent: 0 }];
@@ -290,7 +292,7 @@ export function jobsModel(state: JobsState | null, subs: Map<string, JobsState>,
   const popup = ui.confirm ? { popup: popupOf(ui.confirm) } : {};
   const noticeLines = ui.notice ? [ui.notice] : [];
   const keysFor = (k: string[]) => [...noticeLines, ...keyLines(ui.confirm ? ["←→ 이동", "Enter 선택", "Esc 취소"] : k, width, w)];
-  const titled = (full: string, right: string) => (w(full) + 1 + w(right) <= width ? full : "Jobs");
+  const titled = (full: string, right: string) => (TITLE_MARK_WIDTH + w(full) + 1 + w(right) <= width ? full : "Jobs");
 
   // 로그 화면
   if (ui.mode === "log" && ui.log) {

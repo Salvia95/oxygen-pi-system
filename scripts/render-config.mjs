@@ -2,7 +2,7 @@
 // configure.sh 와 설치 TUI(installer/) 가 공통으로 사용한다. 외부 의존성 없음.
 //
 //   CLI: node scripts/render-config.mjs <agentDir>      (값은 환경변수에서 읽음)
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as secrets from "../installer/secrets.mjs";
@@ -82,20 +82,25 @@ function applyLlmSettings(json, llm) {
  * opts.root: 하네스 루트 (pi 내장 카탈로그 확인용. 기본은 vars.OXY_HOME → agentDir 의 상위)
  * @returns 생성한 파일 경로 목록
  */
-export const DEFAULT_THEME = "tokyo-night";
+export const DEFAULT_THEME = "oxygen";
+/** 예전 기본 테마 (2026-11-13 걷어냄, docs/ui-unify-spec.md §2.0). 설정에 남아 있으면 DEFAULT_THEME 으로 바꾼다 */
+const RETIRED_THEMES = ["tokyo-night"];
 
 /**
- * pi 테마 (docs/flow-view-spec.md §4): 번들의 vendor/pi-themes/*.json 을 agent/themes 로 복사하고,
+ * pi 테마 (docs/ui-unify-spec.md §2.0): 저장소의 config/pi-themes/*.json (Oxygen 테마) 을 agent/themes 로 복사하고,
  * settings.json 의 theme 은 지금 값(사용자가 pi /settings 에서 고른 것)을 두되 없으면 DEFAULT_THEME (그 테마 파일이 있을 때만).
+ * 걷어낸 예전 기본 테마(tokyo-night)가 설정에 남아 있으면 DEFAULT_THEME 으로 바꾸고 그 테마 파일을 지운다.
  */
 export function applyTheme(json, agentDir, root) {
-  const src = join(root, "vendor", "pi-themes");
+  const src = join(root, "config", "pi-themes");
   if (existsSync(src)) {
     mkdirSync(join(agentDir, "themes"), { recursive: true });
     for (const f of readdirSync(src).filter((x) => x.endsWith(".json"))) copyFileSync(join(src, f), join(agentDir, "themes", f));
   }
+  for (const t of RETIRED_THEMES) rmSync(join(agentDir, "themes", `${t}.json`), { force: true });
   let current;
   try { current = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).theme; } catch { /* 아직 없음 */ }
+  if (RETIRED_THEMES.includes(current)) current = undefined;
   const out = { ...json };
   if (typeof current === "string" && current) out.theme = current;
   else if (existsSync(join(agentDir, "themes", `${DEFAULT_THEME}.json`))) out.theme = DEFAULT_THEME;

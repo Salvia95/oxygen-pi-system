@@ -26,6 +26,7 @@ run() { # <설명> <installer node> <답...>
 # 브라우저 선택지 수는 PC 마다 다름 (Edge/Chrome 설치 여부) → 마지막 항목('사용 안 함') 번호를 계산
 NONE_IDX=$("$NODE" --input-type=module -e "import('$(winpath "$OXY_HOME/installer/components.mjs" | sed 's|^|file:///|')').then(m=>console.log(m.browserChoices(process.argv[1]).length))" "$(winpath "$OXY_HOME")")
 [[ -f "$OXY_HOME/runtime/sqlcl/bin/sql" && -f "$OXY_HOME/vendor/browsers/chromium/chrome.exe" ]]   || die "이 테스트는 SQLcl·Chromium 이 받아진 상태가 필요 → bash scripts/fetch-bundle.sh --all --accept-license"
+compgen -G "$OXY_HOME/vendor/fonts/d2coding/D2Coding-Ver*.ttf" >/dev/null   || die "이 테스트는 D2Coding 글꼴이 받아진 상태가 필요 → bash scripts/fetch-bundle.sh"
 
 # 1) 신규 설치: 점검 계속 / 기본 위치 / (긴 경로 경고 시 1 = 이 경로에 설치) / 구성요소: 표시된 대로("" = 반입된 것 전부, SQLcl 포함)
 #    / 브라우저: Chromium(2)
@@ -51,10 +52,15 @@ chk "선택하지 않은 브라우저는 복사 안 함"       '[[ -f "$I/vendor
 chk "브라우저 선택 기록 (chromium)"           'grep -q "^OXY_BROWSER=chromium$" "$I/agent/oxy.env"'
 chk "skill 자동 활성화 (설치된 도구만)"        '[[ -f "$I/agent/skills/sql-querying/SKILL.md" && -f "$I/agent/skills/web-page-automation/SKILL.md" && ! -d "$I/agent/skill-library/../skills/nonexistent" ]]'
 chk "verify 통과 (FAIL 0)"               'grep -q "FAIL 0" "$SB/out.txt"'
+# 터미널 글꼴 D2Coding (§12): 등록 항목 작업 앞의 작업 줄, 설치 기록(reg.font), WT 프로필의 font.face
+chk "글꼴: 작업 줄 '새로 설치' (PATH 등록보다 앞)"   '[[ -n $(grep -n "✓ 글꼴 설치 (D2Coding)  새로 설치" "$SB/out.txt" | head -1) ]] && [[ $(grep -n "✓ 글꼴 설치 (D2Coding)" "$SB/out.txt" | head -1 | cut -d: -f1) -lt $(grep -n "✓ PATH 등록" "$SB/out.txt" | head -1 | cut -d: -f1) ]]'
+chk "글꼴: 설치 기록 font (version · 파일 2개) + sandbox 글꼴 목록"   '[[ "$(jq -r "(.font.version // \"\") + \" \" + (.font.files | length | tostring)" "$SB/AppData/oxygen-pi/install.json" | tr -d "\r")" =~ ^[0-9.]+\ 2$ && "$(jq -r .registered "$SB/fonts.json" | tr -d "\r")" == user ]]'
+chk "글꼴: WT 프로필 font.face = D2Coding"   '[[ "$(jq -r ".profiles[0].font.face" "$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi/oxygen-pi.json" | tr -d "\r")" == D2Coding ]]'
+chk "글꼴: 확인 요약 · 완료 화면에는 줄을 더하지 않음 (작업 줄 한 번뿐)"   '[[ $(grep -c "✓ 글꼴 설치 (D2Coding)" "$SB/out.txt") == 1 ]] && ! sed -n "1,/설치하는 중입니다/p" "$SB/out.txt" | grep -q "D2Coding" && ! sed -n "/✓ 설치를 마쳤습니다/,\$p" "$SB/out.txt" | grep -q "D2Coding"'
 WTF="$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi/oxygen-pi.json"
 chk "터미널 셸 · 멀티플렉서 기록 (git-bash · psmux) + oxy.cmd 용 OXY_GIT_BASH"  'grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_GIT_BASH=.*bash.exe" "$I/agent/oxy.env"'
 chk "WT 프로필: Git Bash 로 env.sh"           'grep -q "bash.exe.*env.sh" "$WTF"'
-chk "WT 프로필: Tokyo Night 색 구성"          '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Tokyo Night (Oxygen Pi) #1A1B26" ]]'
+chk "WT 프로필: Oxygen 색 구성"               '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Oxygen #141A17" ]]'
 chk "확인 요약 · 완료 화면에 멀티플렉서"         'grep -q "터미널.*Git Bash · 멀티플렉서 psmux" "$SB/out.txt" && grep -q "oxy --no-mux" "$SB/out.txt"'
 # oxy 런처: OXY_MUX=psmux 여도 비대화형(파이프)·--no-mux 는 세션 없이 바로 실행
 ver=$(cd "$SB" && env -u TMUX bash "$I/oxy" --version </dev/null 2>&1 | tail -1)
@@ -70,9 +76,10 @@ SHORTCUT="$SB/Desktop/Oxygen Pi.lnk.json"
 jq 'del(.profiles[0].colorScheme) | del(.schemes)' "$WTF" > "$SB/wt.stale" && cp "$SB/wt.stale" "$WTF"
 echo '{}' > "$SHORTCUT"
 run "업데이트" "$NODE" 3 1 2 ""
-chk "업데이트: WT 프로필 다시 씀 (colorScheme 복원 · 셸 유지)"   '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Tokyo Night (Oxygen Pi) #1A1B26" ]] && grep -q "bash.exe.*env.sh" "$WTF"'
+chk "업데이트: WT 프로필 다시 씀 (colorScheme 복원 · 셸 유지)"   '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Oxygen #141A17" ]] && grep -q "bash.exe.*env.sh" "$WTF"'
 chk "업데이트: 바탕화면 바로가기 다시 씀"            '[[ -n $(jq -r ".target // empty" "$SHORTCUT") ]]'
 chk "업데이트: 작업 줄 (WT 프로필 갱신 · 바로가기 갱신)"   'grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt" && grep -q "바탕화면 바로가기 갱신" "$SB/out.txt"'
+chk "업데이트: 글꼴 작업 줄 (설정 파일 다시 생성 뒤 · 프로필 갱신 앞, 같은 버전이면 이미 있음) + 기록 유지"   '[[ -n $(grep "✓ 글꼴 설치 (D2Coding)  이미 있음" "$SB/out.txt") ]] && a=$(grep -n "✓ 설정 파일 다시 생성" "$SB/out.txt" | head -1 | cut -d: -f1) && f=$(grep -n "✓ 글꼴 설치 (D2Coding)" "$SB/out.txt" | head -1 | cut -d: -f1) && p=$(grep -n "✓ Windows Terminal 프로필 갱신" "$SB/out.txt" | head -1 | cut -d: -f1) && (( a < f && f < p )) && [[ "$(jq -r ".font.files | length" "$SB/AppData/oxygen-pi/install.json" | tr -d "\r")" == 2 ]]'
 chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_KEEP=1$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env"'
 chk "업데이트 후 LLM 연결 · 키 유지"           '[[ $(lj ".connections[0].models | length") == 2 ]] && has_key site'
 
@@ -85,13 +92,21 @@ chk "브라우저 없음 → web-page-automation skill 꺼짐" '[[ ! -d "$I/agen
 chk "SQLcl 유지"                          '[[ -f "$I/runtime/sqlcl/bin/sql" ]]'
 chk "모델 하나만 선택 → llm.json 모델 1개 · 키 유지"   '[[ "$(lj ".connections[0].models | map(.id) | join(\",\")")" == qwen3.6-coder-30b ]] && has_key site'
 chk "다시 설정: 저장된 키 유지 화면 · 요약에 (변경됨)"    'grep -q "저장된 API 키를 유지할까요?" "$SB/out.txt" && grep -q "qwen3.6-coder-30b · 128K · thinking off (변경됨)" "$SB/out.txt"'
-chk "바로가기만 해제"                       '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" && -f "$SB/user-path.txt" ]]'
+chk "다시 설정: 글꼴 작업 줄 (이미 있음, 기록 유지)"   '[[ -n $(grep "✓ 글꼴 설치 (D2Coding)  이미 있음" "$SB/out.txt") ]] && [[ "$(jq -r ".font.files | length" "$SB/AppData/oxygen-pi/install.json" | tr -d "\r")" == 2 ]]'
+chk "바로가기만 해제"                    '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" && -f "$SB/user-path.txt" ]]'
 chk "셸 변경: WT 프로필이 cmd.exe /k 로, OXY_MUX=none"  'grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && ! grep -q "env.sh" "$WTF" && grep -q "^OXY_TERMINAL_SHELL=cmd$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=none$" "$I/agent/oxy.env"'
 #    바로가기를 해제한 뒤의 업데이트: 등록하지 않은 바로가기는 새로 만들지 않고, 프로필은 기록된 셸(cmd)로 다시 쓴다
 jq 'del(.profiles[0].colorScheme)' "$WTF" > "$SB/wt.stale" && cp "$SB/wt.stale" "$WTF"
 run "업데이트 (바로가기 없음)" "$NODE" 3 1 2 ""
 chk "업데이트: 등록하지 않은 바로가기는 만들지 않음"   '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" ]] && ! grep -q "바탕화면 바로가기 갱신" "$SB/out.txt"'
-chk "업데이트: WT 프로필 다시 씀 (기록된 셸 cmd)"      '[[ $(jq -r ".profiles[0].colorScheme" "$WTF") == "Tokyo Night (Oxygen Pi)" ]] && grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt"'
+chk "업데이트: WT 프로필 다시 씀 (기록된 셸 cmd)"      '[[ $(jq -r ".profiles[0].colorScheme" "$WTF") == "Oxygen" ]] && grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt"'
+#    글꼴이 이미 시스템에 있는 PC (<sandbox>/fonts.json = system, 우리가 깐 기록 없음): 이미 있음 · 기록은 남기지 않는다 (제거 때 지울 것도 없다)
+INST_JSON="$SB/AppData/oxygen-pi/install.json"
+cp "$INST_JSON" "$SB/install.json.keep"; cp "$SB/fonts.json" "$SB/fonts.json.keep"
+jq 'del(.font)' "$SB/install.json.keep" > "$INST_JSON"; echo '{"registered":"system"}' > "$SB/fonts.json"
+run "업데이트 (글꼴이 이미 시스템에 있음)" "$NODE" 3 1 2 ""
+chk "업데이트: 시스템 글꼴 → 이미 있음 · 설치 기록에 font 없음"   'grep -q "✓ 글꼴 설치 (D2Coding)  이미 있음" "$SB/out.txt" && [[ "$(jq -r "has(\"font\") and .font != null" "$INST_JSON" | tr -d "\r")" == false ]]'
+cp "$SB/install.json.keep" "$INST_JSON"; cp "$SB/fonts.json.keep" "$SB/fonts.json"
 
 # 3-1) 설치된 복사본의 Tweak TUI: SQLite 연결 추가 (usql + dbhub) → 설치 위치 기준 파일 생성
 "$I/bin/usql.exe" "sqlite:$(winpath "$SB/t.db")" -c "create table t(a int); insert into t values (5),(6);" >/dev/null 2>&1
@@ -180,6 +195,7 @@ chk "configure.sh 를 다시 돌려도 꺼진 채 남음"       '[[ $CRC == 0 &&
 INSTALLER="$I/installer/install.mjs" run "자기 제거" "$I/runtime/node/node.exe" 4 1 oxygen-pi ""
 chk "제거 종료코드 0"                      '[[ $RC == 0 ]]'
 chk "등록 해제 + 설치 기록 삭제 + 설정 백업"  '[[ ! -f "$SB/user-path.txt" && ! -d "$SB/LocalAppData/Microsoft/Windows Terminal/Fragments/oxygen-pi" && ! -f "$SB/AppData/oxygen-pi/install.json" && -f "$SB/AppData/oxygen-pi/oxy.env.bak" ]]'
+chk "제거: 글꼴 제거 작업 줄 (프로필 해제 뒤 · 설치 기록 삭제 앞) + 글꼴 파일 · 목록 지움"   'grep -q "✓ 글꼴 제거 (D2Coding)  지움" "$SB/out.txt" && a=$(grep -n "✓ Windows Terminal 프로필 해제" "$SB/out.txt" | head -1 | cut -d: -f1) && f=$(grep -n "✓ 글꼴 제거 (D2Coding)" "$SB/out.txt" | head -1 | cut -d: -f1) && r=$(grep -n "✓ 설치 기록 삭제" "$SB/out.txt" | head -1 | cut -d: -f1) && (( a < f && f < r )) && [[ ! -f "$SB/fonts.json" && -z "$(ls "$SB"/LocalAppData/Microsoft/Windows/Fonts/ 2>/dev/null)" ]]'
 for _ in $(seq 60); do [[ -d "$I" ]] || break; sleep 1; done
 chk "설치 폴더 삭제 (예약 삭제 완료)"         '[[ ! -d "$I" ]]'
 

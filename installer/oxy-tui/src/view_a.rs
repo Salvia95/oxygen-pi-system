@@ -8,7 +8,7 @@ use ratatui::widgets::Paragraph;
 use crate::banner;
 use crate::model::{App, ConfirmSpec, InputSpec, Row, Screen, SelectSpec, TaskItem, TaskSpec};
 use crate::parts::{alert_line, context_lines, desc_line, help_text, keys_for, keys_line, label_width, loc_line, loc_parts, loc_short, result_line, row_spans, summary_lines};
-use crate::text::{trunc, w};
+use crate::text::{fit, trunc, w};
 use crate::theme;
 
 type L = Line<'static>;
@@ -341,15 +341,17 @@ pub fn progress_text(percent: i32, width: usize) -> String {
     format!("{}{}  {percent:>3}%", "█".repeat(filled), "░".repeat(bar - filled))
 }
 
-/// 작업 한 줄: ✓ 끝남 · 돌아가는 표시 · × 실패 · `·` 대기. state 가 text 면 작업이 아닌 그냥 한 줄
+/// 작업 한 줄: ✓ 끝남 · 돌아가는 표시 · × 실패 · `!` 경고(노랑) · `·` 대기. 경고의 이유는 줄 끝에 놓고, 넘치는 이유는 Node 가 다음 줄(text)로 내린다.
+/// state 가 text 면 작업이 아닌 그냥 한 줄
 pub fn task_item_line(app: &App, it: &TaskItem, width: usize, indent: usize) -> L {
     if it.state == "text" {
-        return Line::raw(format!("{}{}", " ".repeat(indent), trunc(&it.label, width.saturating_sub(indent))));
+        return Line::raw(format!("{}{}", " ".repeat(indent), fit(&it.label, width.saturating_sub(indent))));
     }
     let (mark, style) = match it.state.as_str() {
         "done" => (theme::OK, theme::ok()),
         "fail" => (theme::ERR, theme::err()),
-        "run" => (theme::SPINNER[app.tick % theme::SPINNER.len()], theme::accent()),
+        "run" => (app.spinner(), theme::accent()),
+        "warn" => (theme::WARN, theme::warn()),
         _ => ("·", theme::sub()),
     };
     let label_style = if it.state == "wait" { theme::text() } else { theme::strong() };
@@ -357,7 +359,7 @@ pub fn task_item_line(app: &App, it: &TaskItem, width: usize, indent: usize) -> 
     if !it.extra.is_empty() {
         let used = indent + 2 + w(&it.label) + 3;
         spans.push(Span::raw("   "));
-        spans.push(Span::raw(trunc(&it.extra, width.saturating_sub(used))));
+        spans.push(Span::raw(fit(&it.extra, width.saturating_sub(used))));
     }
     Line::from(spans)
 }
@@ -464,5 +466,35 @@ mod tests {
         let mut locked = plain.clone();
         locked.rows[0].locked = true;
         assert_eq!(desc_rows(&locked), 1);
+    }
+
+    fn item(label: &str, state: &str, extra: &str) -> TaskItem {
+        TaskItem { label: label.into(), state: state.into(), extra: extra.into() }
+    }
+    fn text_of(l: &L) -> String {
+        l.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn a_warn_task_line_is_a_yellow_bang_with_the_reason_at_the_end_of_the_line() {
+        let app = App::new(Default::default(), Screen::Idle);
+        let l = task_item_line(&app, &item("D2Coding 글꼴", "warn", "설치하지 못했습니다: 파일이 사용 중입니다 (EBUSY)"), 78, 2);
+        assert_eq!(text_of(&l), "  ! D2Coding 글꼴   설치하지 못했습니다: 파일이 사용 중입니다 (EBUSY)");
+        let mark = &l.spans[1];
+        assert_eq!((mark.content.as_ref(), mark.style.fg), ("! ", Some(ratatui::style::Color::Yellow)));
+        // 이유가 없으면 label 만. 끝남 · 실패 줄과 같은 칸에 기호가 놓인다
+        assert_eq!(text_of(&task_item_line(&app, &item("D2Coding 글꼴", "warn", ""), 78, 2)), "  ! D2Coding 글꼴");
+        assert_eq!(text_of(&task_item_line(&app, &item("파일 복사", "done", ""), 78, 2)), "  ✓ 파일 복사");
+        // 폭을 넘으면 이유를 `…` 로 줄인다
+        let cut = text_of(&task_item_line(&app, &item("D2Coding 글꼴", "warn", "설치하지 못했습니다: 파일이 사용 중입니다 (EBUSY)"), 40, 2));
+        assert!(cut.ends_with('…') && w(&cut) <= 40, "{cut}");
+    }
+
+    #[test]
+    fn the_running_task_spinner_is_one_of_the_four_circles() {
+        let app = App::new(Default::default(), Screen::Idle);
+        let l = task_item_line(&app, &item("파일 복사", "run", ""), 78, 2);
+        assert!(theme::SPINNER.contains(&l.spans[1].content.trim_end()), "{:?}", l.spans[1]);
+        assert!(theme::SPINNER.contains(&app.spinner()));
     }
 }

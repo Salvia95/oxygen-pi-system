@@ -8,6 +8,13 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { CATALOG, readLock } from "./components.mjs";
 
 export const MARKER = ".oxy-install";
+
+/** 터미널 글꼴 (docs/tui-spec.md §12): 번들의 vendor/fonts/d2coding 파일과 사용자 글꼴 레지스트리 값 이름 */
+export const FONT_FACE = "D2Coding";
+export const FONT_FILES = [
+  { file: "D2Coding-Ver1.4.0-20261003.ttf", value: "D2Coding (TrueType)" },
+  { file: "D2CodingBold-Ver1.4.0-20261003.ttf", value: "D2Coding Bold (TrueType)" },
+];
 export const WT_PROFILE_NAME = "Oxygen Pi";
 const WT_GUID = "{6f1d3c2a-8b4e-4c7d-9a2f-0e5b7c3d1a90}";
 
@@ -19,17 +26,17 @@ const COPY_EXCLUDE = [".cache", "dist", ".git", ".oxy-selection", "optional", "a
   // 화면 프로그램(oxy-tui)의 빌드 산출물과 캡처 도구의 상태 파일 (개발 PC 에만 있다)
   "installer/oxy-tui/target", "tests/tui-capture/.state"];
 
-/** Windows Terminal 프로필의 색 구성: pi 테마 tokyo-night 와 같은 Tokyo Night 바탕 (docs/flow-view-spec.md §4, T3) */
+/** Windows Terminal 프로필의 색 구성: pi 테마 oxygen 과 같은 팔레트 (docs/ui-unify-spec.md §2.0, Tokyo Night 를 대신함) */
 export const WT_SCHEME = {
-  name: "Tokyo Night (Oxygen Pi)",
-  background: "#1A1B26", foreground: "#C0CAF5", cursorColor: "#C0CAF5", selectionBackground: "#283457",
-  black: "#15161E", red: "#F7768E", green: "#9ECE6A", yellow: "#E0AF68", blue: "#7AA2F7", purple: "#BB9AF7", cyan: "#7DCFFF", white: "#A9B1D6",
-  brightBlack: "#414868", brightRed: "#F7768E", brightGreen: "#9ECE6A", brightYellow: "#E0AF68", brightBlue: "#7AA2F7", brightPurple: "#BB9AF7", brightCyan: "#7DCFFF", brightWhite: "#C0CAF5",
+  name: "Oxygen",
+  background: "#141A17", foreground: "#DCE5DA", cursorColor: "#A9CBA4", selectionBackground: "#2C4A3C",
+  black: "#1E2924", red: "#F2777A", green: "#9BDB7B", yellow: "#E8C26B", blue: "#7FB8D6", purple: "#A798D7", cyan: "#79C7C5", white: "#DCE5DA",
+  brightBlack: "#56635D", brightRed: "#F69A9C", brightGreen: "#B5E89B", brightYellow: "#F0D48F", brightBlue: "#A3CDE3", brightPurple: "#C2B8E4", brightCyan: "#A0DAD8", brightWhite: "#F1F7EE",
 };
 
 /** 하네스 자체 파일 (구성요소 바이너리 외) */
 const HARNESS_FILES = [
-  "installer/components.mjs", "wrappers/sql", "wrappers/jq", "config/ripgreprc", "agent/templates/models.json",
+  "installer/components.mjs", "wrappers/sql", "wrappers/jq", "config/ripgreprc", "config/pi-themes/oxygen.json", "agent/templates/models.json",
   "agent/templates/settings.json", "env.sh", "oxy", "oxy.cmd", "scripts/verify.sh", "manifest/tools.lock.tsv", "scripts/mux/psmux.sh",
 ];
 
@@ -192,6 +199,11 @@ export function createSystem({ root, sandbox = null }) {
       const r = spawnSync("where.exe", ["wt"], { encoding: "utf8" });
       return r.status === 0 ? (r.stdout.split(/\r?\n/).find(Boolean) ?? null) : null;
     },
+    /** Git for Windows 의 mintty (<Git>\usr\bin\mintty.exe, 없으면 null). gitBash 는 <Git>\bin\bash.exe */
+    minttyExe(gitBash) {
+      const p = join(dirname(dirname(gitBash)), "usr", "bin", "mintty.exe");
+      return existsSync(p) ? p : null;
+    },
     /** Git for Windows 아이콘 (배포판에 따라 ucrt64 / mingw64 / clangarm64) */
     gitIcon(gitBash) {
       const root = dirname(dirname(gitBash));
@@ -232,6 +244,8 @@ export function createSystem({ root, sandbox = null }) {
         guid: WT_GUID, name: WT_PROFILE_NAME, startingDirectory: "%USERPROFILE%",
         commandline: `"${run.exe}" ${run.args}`,
         colorScheme: WT_SCHEME.name,
+        // 터미널 글꼴 (docs/tui-spec.md §12): 글꼴이 등록되어 있을 때만 (없는 글꼴을 가리키면 WT 가 경고 창을 띄운다)
+        ...(sys.fontRegistered() ? { font: { face: FONT_FACE } } : {}),
         ...(icon ? { icon } : {}),
       };
       const file = join(dir, "oxygen-pi.json");
@@ -240,14 +254,99 @@ export function createSystem({ root, sandbox = null }) {
     },
     removeTerminalProfile(file) { if (file) rmSync(dirname(file), { recursive: true, force: true }); },
 
+    // ---------------------------------------------------------- 터미널 글꼴 D2Coding (docs/tui-spec.md §12)
+    /** 번들의 글꼴 파일 (없으면 null) */
+    fontBundle() {
+      const lock = readLock(root).find((r) => r.name === "d2coding");
+      const version = lock?.version ?? "";
+      const dir = join(root, "vendor", "fonts", "d2coding");
+      const files = FONT_FILES.map((f) => join(dir, f.file));
+      return version && files.every((f) => existsSync(f)) ? { version, files } : null;
+    },
+    /**
+     * 글꼴 이름이 정확히 D2Coding 인 글꼴이 등록되어 있는가: "system" · "user" · null.
+     * `D2Coding ligature` · `D2Codingligature Nerd Font` 처럼 이름이 다른 글꼴은 해당하지 않는다
+     */
+    fontRegistered() {
+      if (sys._font !== undefined) return sys._font;
+      if (sandbox) {
+        try { sys._font = JSON.parse(readFileSync(join(sandbox, "fonts.json"), "utf8")).registered ?? null; } catch { sys._font = null; }
+        return sys._font;
+      }
+      let out = "";
+      try {
+        out = powershell(`
+          foreach ($k in @('HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts', 'HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts')) {
+            $p = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
+            if ($p -and ($p.PSObject.Properties.Name -contains ${psq(FONT_FILES[0].value)})) { Write-Output $k.Substring(0, 4) }
+          }`);
+      } catch { out = ""; }
+      sys._font = /HKLM/.test(out) ? "system" : /HKCU/.test(out) ? "user" : null;
+      return sys._font;
+    },
+    /**
+     * 설치 · 업데이트: 결과 글과 설치 기록. prev = 지난 설치 기록(reg.font, 우리가 깐 경우만)
+     *   새로 설치 · 이미 있음 · 새 버전으로 바꿈 · 번들에 없어 건너뜀
+     */
+    installFont(prev = null) {
+      const bundle = sys.fontBundle();
+      if (!bundle) return { text: "번들에 없어 건너뜀", record: prev };
+      const where = sys.fontRegistered();
+      if (where && !(prev && prev.version !== bundle.version)) return { text: "이미 있음", record: prev };
+      const dest = join(LOCAL, "Microsoft", "Windows", "Fonts");
+      const placed = FONT_FILES.map((f) => ({ ...f, path: join(dest, f.file) }));
+      if (sandbox) {
+        mkdirSync(dest, { recursive: true });
+        placed.forEach((f, i) => writeFileSync(f.path, `sandbox copy of ${bundle.files[i]}\n`));
+        writeFileSync(join(sandbox, "fonts.json"), JSON.stringify({ registered: "user", values: placed.map((f) => f.value) }, null, 2));
+      } else {
+        if (prev?.files) sys.removeFont(prev);
+        powershell(`
+          $dest = ${psq(dest)}
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Add-Type -Namespace OxyFont -Name W -MemberDefinition '[DllImport("gdi32.dll", CharSet=CharSet.Unicode)] public static extern int AddFontResourceW(string f); [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, UIntPtr w, IntPtr l, uint f, uint t, out UIntPtr r);'
+          ${placed.map((f, i) => `Copy-Item -LiteralPath ${psq(bundle.files[i])} -Destination ${psq(f.path)} -Force
+          New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts' -Name ${psq(f.value)} -Value ${psq(f.path)} -PropertyType String -Force | Out-Null
+          [void][OxyFont.W]::AddFontResourceW(${psq(f.path)})`).join("\n          ")}
+          $r = [UIntPtr]::Zero
+          [void][OxyFont.W]::SendMessageTimeoutW([IntPtr]0xffff, 0x001D, [UIntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$r)`);
+      }
+      sys._font = "user";
+      return { text: prev ? "새 버전으로 바꿈" : "새로 설치", record: { version: bundle.version, files: placed.map((f) => f.path), values: placed.map((f) => f.value) } };
+    },
+    /** 제거: 우리가 깐 글꼴(record)만. 등록을 지우고 파일을 지운다. 사용 중이라 못 지운 파일은 남긴다 */
+    removeFont(record) {
+      if (!record?.files) return "";
+      if (sandbox) {
+        record.files.forEach((f) => rmSync(f, { force: true }));
+        rmSync(join(sandbox, "fonts.json"), { force: true });
+        sys._font = null;
+        return "지움";
+      }
+      const left = powershell(`
+        Add-Type -Namespace OxyFont -Name R -MemberDefinition '[DllImport("gdi32.dll", CharSet=CharSet.Unicode)] public static extern int RemoveFontResourceW(string f);'
+        ${(record.values ?? FONT_FILES.map((f) => f.value)).map((v) => `Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts' -Name ${psq(v)} -ErrorAction SilentlyContinue`).join("\n        ")}
+        $left = 0
+        ${record.files.map((f) => `[void][OxyFont.R]::RemoveFontResourceW(${psq(f)})
+        try { Remove-Item -LiteralPath ${psq(f)} -Force -ErrorAction Stop } catch { if (Test-Path -LiteralPath ${psq(f)}) { $left++ } }`).join("\n        ")}
+        Write-Output $left`);
+      sys._font = undefined;
+      return Number(left) > 0 ? "사용 중이라 파일을 남김" : "지움";
+    },
+
     // ---------------------------------------------------------- 바탕화면 바로가기
     addShortcut(installDir, gitBash, useTerminalProfile, shell = "git-bash") {
       const wt = sys.findWindowsTerminal();
       const viaWt = useTerminalProfile && Boolean(wt);
       const run = sys.launchSpec(shell, installDir, gitBash);
-      const target = viaWt ? wt : run.exe;
-      const args = viaWt ? `-p "${WT_PROFILE_NAME}"` : run.args;
       const icon = (shell === "git-bash" ? sys.gitIcon(gitBash) : run.exe) ?? "";
+      // Windows Terminal 없이 Git Bash: 콘솔 창 대신 mintty 로, 글꼴이 있으면 D2Coding (docs/tui-spec.md §12, pi-tui-spec D7 (b)).
+      // ~/.minttyrc 는 건드리지 않는다. mintty 가 없으면 지금처럼 bash.exe
+      const mintty = !viaWt && shell === "git-bash" ? sys.minttyExe(gitBash) : null;
+      const target = viaWt ? wt : mintty ?? run.exe;
+      const args = viaWt ? `-p "${WT_PROFILE_NAME}"`
+        : mintty ? [sys.fontRegistered() ? `-o Font=${FONT_FACE}` : "", icon ? `-i "${icon}"` : "", `/usr/bin/bash ${run.args}`].filter(Boolean).join(" ")
+        : run.args;
       if (sandbox) {
         const file = join(sandbox, "Desktop", "Oxygen Pi.lnk.json");
         mkdirSync(dirname(file), { recursive: true });

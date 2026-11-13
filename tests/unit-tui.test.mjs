@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { BACK, InputEnded, UI, displayWidth, explainError, truncate, truncatePath } from "../installer/tui.mjs";
+import { BACK, InputEnded, UI, displayWidth, explainError, supportsTaskWarn, truncate, truncatePath } from "../installer/tui.mjs";
 
 // ---------------------------------------------------------------- 원격 모드 (가짜 연결)
 /** exe 대신 지시를 모으고, reply(지시) 가 돌려준 답을 다음 틱에 넣어 준다 */
@@ -227,6 +227,43 @@ test("줄 입력 task: 시작 · 25% 마다 · 끝을 한 줄씩 (회귀 테스�
   assert.equal(t.out(), "  … tdb 접속\n  … tdb 접속  1/4 (25%)\n  … tdb 접속  2/4 (50%)\n  ✓ tdb 접속  성공\n");
 });
 
+test("task warn: 실패해도 던지지 않고 `!` 줄을 남긴다 (줄 입력 · 원격 · 긴 이유는 다음 줄로)", async () => {
+  const warn = "글꼴을 등록하지 못했습니다";
+  const t = lineUI([]);
+  assert.equal(await t.ui.task("글꼴 설치 (D2Coding)", async () => { throw new Error("접근 거부"); }, { warn }), undefined);
+  assert.equal(t.out(), `  … 글꼴 설치 (D2Coding)\n  ! 글꼴 설치 (D2Coding)  ${warn}: 접근 거부\n`);
+  const long = lineUI([]);
+  const reason = "Copy-Item : C:\\Users\\kim\\AppData\\Local\\Microsoft\\Windows\\Fonts\\D2Coding-Ver1.4.0.ttf 파일에 접근할 수 없습니다";
+  await long.ui.task("글꼴 설치 (D2Coding)", async () => { throw new Error(reason); }, { warn });
+  const lines = long.out().split("\n");
+  assert.equal(lines[1], `  ! 글꼴 설치 (D2Coding)  ${warn}`);
+  assert.ok(lines.slice(2).filter(Boolean).every((l) => l.startsWith("    ") && displayWidth(l) <= 74), long.out());
+  // 원격, 예전 exe(task-warn 을 모름): 작업 줄이 ✓ × 만 그리므로 `!` 를 단 글 한 줄로 보낸다. 다음 작업은 이어진다
+  const r = remoteUI();
+  r.ui.screen("  설치하는 중입니다\n");
+  await r.ui.task("글꼴 설치 (D2Coding)", async () => { throw new Error("접근 거부"); }, { warn });
+  await r.ui.task("PATH 등록", async () => {});
+  assert.deepEqual(r.last("task").items, [
+    { label: `! 글꼴 설치 (D2Coding)   ${warn}: 접근 거부`, state: "text", extra: "" },
+    { label: "PATH 등록", state: "done", extra: "" },
+  ]);
+  // 원격, task-warn 을 아는 exe: state:"warn" 으로 보낸다 (기호 `!` 와 노란색은 exe 가 그린다). 이유는 extra, 긴 이유는 다음 줄(text)
+  const sent = [];
+  const link = { send(m) { sent.push(m); } };
+  const w = new UI({ input: new EventEmitter(), output: { isTTY: true, columns: 80, rows: 24, write() { return true; } }, tty: true, remote: link, warnState: true });
+  w.screen("  설치하는 중입니다\n");
+  await w.task("글꼴 설치 (D2Coding)", async () => { throw new Error("접근 거부"); }, { warn });
+  await w.task("글꼴 설치 (D2Coding)", async () => { throw new Error(reason); }, { warn });
+  const items = sent.filter((m) => m.op === "task").at(-1).items;
+  assert.deepEqual(items[0], { label: "글꼴 설치 (D2Coding)", state: "warn", extra: `${warn}: 접근 거부` });
+  assert.deepEqual(items[1], { label: "글꼴 설치 (D2Coding)", state: "warn", extra: warn });
+  assert.ok(items.slice(2).every((x) => x.state === "text" && displayWidth(x.label) <= 72), JSON.stringify(items));
+  // exe 의 `--version` 에 task-warn 낱말이 있어야 안다
+  assert.ok(supportsTaskWarn("oxy-tui 0.4.0 monitor task-warn\n") && !supportsTaskWarn("oxy-tui 0.3.0 monitor\n"));
+  // warn 이 없으면 지금처럼 실패(×)로 던진다
+  await assert.rejects(lineUI([]).ui.task("x", async () => { throw new Error("y"); }), (e) => e.reported === true);
+});
+
 // ---------------------------------------------------------------- 공용 도우미 · 문구
 /** 주석(// … · /* … *\/)을 제외한 코드 줄. 문자열 안의 // 는 주석이 아니다 */
 function codeLines(src) {
@@ -348,10 +385,10 @@ test("터미널 셸: 프로필과 바로가기가 선택한 셸을 하네스 환
     const prof = JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "cmd"), "utf8")).profiles[0];
     assert.equal(prof.commandline, `"${c.exe}" ${c.args}`);
     assert.equal(prof.icon, undefined);
-    // Tokyo Night 색 구성을 같은 조각 파일에 두고 프로필이 그것을 쓴다 (flow-view-spec §4 T3)
+    // Oxygen 색 구성을 같은 조각 파일에 두고 프로필이 그것을 쓴다 (ui-unify-spec §2.0, 예전 Tokyo Night 를 대신함 — flow-view-spec §4 T3)
     const frag = JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "cmd"), "utf8"));
-    assert.equal(prof.colorScheme, "Tokyo Night (Oxygen Pi)");
-    assert.deepEqual([frag.schemes.length, frag.schemes[0].name, frag.schemes[0].background], [1, "Tokyo Night (Oxygen Pi)", "#1A1B26"]);
+    assert.equal(prof.colorScheme, "Oxygen");
+    assert.deepEqual([frag.schemes.length, frag.schemes[0].name, frag.schemes[0].background], [1, "Oxygen", "#141A17"]);
     // 바로가기 (Windows Terminal 프로필 없이): 셸을 직접 연다
     const lnk = JSON.parse(readFileSync(sys.addShortcut(inst, bash, false, "powershell"), "utf8"));
     assert.deepEqual(lnk, { target: p.exe, args: p.args });
@@ -438,7 +475,7 @@ test("모니터 예시 모델: model.ts 가 지금 만드는 것과 tests/fixtur
     // since 는 now 기준 몇 초 전, 모든 모델의 줄 수는 높이 안
     for (const f of files) assert.ok(f.modelHeight <= f.height, `${f.file}: ${f.modelHeight} > ${f.height}`);
     const flow = JSON.parse(readFileSync(join(dir, "flow-23x12.json"), "utf8"));
-    assert.deepEqual([flow.op, flow.kind, flow.title, flow.sections[0].title, flow.sections[0].rows[0].since], ["monitor", "flow", "Flow Monitor", "Current Task", index.generatedAt - 42000]);
+    assert.deepEqual([flow.op, flow.kind, flow.title, flow.sections[0].title, flow.sections[0].rows[0].since], ["monitor", "flow", "Flow", "Current Task", index.generatedAt - 42000]);   // 23칸: `◆ ` 를 더하면 `Flow Monitor` 가 들어가지 않는다 (ui-unify-spec §2.3)
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -448,7 +485,8 @@ test("oxy-tui.exe: --version 에 monitor, demo monitor --model --exit-after 가 
   const { spawnSync } = await import("node:child_process");
   const { DEFAULT_DIR } = await import("./monitor-fixtures.mjs");
   const v = spawnSync(exe, ["--version"], { encoding: "utf8" });
-  assert.match(v.stdout.trim(), /^oxy-tui \d+\.\d+\.\d+ monitor$/, "예전 exe 는 monitor 를 출력하지 않는다. just tui-build");
+  assert.match(v.stdout.trim(), /^oxy-tui \d+\.\d+\.\d+ monitor task-warn$/, "예전 exe 는 monitor · task-warn 을 출력하지 않는다. just tui-build");
+  assert.ok(supportsTaskWarn(v.stdout) && !supportsTaskWarn("oxy-tui 0.3.0 monitor\n") && !supportsTaskWarn(""), "supportsTaskWarn: 낱말로 판단");
   const at = JSON.parse(readFileSync(join(DEFAULT_DIR, "index.json"), "utf8")).generatedAt;
   for (const [name, size] of [["flow-23x12", [23, 12]], ["jobs-23x12", [23, 12]], ["flow-35x28", [35, 28]], ["jobs-35x28", [35, 28]]]) {
     const r = spawnSync(exe, ["demo", "monitor", "--model", join(DEFAULT_DIR, `${name}.json`), "--exit-after", "300", "--size", size.join("x"), "--now", String(at + 5000)], { encoding: "utf8", timeout: 10000 });
@@ -456,7 +494,9 @@ test("oxy-tui.exe: --version 에 monitor, demo monitor --model --exit-after 가 
     const lines = r.stdout.replace(/\r/g, "").split("\n").slice(0, -1);
     assert.equal(lines.length, size[1], `${name}: 줄 수`);
     for (const l of lines) assert.ok(displayWidth(l) <= size[0], `${name}: ${size[0]}칸 넘음: ${l}`);
-    assert.match(lines.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, `${name}: 스피너`);
+    assert.match(lines.join("\n"), /[◐◓◑◒]/, `${name}: 스피너 (D2Coding 1칸 원 기호)`);
+    assert.doesNotMatch(lines.join("\n"), /[⠀-⣿]/, `${name}: 점자 스피너는 D2Coding 에 없다`);
+    assert.ok(lines[0].startsWith("◆ "), `${name}: 띠 제목 앞에 ◆: ${lines[0]}`);
     const clock = name.startsWith("flow") ? "0:47" : "0:17";   // flow: 지금 할 일 42초 전 시작, jobs: 작업 12초 전 시작 (+ 5초)
     assert.ok(new RegExp("\\b" + clock + "\\b").test(lines.join("\n")), `${name}: 경과 m:ss (${clock})`);
   }
@@ -464,4 +504,60 @@ test("oxy-tui.exe: --version 에 monitor, demo monitor --model --exit-after 가 
   assert.equal(bad.status, 2);
   assert.match(bad.stderr, /보기 모델을 읽지 못했습니다/);
   assert.equal(spawnSync(exe, ["--pipe", "x", "--mode", "nope"], { encoding: "utf8" }).status, 2);
+});
+
+// ---------------------------------------------------------------- 터미널 글꼴 D2Coding (docs/tui-spec.md §12)
+test("글꼴 D2Coding: 새로 설치 · 이미 있음 · 새 버전 · 번들에 없음 · 제거, 프로필 font.face 와 mintty 바로가기", async () => {
+  const { mkdirSync } = await import("node:fs");
+  const { createSystem, FONT_FILES } = await import("../installer/system.mjs");
+  const repo = join(import.meta.dirname, "..");
+  const box = mkdtempSync(join(tmpdir(), "oxy-font-"));
+  try {
+    // 가짜 번들: manifest 와 vendor/fonts/d2coding 의 두 TTF
+    const root = join(box, "bundle");
+    mkdirSync(join(root, "manifest"), { recursive: true });
+    writeFileSync(join(root, "manifest", "tools.lock.tsv"), readFileSync(join(repo, "manifest", "tools.lock.tsv"), "utf8"));
+    const sb = (n) => { const d = join(box, n); mkdirSync(d, { recursive: true }); return d; };
+    // 1) 번들에 글꼴이 없으면 건너뛴다
+    let sys = createSystem({ root, sandbox: sb("s0") });
+    assert.deepEqual(sys.installFont(null), { text: "번들에 없어 건너뜀", record: null });
+    mkdirSync(join(root, "vendor", "fonts", "d2coding"), { recursive: true });
+    for (const f of FONT_FILES) writeFileSync(join(root, "vendor", "fonts", "d2coding", f.file), "ttf");
+    // 2) 새로 설치 → 기록 · 등록, 프로필에 font.face
+    const s1 = sb("s1");
+    sys = createSystem({ root, sandbox: s1 });
+    const inst = String.raw`C:\Users\kim\Programs\oxygen-pi`;
+    const bash = String.raw`C:\Program Files\Git\bin\bash.exe`;
+    assert.equal(sys.fontRegistered(), null);
+    assert.equal(JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "git-bash"), "utf8")).profiles[0].font, undefined, "글꼴이 없으면 프로필에 넣지 않는다");
+    const a = sys.installFont(null);
+    assert.equal(a.text, "새로 설치");
+    assert.equal(a.record.version, "1.4.0");
+    assert.deepEqual(a.record.values, ["D2Coding (TrueType)", "D2Coding Bold (TrueType)"]);
+    assert.ok(a.record.files.every((f) => existsSync(f)), "사용자 글꼴 폴더(sandbox)에 복사");
+    assert.equal(sys.fontRegistered(), "user");
+    assert.deepEqual(JSON.parse(readFileSync(sys.addTerminalProfile(inst, bash, "git-bash"), "utf8")).profiles[0].font, { face: "D2Coding" });
+    // 바로가기 (WT 없이 Git Bash): mintty 가 있으면 mintty + -o Font=D2Coding, bash 는 /usr/bin/bash
+    const lnk = JSON.parse(readFileSync(sys.addShortcut(inst, bash, false, "git-bash"), "utf8"));
+    if (sys.minttyExe(bash)) {
+      assert.match(lnk.target, /usr\\bin\\mintty\.exe$/i);
+      assert.match(lnk.args, /^-o Font=D2Coding (-i "[^"]+" )?\/usr\/bin\/bash --login -i -c "source '\/c\/Users\/kim\/Programs\/oxygen-pi\/env\.sh' && cd ~ && exec bash -i"$/);
+    } else assert.equal(lnk.target, bash, "mintty 가 없으면 bash.exe 를 그대로");
+    // 3) 같은 버전을 다시: 이미 있음 (기록 유지)
+    assert.deepEqual(createSystem({ root, sandbox: s1 }).installFont(a.record), { text: "이미 있음", record: a.record });
+    // 4) 지난 기록의 버전이 다르면 바꾼다
+    const old = { ...a.record, version: "1.3.2" };
+    const b = createSystem({ root, sandbox: s1 }).installFont(old);
+    assert.deepEqual([b.text, b.record.version], ["새 버전으로 바꿈", "1.4.0"]);
+    // 5) 다른 사람이 깐 같은 이름의 글꼴: 이미 있음, 기록 없음 (제거 때 건드리지 않는다)
+    const s2 = sb("s2");
+    writeFileSync(join(s2, "fonts.json"), JSON.stringify({ registered: "system" }));
+    assert.deepEqual(createSystem({ root, sandbox: s2 }).installFont(null), { text: "이미 있음", record: null });
+    // 6) 제거: 우리가 깐 것만
+    sys = createSystem({ root, sandbox: s1 });
+    assert.equal(sys.removeFont(null), "");
+    assert.equal(sys.removeFont(b.record), "지움");
+    assert.ok(!b.record.files.some((f) => existsSync(f)));
+    assert.equal(createSystem({ root, sandbox: s1 }).fontRegistered(), null);
+  } finally { rmSync(box, { recursive: true, force: true }); }
 });

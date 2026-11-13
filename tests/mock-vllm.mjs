@@ -33,6 +33,24 @@ const SCENARIOS = {
   "db-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__dbhub__execute_sql(_|$)/.test(n)) ?? "missing_dbhub_tool",
     args: { sql: "select count(*) as n from t" } }],
   "env-mcp": [{ tool: (body) => body.tools?.map((t) => t.function.name).find((n) => /^mcp__envcheck__check$/.test(n)) ?? "missing_envcheck_tool", args: {} }],
+  // oxygen-pi-tui (docs/pi-tui-spec.md): 도구 줄 그리기 확인용. MOCK_GREP_PATH = 찾을 폴더 (기본: 작업 폴더)
+  "tui-tools": [
+    { tool: "read", args: { path: "sample.txt" } },
+    bash("for i in $(seq 1 12); do echo \"로그 줄 $i\"; done"),
+    { tool: "edit", args: { path: "sample.txt", edits: [{ oldText: "hello", newText: "bye" }] } },
+    { tool: "write", args: { path: "notes.md", content: "# 메모\n- 하나\n- 둘\n" } },
+    bash("echo 실패 직전; exit 3"),
+    { text: "tools checked" },
+  ],
+  "tui-search": ((d) => [
+    bash(`cd "${d}" && fd -e ts`),
+    bash(`cd "${d}" && rg -n registerTool`),
+    bash(`cd "${d}" && rg -l registerTool`),
+    bash(`cd "${d}" && rg -c registerTool`),
+    bash(`cd "${d}" && rg zzz_not_here_zzz`),
+    { text: "search checked" },
+  ])(process.env.MOCK_GREP_PATH ?? "."),
+  "tui-grep": [{ tool: "grep", args: { pattern: "registerTool", path: process.env.MOCK_GREP_PATH ?? "." } }, { text: "grep checked" }],
   // oxy-jobs: 백그라운드 작업 → 대화 종료 전 결과 알림 → 이어서 응답
   "bg-start": [{ tool: "background", args: { action: "start", command: "sleep 2; echo bg-finished-ok" } }, { text: "Waiting for the background job." }],
   "bg-guard": [{ tool: "background", args: { action: "start", command: "npm install lodash" } }],

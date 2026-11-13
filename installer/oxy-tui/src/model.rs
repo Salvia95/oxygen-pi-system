@@ -1,5 +1,7 @@
 //! 화면 모델. Node(installer/tui.mjs)가 파이프로 보내는 JSON 과 같은 모양이다 (데모 모드는 같은 모델에 예시 값을 채운다).
 //! 필드 설명이 곧 프로토콜 설명이다. 지시의 종류와 흐름은 protocol.rs 머리말에 있다.
+use std::time::Instant;
+
 use serde::Deserialize;
 
 /// 프레임: 배너 아래에 보일 위치. 설치는 steps + current, 설정(Tweak)은 path
@@ -107,7 +109,7 @@ pub struct ConfirmSpec {
 #[serde(default)]
 pub struct TaskItem {
     pub label: String,
-    /// done | run | fail | wait | text (text 는 작업이 아니라 그냥 한 줄: 오류의 원인 · 해결 방법, 결과 요약)
+    /// done | run | fail | warn | wait | text (warn 은 실패해도 멈추지 않는 작업: `!` 노랑. text 는 작업이 아니라 그냥 한 줄: 오류의 원인 · 해결 방법, 결과 요약)
     pub state: String,
     pub extra: String,
 }
@@ -153,11 +155,18 @@ pub struct App {
     /// 지금 화면을 그대로 둔 채 알리는 잠깐의 작업 (키 안내 자리에 돌아가는 표시와 함께 보인다). 다음 화면이 오면 사라진다
     pub busy: Option<String>,
     pub tick: usize,
+    /// 이 화면 프로그램을 시작한 때 (돌아가는 표시의 모양을 시간으로 정한다)
+    pub born: Instant,
 }
 
 impl App {
     pub fn new(frame: FrameSpec, screen: Screen) -> Self {
-        Self { frame, screen, under: None, help: false, pause: None, frozen: false, busy: None, tick: 0 }
+        Self { frame, screen, under: None, help: false, pause: None, frozen: false, busy: None, tick: 0, born: Instant::now() }
+    }
+
+    /// 돌아가는 표시의 지금 모양 (프레임 하나가 150ms)
+    pub fn spinner(&self) -> &'static str {
+        crate::theme::SPINNER[crate::theme::spinner_frame(self.born.elapsed().as_millis())]
     }
 }
 

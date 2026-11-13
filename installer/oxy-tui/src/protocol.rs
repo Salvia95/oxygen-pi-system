@@ -17,6 +17,7 @@
 //!   {"op":"confirm", "id":N, title, header, context, summary, warning, yes, no, danger, on_yes}   위험 확인 팝업 (아래에 직전 화면)
 //!        → {"id":N,"yes":true|false} · {"id":N,"back":true}
 //!   {"op":"task", title, lines, items:[{label,state,extra}], percent}       진행 화면. 답 없음. 상태가 바뀔 때마다 전체를 다시 보낸다
+//!        state: done ✓ · run 돌아가는 표시 ◐◓◑◒ · fail × · warn `!` 노랑(실패해도 멈추지 않는 작업. extra 는 이유. `--version` 에 task-warn 이 있을 때만 보낸다) · wait · text(그냥 한 줄)
 //!   {"op":"pause", "id":N, "label":"계속"}                                  지금 화면에서 Enter 를 기다린다 → {"id":N}
 //!   {"op":"busy", "label":"삭제할 파일을 세는 중입니다"}                     지금 화면을 그대로 둔 채 키 안내 자리에 진행 표시. 답 없음. 다음 화면 지시가 오면 사라진다
 //!   {"op":"suspend", "id":N}                                               대체 화면과 raw mode 에서 나온다 (verify 를 본 화면에서 돌릴 때) → {"id":N}

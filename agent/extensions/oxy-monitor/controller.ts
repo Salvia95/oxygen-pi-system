@@ -12,12 +12,11 @@ export const KEYS: readonly MonitorKey[] = ["up", "down", "left", "right", "ente
 export const supportsMonitor = (versionOutput: string): boolean => /^oxy-tui \S+ .*\bmonitor\b/m.test(versionOutput);
 
 /**
- * 모니터 exe 의 팔레트 (OXY_TUI_THEME, docs/flow-view-spec.md §4 T2): 이미 정해져 있으면(사용자가 light 등으로 지정) 그대로,
- * 아니면 pi settings.json 의 theme 이 tokyo-night 일 때 tokyo-night. settingsText 는 settings.json 내용 (없으면 null)
+ * 모니터 exe 의 팔레트 (OXY_TUI_THEME): 사용자가 정한 값(light 등)이 있으면 그대로, 아니면 기본(Oxygen 세이지) 팔레트.
+ * pi 테마는 oxygen 하나라 따로 맞출 것이 없다 (Tokyo Night 는 걷어냈다, docs/ui-unify-spec.md §2.0). settingsText 는 예전 호출 모양을 지키려고 받는다
  */
-export function monitorTheme(settingsText: string | null, envTheme: string | undefined): string | undefined {
-  if (envTheme) return envTheme;
-  try { return JSON.parse(settingsText ?? "").theme === "tokyo-night" ? "tokyo-night" : undefined; } catch { return undefined; }
+export function monitorTheme(_settingsText: string | null, envTheme: string | undefined): string | undefined {
+  return envTheme || undefined;
 }
 
 /** 목록에서 key 를 기준으로 한 칸 이동 (없으면 첫 줄) */

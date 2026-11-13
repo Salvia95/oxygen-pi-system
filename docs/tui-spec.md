@@ -86,7 +86,7 @@ mintty 와 Windows Terminal 양쪽에서 **1칸으로 그려지는 글자만** �
 | `▲▼` `←→` | 키 안내의 방향키, `▲ n개 더` |
 | `◀` | flow 모니터의 지금 할 일 (`◀ Current Task`). mintty · Windows Terminal 에서 1칸 확인 (2026-11-13, `docs/flow-view-spec.md`) |
 | `…` | 말줄임, 레이블 끝에서는 "다음 화면이 있다" |
-| 점자 `⠋⠙⠹…` | 진행 중 |
+| `◐ ◓ ◑ ◒` | 진행 중 (150ms 마다 바뀐다. D2Coding 1칸) |
 
 ## 6. 문구
 
@@ -201,6 +201,7 @@ PATH·바로가기에서 정하는 두 값이다. 서로 독립이다. 값은 `a
 | 셸 | 실행 | 하네스 적용 |
 | --- | --- | --- |
 | Git Bash | `"<bash.exe>" --login -i -c "source '<설치>/env.sh' && cd ~ && exec bash -i"` | `env.sh` 전체 |
+| Git Bash 바로가기 (Windows Terminal 없이, §12) | `"<Git>\usr\bin\mintty.exe" -o Font=D2Coding -i "<Git 아이콘>" /usr/bin/bash --login -i -c "source '<설치>/env.sh' && cd ~ && exec bash -i"`. 글꼴이 없으면 `-o Font=…` 를 빼고, mintty 가 없으면 위 줄 | 같다 |
 | 명령 프롬프트 | `%SystemRoot%\System32\cmd.exe /k "set "OXY_HOME=<설치>" & set "PATH=<설치>;%PATH%""` | 설치 폴더만 PATH 앞에. `oxy` → `oxy.cmd` → Git Bash 로 `env.sh` |
 | PowerShell | `<pwsh.exe 또는 powershell.exe> -NoLogo -NoExit -Command "$env:OXY_HOME='<설치>'; $env:Path='<설치>;'+$env:Path"` | 같다. `-Command` 라서 실행 정책(ps1 차단)의 영향을 받지 않는다 |
 
@@ -390,3 +391,50 @@ ID 는 Claude Console 의 Settings → Workspaces 화면 **ID** 열에 있고 `w
 - 연결마다 한 묶음: `7. LLM 연결: site (사내 vLLM)`. 키를 복호화할 수 있는지 → 모델 목록에 등록한 모델이 있는지 → 짧은 요청 하나로 tool call 이 구조화되어 오는지.
 - vLLM 전용 안내(`--enable-auto-tool-choice` 등)와 샘플링 파라미터 거부 확인은 `probe` 가 있는 종류만 한다.
 - 기본 모델과 작업 수준이 가리키는 연결 · 모델이 모두 있는지 확인한다.
+
+## 12. 터미널 글꼴 D2Coding
+
+`docs/pi-tui-spec.md` §8 의 설치 쪽이다. 글꼴 고르기 화면은 두지 않는다 (pi 테마와 같이 하네스 자료로 늘 설치, 사용자 결정 2026-11-13 "D2Coding 폰트를 패킹해서 사용"). 진행 상태: [진행판](dev-board.md) 의 `pi-tui/8` 행.
+승인 (사용자, 2026-11-13: "변경되면 보여주고 8단계 진행하자").
+
+### 작업 줄
+
+| 흐름 | 위치 | 작업 줄 | 결과 글 |
+| --- | --- | --- | --- |
+| 설치 · 다시 설정 | 등록 항목 작업(`PATH 등록` · `Windows Terminal 프로필 등록` · `바탕화면 바로가기 등록`) **앞** | `글꼴 설치 (D2Coding)` | `새로 설치` · `이미 있음` · `번들에 없어 건너뜀` |
+| 업데이트 | `설정 파일 다시 생성` 뒤, `Windows Terminal 프로필 갱신` **앞** | `글꼴 설치 (D2Coding)` | 위와 같다. 우리가 깐 글꼴의 버전이 번들과 다르면 `새 버전으로 바꿈` |
+| 제거 | `바탕화면 바로가기 해제` 뒤, `설치 기록 삭제` 앞 | `글꼴 제거 (D2Coding)` | 우리가 깐 경우만 줄이 나온다. `지움` · 사용 중이라 파일을 지우지 못하면 `사용 중이라 파일을 남김` (등록은 지운다) |
+
+- 등록 항목보다 앞에 두는 이유: Windows Terminal 프로필 · 바로가기가 글꼴 이름을 가리키므로 글꼴이 먼저 있어야 한다.
+- 실패해도 설치를 멈추지 않는다: 작업 줄은 노란색 `!` 와 이유(`글꼴을 등록하지 못했습니다: <이유>`)를 보이고 다음 작업으로 간다. 이유는 줄 끝에 놓고, 74칸을 넘으면 다음 줄에 들여써서 잇는다. 터미널은 지금 글꼴로 동작한다.
+- 확인 단계 요약 · 완료 화면에는 줄을 더하지 않는다 (pi 테마와 같다).
+- `--sandbox` 에서는 sandbox 폴더에 복사 기록만 남기고 레지스트리 · 시스템 글꼴 목록을 건드리지 않는다.
+
+### 동작 (system.mjs, 부모 구현)
+
+- 이미 있음 판정: 글꼴 이름이 정확히 `D2Coding` 인 글꼴이 시스템(`HKLM\…\Fonts`) 이나 사용자(`HKCU\…\Fonts`) 에 등록되어 있으면 그것을 쓴다. `D2Coding ligature` · `D2Codingligature Nerd Font` 처럼 이름이 다른 글꼴은 해당하지 않는다 (이 PC 실측, `docs/pi-tui-spec.md` §1).
+- 새로 설치: 번들의 두 TTF 를 `%LOCALAPPDATA%\Microsoft\Windows\Fonts\` 에 복사하고 `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Fonts` 에 `D2Coding (TrueType)` · `D2Coding Bold (TrueType)` 를 쓴 뒤 `AddFontResource` + `WM_FONTCHANGE` 로 알린다. 설치 기록(`reg.font`)에 `{ version, files }` 를 남긴다.
+- 제거: `reg.font` 가 있을 때만 레지스트리 값과 파일을 지운다. 사용 중인 파일을 다음 로그인 때 지우게 예약하는 것은 관리자 권한이 필요해서 하지 않는다 (구현 중 바꿈, 2026-11-13).
+- 구현 (1, 부모, 2026-11-13): `installer/system.mjs` 의 `FONT_FACE` · `FONT_FILES` · `fontBundle()` · `fontRegistered()` · `installFont(prev) → { text, record }` · `removeFont(record) → 결과 글`, `minttyExe()`, `addTerminalProfile` 의 `font`, `addShortcut` 의 mintty. 단위 `tests/unit-tui.test.mjs` "글꼴 D2Coding". 이 PC 실측(읽기만): `fontRegistered()` = `user`, `fontBundle().version` = `1.4.0`, mintty `C:\Program Files\Git\usr\bin\mintty.exe`. `verify.sh` → `PASS D2Coding 글꼴 (사용자 글꼴)`.
+
+### Windows Terminal 프로필 · 바로가기 (§10 표를 바꾼다)
+
+- `Oxygen Pi` 프로필에 `"font": { "face": "D2Coding" }` 를 더한다 (글꼴이 있을 때만. 글자 크기는 정하지 않는다).
+- Windows Terminal 을 쓰지 않는 Git Bash 바로가기는 콘솔 창 대신 mintty 로 연다 (`docs/pi-tui-spec.md` D7 (b)):
+  `"<Git>\usr\bin\mintty.exe" -o Font=D2Coding -i "<Git 아이콘>" /usr/bin/bash --login -i -c "source '<설치>/env.sh' && cd ~ && exec bash -i"`.
+  mintty 가 없으면 지금처럼 `bash.exe` 를 연다. `~/.minttyrc` 는 건드리지 않는다. 명령 프롬프트 · PowerShell 바로가기는 바꾸지 않는다.
+- 업데이트의 `Windows Terminal 프로필 갱신` · `바탕화면 바로가기 갱신` 이 위 내용을 그대로 다시 쓴다 (§10).
+
+### 상태 점검
+
+- `verify.sh` 에 한 줄: `D2Coding 글꼴` PASS (`사용자 글꼴` · `시스템 글꼴`) / 없으면 WARN `터미널은 지금 글꼴로 동작합니다. install.cmd 의 업데이트로 설치하세요.`
+
+### 구현 순서와 확인 방법
+
+1. `system.mjs` 글꼴 판정 · 설치 · 제거, 프로필 `font.face`, mintty 바로가기 (부모) — 자동 검증: 단위 (이미 있음 · 새로 설치 · 다른 이름 글꼴 · sandbox · 제거 판정), `bash tests/installer-sandbox.sh` (WT 조각의 `font.face`, 바로가기 대상).
+2. 작업 줄 (tui-implementer) — 자동 검증: `just tui-test` · `bash tests/installer-sandbox.sh`. 실측: mintty 80×24 설치 · 업데이트 · 제거 진행 화면 캡처.
+3. 설치본 업데이트 [승인 필요: 실제 설치본] — 실측: WT `Oxygen Pi` 프로필과 바로가기가 D2Coding 으로 열림, `verify.sh` 의 글꼴 줄.
+
+### 정할 것
+
+- 없음 (이 절의 승인만 남음)

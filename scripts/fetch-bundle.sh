@@ -173,17 +173,18 @@ process_row() { # <name> <version> <url> <sha>
   log "✓ $name $version"
 }
 
-# 하네스 자체의 프로그램 · 자료 (oxy-tui.exe, pi 테마). 받지 못해도 fetch 를 멈추지 않는다: 없으면 설치·설정 TUI 가 줄 입력 모드로, pi 가 기본 테마로 동작한다
-harness_note() { case "$1" in pi-tokyo-night) echo "pi 는 기본 테마로 동작합니다" ;; *) echo "설치·설정 TUI 는 줄 입력 모드로 동작합니다" ;; esac; }
+# 하네스 자체의 프로그램 · 자료 (oxy-tui.exe, 글꼴 D2Coding). 받지 못해도 fetch 를 멈추지 않는다: 없으면 설치·설정 TUI 가 줄 입력 모드로, 터미널이 지금 글꼴로 동작한다
+harness_note() { case "$1" in d2coding) echo "터미널은 지금 글꼴로 동작합니다" ;; *) echo "설치·설정 TUI 는 줄 입력 모드로 동작합니다" ;; esac; }
 place_harness() { # <name> <받은 파일>
   local t
   case "$1" in
-    pi-tokyo-night)
-      # 패키지에서 테마 파일만 꺼낸다 (configure 가 agent/themes 로 복사하고 settings 의 theme 으로 고른다)
-      t=$(fresh_tmp pi-tokyo-night); tar --force-local -xzf "$2" -C "$t"   # C:/ 경로를 원격 호스트로 읽지 않게
-      [[ -f "$t/package/themes/tokyo-night.json" ]] || die "pi-tokyo-night: 패키지에 themes/tokyo-night.json 이 없음"
-      mkdir -p "$OXY_HOME/vendor/pi-themes"
-      cp -f "$t/package/themes/tokyo-night.json" "$OXY_HOME/vendor/pi-themes/tokyo-night.json" ;;
+    d2coding)
+      # 릴리스 zip 에서 일반 · 굵게 TTF 와 라이선스만 꺼낸다 (합자판 · TTC · D2CodingAll 은 넣지 않는다, docs/pi-tui-spec.md §8)
+      local f files=(D2Coding/D2Coding-Ver1.4.0-20261003.ttf D2Coding/D2CodingBold-Ver1.4.0-20261003.ttf OFL.txt)
+      t=$(fresh_tmp d2coding); unzip -q -o "$2" "${files[@]}" -d "$t" || die "d2coding: zip 에서 글꼴 파일을 꺼내지 못함"
+      for f in "${files[@]}"; do [[ -f "$t/$f" ]] || die "d2coding: zip 에 $f 가 없음"; done
+      rm -rf "$OXY_HOME/vendor/fonts/d2coding"; mkdir -p "$OXY_HOME/vendor/fonts/d2coding"
+      for f in "${files[@]}"; do cp -f "$t/$f" "$OXY_HOME/vendor/fonts/d2coding/"; done ;;
     *) cp -f "$2" "$BIN/$1.exe" ;;
   esac
 }
