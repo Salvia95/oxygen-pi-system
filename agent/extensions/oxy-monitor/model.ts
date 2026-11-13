@@ -87,6 +87,8 @@ export function doingItem(plan: PlanItem[]): PlanItem | null {
 
 export interface FlowLike {
   goal: string; plan?: PlanItem[];
+  next?: string;      // 모델이 flow_note(kind=next) 로 남긴 다음 단계
+  blocked?: string;   // flow_note(kind=blocked) 로 남긴 막힘 (할 일을 다시 시작하면 oxy-flow 가 지운다)
   nodes: Array<{ id: string; commit: string; title: string; decisions: Array<{ text: string; why?: string }>; files: string[] }>;
   buffer: { decisions: Array<{ text: string; why?: string }>; files: string[]; failures: Array<{ command: string }> };
 }
@@ -188,11 +190,20 @@ export function flowSelection(rows: Row[], plan: PlanItem[], ui: FlowUiState, no
   return rows.find((r) => r.key)?.key ?? null;
 }
 
-/** Current Task 구역: 지금 할 일(이름 · 경과) · pi 상태 줄(높이가 되면) · Next Task */
-export function currentRows(live: LiveState | null, plan: PlanItem[], height: number, now: number): Row[] {
+/**
+ * Current Task 구역: 지금 할 일(이름 · 경과) · pi 상태 줄(높이가 되면) · Next Task.
+ * 진행 중인 할 일이 없으면 (2026-11-14, 계획이 끝난 뒤 새 일을 메모로만 남겨 모니터가 "없음"만 보였다)
+ *   막힘(blocked)이 있으면 `! <막힘>`, 없으면 모델이 남긴 다음 단계(next)를 지금 할 일 자리에 보인다
+ */
+export function currentRows(live: LiveState | null, plan: PlanItem[], height: number, now: number,
+  notes: { next?: string; blocked?: string } = {}): Row[] {
   const cur = doingItem(plan);
+  const nextNote = (notes.next ?? "").trim();
+  const blocked = (notes.blocked ?? "").trim();
   const rows: Row[] = [cur
     ? { marker: "spinner", text: cur.text, since: cur.startedAt ?? cur.at, indent: 0, emphasis: true }
+    : blocked ? { marker: "blocked", text: blocked, indent: 0, emphasis: true }
+    : nextNote ? { marker: "todo", text: nextNote, indent: 0, emphasis: true }
     : { marker: "none", text: "진행 중인 할 일이 없습니다", indent: 0 }];
   if (height >= STATE_ROW_MIN_HEIGHT) {
     const st = stateRow(live, now);
@@ -201,8 +212,10 @@ export function currentRows(live: LiveState | null, plan: PlanItem[], height: nu
     const what = t ? (t.summary ? t.name + " " + t.summary : t.name) + (tools.length > 1 ? " 외 " + (tools.length - 1) + "개" : "") : "";
     rows.push({ marker: "none", text: what ? st.text + " · " + what : st.text, indent: 2 });
   }
+  // 다음 할 일: 계획의 다음 항목. 없으면, 지금 할 일 자리에 쓰지 않은 다음 단계 메모
   const next = nextItem(plan);
-  rows.push({ marker: "none", text: "Next Task: " + (next ? next.text : "없음"), indent: 0 });
+  const shownNote = !cur && !blocked && nextNote;
+  rows.push({ marker: "none", text: "Next Task: " + (next ? next.text : !shownNote && nextNote ? nextNote : "없음"), indent: 0 });
   return rows;
 }
 
@@ -220,7 +233,7 @@ export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: Flo
   const right = leaves.length ? "Total " + leaves.filter((x) => x.status === "done").length + "/" + leaves.length : "";
   const title = !right || TITLE_MARK_WIDTH + w(FLOW_TITLE) + 1 + w(right) <= width ? FLOW_TITLE : "Flow";
   const keys = keyLines(["▲▼ 이동", "Enter 펼치기", "q 닫기"], width, w);
-  const top = currentRows(live, plan, height, now);
+  const top = currentRows(live, plan, height, now, { next: flow?.next, blocked: flow?.blocked });
   const rows = flow ? planRows(flow, ui.open, width) : [{ marker: "none" as Marker, text: "작업 기록이 없습니다.", indent: 0 }];
   // 높이: 맨 윗줄 1 + Current Task 가로줄 1 + 그 줄들 + Overall Task 가로줄 1 + 트리 + (Before Commit Task 가로줄 1 + 그 줄들) + 키 안내.
   // Before Commit Task 는 트리에 최소 3줄(낮으면 남는 만큼)을 남기고 남는 자리만 쓴다 (오래된 줄부터 빼고, 1줄도 안 되면 영역을 뺀다)

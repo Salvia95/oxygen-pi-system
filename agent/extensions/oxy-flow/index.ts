@@ -34,6 +34,11 @@ const findLinked = (plan: PlanItem[], nodeId: string): PlanItem | null => {
 };
 
 const CUSTOM = "oxy-flow";
+/** 계획이 모두 끝났거나 빠진 상태에서 새 요청 · 메모가 오면 덧붙이는 안내 (2026-11-14, Flow Monitor 가 새 일을 못 보던 문제) */
+export const PLAN_DONE_HINT = "All plan items are finished or dropped. If this is new work, add it with flow_plan(action=\"add\", text=...) and mark it doing before you start, so the task log and Flow Monitor follow the work.";
+/** 계획에 항목이 있고, 할 일 · 진행 중인 것이 하나도 없는가 */
+const planFinished = (plan: PlanItem[]): boolean =>
+  plan.length > 0 && !plan.flatMap((p) => [p, ...p.children]).some((i) => i.status === "todo" || i.status === "doing");
 const COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+(?:-[cC]\s+\S+\s+)*commit\b/;
 // Git Bash 경로(/c/x)·상대 경로 → 절대 경로 (표시용이므로 대소문자는 유지)
 function toAbs(p: string, cwd: string): string {
@@ -121,8 +126,12 @@ export default function (pi: ExtensionAPI) {
     const continuing = e.takeContinue();
     if (e.writable) e.ensureGoal(prompt);
     status(ctx);
-    if (!work || injected(ctx)) return undefined;
-    return { message: { customType: CUSTOM, content: renderContext(e.load(), ctxMax, continuing ? "continue" : "reference"), display: false } };
+    const finished = planFinished(e.load().plan);
+    if (!work || injected(ctx)) {
+      return finished && !prompt.startsWith("[oxy-") ? { message: { customType: `${CUSTOM}-hint`, content: PLAN_DONE_HINT, display: false } } : undefined;
+    }
+    const context = renderContext(e.load(), ctxMax, continuing ? "continue" : "reference");
+    return { message: { customType: CUSTOM, content: finished ? `${context}\n\n${PLAN_DONE_HINT}` : context, display: false } };
   });
 
   // ---------------------------------------------------------------- 사실 자동 기록 · 커밋 → 노드
@@ -249,7 +258,8 @@ export default function (pi: ExtensionAPI) {
       if (!text && params.kind !== "done") throw new Error("text is required");
       e.note(params.kind, text, params.why);
       status(ctx);
-      return ok(`Recorded ${params.kind}.`);
+      const hint = (params.kind === "next" || params.kind === "decision") && planFinished(e.load().plan) ? ` ${PLAN_DONE_HINT}` : "";
+      return ok(`Recorded ${params.kind}.${hint}`);
     },
   });
 

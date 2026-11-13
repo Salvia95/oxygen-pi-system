@@ -205,6 +205,8 @@ export class FileFlowEngine implements FlowEngine {
     else if (kind === "next") f.next = t;
     else if (kind === "blocked") f.blocked = t;
     else if (kind === "done") { f.status = "done"; f.next = t || f.next; }
+    // 새 다음 단계 · 끝을 기록하면 막힘은 풀린 것으로 본다 (2026-11-14: 재개한 뒤에도 "작업 중단" 이 남아 모델에게 계속 전달됐다)
+    if (kind === "next" || kind === "done") f.blocked = "";
     if (kind !== "done" && f.status === "done") f.status = "active";
     this.save();
     return f;
@@ -228,7 +230,9 @@ export class FileFlowEngine implements FlowEngine {
   }
 
   updatePlan(id: string, change: { status?: string; text?: string }): PlanItem {
-    const item = updateItem(this.load().plan, id, change);
+    const f = this.load();
+    const item = updateItem(f.plan, id, change);
+    if (change.status === "doing") { f.blocked = ""; if (f.status === "done") f.status = "active"; }   // 다시 시작하면 막힘이 풀린다
     this.save();
     return item;
   }

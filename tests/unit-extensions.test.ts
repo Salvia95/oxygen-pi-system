@@ -498,6 +498,15 @@ test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 ·
     assert.equal(e.writable, true);
     assert.equal(e.hasContent(), false);
     e.ensureGoal("Add login API");
+    // 막힘은 새 다음 단계 · 할 일 시작(doing)으로 풀린다 (2026-11-14)
+    e.note("blocked", "사용자 지시로 중단");
+    e.note("next", "브라우저 확인");
+    assert.equal(e.load().blocked, "");
+    e.note("blocked", "다시 중단");
+    const pi1 = e.addPlan("확인");
+    e.updatePlan(pi1.id, { status: "doing" });
+    assert.equal(e.load().blocked, "");
+    e.updatePlan(pi1.id, { status: "dropped" });
     e.note("decision", "Use JWT", "stateless servers");
     e.recordFile("a.txt");
     e.recordCommand("npm test", false, "FAIL x\n1 failing");
@@ -1117,6 +1126,13 @@ test("oxy-monitor 보기 모델: flow (Current · Next · Overall, [i/n] 트리,
   const idle: any = { ...flow, plan: [item("p1", "끝", "done", [], { startedAt: 0, endedAt: 5000 })] };
   const im = M.flowModel(idle, live, ui, 35, 24, now, w);
   assert.deepEqual([im.sections[0].rows[0].text, im.sections[0].rows.at(-1)!.text, im.right], ["진행 중인 할 일이 없습니다", "Next Task: 없음", "Total 1/1"]);
+  // 계획이 끝난 뒤 모델이 남긴 다음 단계 · 막힘을 보인다 (2026-11-14: 새 일을 메모로만 남겨 "없음"만 보였다)
+  const noted = M.flowModel({ ...idle, next: "브라우저로 대여 폼 제출" }, live, ui, 35, 24, now, w).sections[0].rows;
+  assert.deepEqual([noted[0].marker, noted[0].text, noted.at(-1)!.text], ["todo", "브라우저로 대여 폼 제출", "Next Task: 없음"]);
+  const blockedRows: any = M.flowModel({ ...idle, next: "브라우저로 대여 폼 제출", blocked: "사용자 확인 필요" }, live, ui, 35, 24, now, w).sections[0].rows;
+  assert.deepEqual([blockedRows[0].marker, blockedRows[0].text, blockedRows.at(-1)!.text], ["blocked", "사용자 확인 필요", "Next Task: 브라우저로 대여 폼 제출"]);
+  const doingNote = M.flowModel({ ...flow, next: "메모" }, live, ui, 35, 24, now, w).sections[0].rows;
+  assert.equal(doingNote[0].marker, "spinner", "진행 중인 할 일이 있으면 그것이 먼저");
   const empty = M.flowModel(null, null, ui, 23, 11, now, w);
   assert.deepEqual([empty.sections[1].rows[0].text, empty.right, empty.title], ["작업 기록이 없습니다.", "", "Flow Monitor"]);
   // 다음 할 일: 같은 항목의 다음 할 일, 없으면 다음 항목의 첫 할 일 (할 일 없는 항목은 그 항목)

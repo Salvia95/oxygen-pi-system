@@ -53,7 +53,7 @@ function loadFlow() {
   flowFile ??= join(projectRoot(cwd), ".oxy", "flow", "flow.json");
   try {
     const f = JSON.parse(readFileSync(flowFile, "utf8"));
-    flow = { goal: f.goal ?? "", next: f.next, status: f.status, plan: Array.isArray(f.plan) ? f.plan : [], nodes: f.nodes ?? [],
+    flow = { goal: f.goal ?? "", next: f.next, blocked: f.blocked, status: f.status, plan: Array.isArray(f.plan) ? f.plan : [], nodes: f.nodes ?? [],
       buffer: { decisions: [], files: [], failures: [], ...f.buffer } };
   } catch { flow = null; }
 }
