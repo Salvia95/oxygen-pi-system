@@ -3,6 +3,8 @@
 //                [--max-calls N] [--minutes N] [--rebuild] [--base-url URL] [--suite base|combo] [--llm-from <agent 폴더>]
 // --suite combo: 여러 skill 을 함께 쓰는 상황 시나리오(combo.mjs). 결과는 results-combo.jsonl, 읽은 SKILL.md · 실행한 명령 · 비용을 함께 남긴다.
 // --llm-from: LLM 연결(llm.json)과 키(secrets.json, DPAPI)를 이 agent 폴더에서 읽는다 (기본: 저장소 agent/). 예: 설치본의 agent 폴더
+// --key-env <변수>: 키를 DPAPI 대신 이 환경변수에서 (CI). 값은 대상 연결의 키로만 쓰고 기록하지 않는다
+// --hide a,b: pi 의 PATH 에서 이 명령이 있는 폴더를 뺀다. combo 는 기본 python,python3,py (사이트 PC 처럼 번들 도구만, docs/skill-combo-spec.md C0-1). --hide none 이면 빼지 않는다
 // 모델: agent/llm.json 의 LLM 연결 (docs/tui-spec.md §11). 기본은 기본 모델(main). --level 은 그 작업 수준의 연결 · 모델 · thinking.
 //   --model 이 연결에 없는 모델이면 스냅샷의 llm.json 에만 더한다. --base-url 은 스냅샷에서 그 연결의 주소만 바꾼다.
 //   키는 스냅샷에 복사하지 않는다: 저장소의 secrets.json(DPAPI)에서 한 번 복호화해 pi 에 OXY_LLM_INHERIT_KEYS 로 넘기고 pi 가 받자마자 지운다.
@@ -30,7 +32,7 @@ const WORK = path.join(os.tmpdir(), "oxy-scenario-eval");
 const argv = process.argv.slice(2);
 const label = argv.shift();
 if (!label || label.startsWith("--")) { console.error("usage: run.mjs <label> [options]"); process.exit(2); }
-const opt = { only: null, model: null, level: null, thinking: null, tools: null, set: {}, minutes: null, rebuild: false, baseUrl: null, rev: null, maxCalls: null, suite: "base", llmFrom: null };
+const opt = { only: null, model: null, level: null, thinking: null, tools: null, set: {}, minutes: null, rebuild: false, baseUrl: null, rev: null, maxCalls: null, suite: "base", llmFrom: null, keyEnv: null, hide: null };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--only") opt.only = argv[++i].split(",");
@@ -46,6 +48,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--base-url") opt.baseUrl = argv[++i];
   else if (a === "--suite") opt.suite = argv[++i];
   else if (a === "--llm-from") opt.llmFrom = argv[++i];
+  else if (a === "--key-env") opt.keyEnv = argv[++i];
+  else if (a === "--hide") opt.hide = argv[++i];
   else { console.error(`unknown option ${a}`); process.exit(2); }
 }
 
@@ -55,6 +59,7 @@ const COMBO_SUITE = opt.suite === "combo";
 opt.maxCalls ??= COMBO_SUITE ? 25 : 8;
 opt.minutes ??= COMBO_SUITE ? 40 : 8;
 const RESULTS = path.join(HERE, COMBO_SUITE ? "results-combo.jsonl" : "results.jsonl");
+const HIDE = (opt.hide ?? (COMBO_SUITE ? "python,python3,py" : "none")) === "none" ? [] : (opt.hide ?? "python,python3,py").split(",").filter(Boolean);
 const LLM_SRC = path.resolve(opt.llmFrom ?? path.join(ROOT, "agent"));
 const fwd = (p) => p.replace(/\\/g, "/");
 const T = path.join(WORK, label);
@@ -136,8 +141,13 @@ function resolveTarget(meta) {
     key: `${conn.id}/${model}${thinking && thinking !== "off" ? `:${thinking}` : ""}` };
 }
 
-/** 키: 저장소 secrets.json 에서 한 번 복호화해 pi 에만 넘긴다 (스냅샷 · 결과 파일 · 화면에는 남기지 않는다) */
+/** 키: 저장소 secrets.json 에서 한 번 복호화해 pi 에만 넘긴다 (스냅샷 · 결과 파일 · 화면에는 남기지 않는다). --key-env 면 그 환경변수의 값을 대상 연결의 키로 */
 function inheritKeys() {
+  if (opt.keyEnv) {
+    const v = process.env[opt.keyEnv];
+    if (!v) throw new Error(`환경변수 ${opt.keyEnv} 가 비어 있음 (CI 비밀을 확인하세요)`);
+    return Buffer.from(JSON.stringify({ [L.secretKey(target.connection)]: v })).toString("base64");
+  }
   const llm = L.loadLlm(AGENT);
   const keys = getSecrets(LLM_SRC, llm.connections.map((c) => L.secretKey(c.id)));
   return Object.keys(keys).length ? Buffer.from(JSON.stringify(keys)).toString("base64") : "";
@@ -150,7 +160,7 @@ function runPi(prompt, cwd, eventsFile) {
   return new Promise((resolve) => {
     const args = [process.env.OXY_PI_CLI, "--no-session", "--mode", "json", "--provider", target.provider, "--model", target.model, "--thinking", target.thinking, prompt];
     // 시험 조건: oxy-flow 끔(추가 턴 방지), 도구 출력 상한을 낮춤(Groq 분당 8000 토큰 = 요청 1건 크기 제한 때문). 모든 구성에 동일.
-    const env = { ...process.env, PI_CODING_AGENT_DIR: fwd(AGENT), OXY_FLOW: "off", OXY_TOOL_OUTPUT_MAX_CHARS: "4000", OXY_READ_MAX_CHARS: "6000",
+    const env = { ...process.env, ...hiddenPath(), PI_CODING_AGENT_DIR: fwd(AGENT), OXY_FLOW: "off", OXY_TOOL_OUTPUT_MAX_CHARS: "4000", OXY_READ_MAX_CHARS: "6000",
       PI_PACKAGE_DIR: fwd(PI_PKG_COPY), ...(keysB64 ? { OXY_LLM_INHERIT_KEYS: keysB64 } : {}), ...meta.set, ...opt.set };
     const child = spawn(process.env.OXY_NODE, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out = fs.createWriteStream(eventsFile);
@@ -211,7 +221,7 @@ const done = new Set(fs.existsSync(RESULTS)
 const meta = build();
 const target = resolveTarget(meta);
 const keysB64 = inheritKeys();
-console.log(`[${label}] tools=${meta.tools.join(",")} model=${target.key}`);
+console.log(`[${label}] tools=${meta.tools.join(",")} model=${target.key}${HIDE.length ? ` hide=${HIDE.join(",")}` : ""}`);
 const started = Date.now();
 const SUITE = COMBO_SUITE ? COMBO : SCENARIOS;
 const todo = SUITE.filter((s) => (!opt.only || opt.only.includes(s.id)) && !done.has(`${label}|${target.key}|${s.id}`));
@@ -237,7 +247,7 @@ for (const [i, s] of todo.entries()) {
     pass: verdict.pass && !m.capped, note: m.capped ? `도구 호출 ${opt.maxCalls}회 상한에서 중단` : verdict.note, requests: m.requests, firstIn: m.firstIn, inTok: m.inTok, outTok: m.outTok,
     toolOut: m.calls.reduce((a, c) => a + c.out, 0), toolRaw: m.calls.reduce((a, c) => a + c.raw, 0),
     calls: m.calls, retries: m.retries.length, errors: m.errors, timedOut: m.timedOut, capped: m.capped, seconds: Math.round((Date.now() - t0) / 1000),
-    cost: Number(m.cost.toFixed(5)), ...(usage ? { skills: usage, skillsUsed: usage.filter((u) => u.ran).length, skillsExpected: usage.length } : {}),
+    cost: Number(m.cost.toFixed(5)), ...(HIDE.length ? { hidden: HIDE } : {}), ...(usage ? { skills: usage, skillsUsed: usage.filter((u) => u.ran).length, skillsExpected: usage.length } : {}),
     text: short(m.text, 600),
   };
   if (usage) console.log(`         skills ${usage.map((u) => `${u.skill}:${u.read ? "읽음" : "-"}/${u.ran ? "실행" : "-"}`).join(" ")} cost=${rec.cost}`);
@@ -264,4 +274,14 @@ function skillUsage(skills, m) {
   }
   return skills.map((skill) => ({ skill, read: m.reads.some((r) => new RegExp(`skills[\\\\/]${skill}[\\\\/]SKILL\\.md$`, "i").test(r)),
     ran: (BIN[skill] ?? []).some((b) => heads.has(b)) }));
+}
+
+/** PATH 에서 숨길 명령(HIDE)이 있는 폴더를 뺀 환경 (Windows 는 Path 키일 수 있다). 숨길 것이 없으면 빈 객체 */
+function hiddenPath() {
+  if (!HIDE.length) return {};
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  const sep = process.platform === "win32" ? ";" : ":";
+  const has = (dir) => HIDE.some((n) => ["", ".exe", ".cmd", ".bat"].some((x) => { try { return fs.statSync(path.join(dir, n + x)).isFile(); } catch { return false; } }));
+  const kept = String(process.env[key] ?? "").split(sep).filter((d) => d && !has(d));
+  return { [key]: kept.join(sep) };
 }

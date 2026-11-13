@@ -1,0 +1,8 @@
+{
+  "note": "skill 상황 시험의 기준선 (docs/skill-combo-spec.md §4 · §5). CI 판정은 여기서 합격이던 시나리오가 합격하지 못하면 실패. 사람이 PR 로 갱신한다.",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "hidden": ["python", "python3", "py"],
+  "measuredAt": "2026-11-13",
+  "labels": ["hide-r1"],
+  "accepted": ["sales", "failtest"]
+}

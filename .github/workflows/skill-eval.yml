@@ -1,0 +1,79 @@
+# skill 상황 시험을 실제 모델(Claude Haiku)로 (docs/skill-combo-spec.md §4).
+# 언제: 수동 실행 · 매일 1번(main) · PR 에 skill-eval 레이블을 붙였을 때 (C2). 2번 돌려 시나리오마다 1번 이상 합격이면 통과 (C3).
+# 비밀: GitHub Environment "llm-eval" 의 ANTHROPIC_API_KEY (승인자를 둔다. fork PR 에는 열리지 않는다). 키는 환경변수로만 pi 에 넘기고 기록하지 않는다.
+# 판정은 2026-11-27 까지 보고만 한다 (C5: 2주 뒤 필수 검사로 바꿀 때 아래 continue-on-error 를 지운다).
+name: skill-eval
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"   # 매일 03:00 (KST)
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-eval
+  cancel-in-progress: false
+
+jobs:
+  combo:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'skill-eval'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: llm-eval
+    defaults:
+      run:
+        shell: bash
+    env:
+      LABEL: ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+
+      - name: 내려받은 구성요소 캐시
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        with:
+          path: .cache/downloads
+          key: bundle-${{ runner.os }}-${{ hashFiles('manifest/**') }}
+
+      - name: 구성요소 받기
+        run: bash scripts/fetch-bundle.sh --select=just,hurl,usql,ast-grep
+
+      # 저장소의 agent/llm.json 대신 시험용 연결 (키 없음). 조직 키라 워크스페이스가 필요하면 변수 ANTHROPIC_WORKSPACE_ID 를 둔다
+      - name: 시험용 LLM 연결
+        env:
+          WS: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/llm"
+          ./bin/jq.exe --arg ws "$WS" 'if $ws != "" then .connections[0].workspaceId = $ws else . end' tests/scenario-eval/ci-llm.json > "$RUNNER_TEMP/llm/llm.json"
+
+      - name: 시험 (2번)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          for r in 1 2; do
+            bash tests/scenario-eval/run.sh "$LABEL-r$r" --suite combo --llm-from "$(cygpath -m "$RUNNER_TEMP/llm")" --key-env ANTHROPIC_API_KEY \
+              --model anthropic-claude/claude-haiku-5-5 --thinking low
+          done
+
+      - name: 판정 (Job Summary)
+        continue-on-error: true   # C5: 2026-11-27 까지 보고만
+        run: bash tests/scenario-eval/run.sh --report --suite combo --gate "$LABEL-" --markdown "$GITHUB_STEP_SUMMARY"
+
+      # 시험의 작업 폴더는 시스템 임시 폴더(TEMP)에 있다 (run.mjs). 이벤트 로그를 작업 공간으로 모은다
+      - name: 기록 모으기
+        if: always()
+        run: |
+          mkdir -p eval-out
+          cp tests/scenario-eval/results-combo.jsonl eval-out/ 2>/dev/null || true
+          for d in "$TEMP"/oxy-scenario-eval/"$LABEL"-r*; do [[ -d $d ]] && mkdir -p "eval-out/$(basename "$d")" && cp "$d"/events-*.jsonl "$d"/meta.json "eval-out/$(basename "$d")/" 2>/dev/null; done; true
+
+      - name: 기록 올리기
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: skill-eval-${{ github.run_id }}
+          path: eval-out/
+          retention-days: 90

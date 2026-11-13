@@ -1282,3 +1282,19 @@ test("oxy-monitor: 모니터 pane 은 화면을 그린 본 대화가 끝날 때�
   assert.equal(closesMonitorsOnShutdown("quit", false), false);   // subagent (-p, 화면 없음): 부모 pane 의 TMUX 를 물려받아도 닫지 않는다
   assert.equal(closesMonitorsOnShutdown("new", true), false);     // /new · 세션 넘기기
 });
+
+test("skill 상황 시험 CI 판정: 반복 중 1번 합격이면 통과 · 기준선보다 나빠지면 실패 · 합격 = 결과 PASS + skill 2개 이상 (skill-combo-spec §4 C3)", async () => {
+  const { gate, accepted } = await import("./scenario-eval/gate.mjs");
+  const r = (scenario: string, pass: boolean, used: number) => ({ scenario, pass, skillsUsed: used, skillsExpected: 2 });
+  assert.equal(accepted(r("a", true, 1)), false);                     // 결과는 맞아도 skill 1개면 불합격
+  assert.equal(accepted(r("a", false, 2)), false);
+  assert.equal(accepted(r("a", true, 2)), true);
+  const rows = [r("a", true, 2), r("a", false, 0), r("b", true, 1), r("b", true, 1), r("c", true, 3)];
+  let g = gate(rows, { accepted: ["a"] });
+  assert.deepEqual([g.ok, g.regressed, g.improved], [true, [], ["c"]]);
+  assert.deepEqual(g.scenarios.map((s) => [s.id, s.passCount, s.runs]), [["a", 1, 2], ["b", 0, 2], ["c", 1, 1]]);
+  g = gate(rows, { accepted: ["a", "b"] });
+  assert.deepEqual([g.ok, g.regressed], [false, ["b"]]);              // 기준선에서 합격이던 b 가 이번에 불합격
+  assert.deepEqual(gate(rows, { accepted: ["d"] }).regressed, ["d"]);  // 기준선 시나리오가 돌지 않음도 실패
+  assert.equal(gate(rows, null).ok, true);
+});

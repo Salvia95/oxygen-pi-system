@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "connections": [
+    {
+      "id": "anthropic-claude",
+      "kind": "anthropic",
+      "name": "Anthropic Claude",
+      "baseUrl": "https://api.anthropic.com",
+      "maxConcurrent": 4,
+      "request": {
+        "retries": 2
+      },
+      "models": [
+        {
+          "id": "claude-haiku-5-5",
+          "contextWindow": 128000,
+          "maxOutput": 16384
+        }
+      ]
+    }
+  ],
+  "main": {
+    "connection": "anthropic-claude",
+    "model": "claude-haiku-5-5",
+    "thinking": "low"
+  }
+}

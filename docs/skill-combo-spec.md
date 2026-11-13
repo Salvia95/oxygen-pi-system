@@ -109,6 +109,8 @@ CI 는 Claude Haiku 로 잰다. 사이트의 vLLM(Qwen)은 GitHub 러너에서 �
 - 결과는 대부분 맞았다 (8번 중 6 PASS, 판정 수정 뒤 7). skill 을 쓰지 않아도 일은 되지만, 사이트 PC 에 Python 이 없으면 `sales` 같은 일의 방법이 사라진다.
 - 합격(결과 PASS + skill 2개 이상): r1 1/4, r2 1/4. 기대 skill 중 `usql` · `hurl` · `ast-grep` 은 8번 동안 한 번도 실행되지 않았다.
 - 읽기 전 편집 금지(`oxy-read-before-edit`)에 막힌 편집이 `deprecate` 에서 매번 7번 나왔다 (호출 낭비의 대부분).
+- **Python 을 숨기면 (C0-1, `hide-r1`, $0.010)**: 결과는 4개 모두 PASS. `sales` 가 `usql` + `jq` 로 바뀌어 2/2, `failtest` 3/3 (`jq` 까지), `api` 1/2(`hurl` 안 씀), `deprecate` 1/2(`ast-grep` 안 씀, 이번에는 bash 로 바꿈). 합격 2/4. 여전히 `SKILL.md` 를 읽은 적은 없다.
+  두 번째(`hide-r2`)는 이 PC 의 메모리가 부족해 Claude Code 가 중간에 멈췄다 (기록 없음). 기준선(`baseline-combo.json`)은 `hide-r1` 하나로 정했다: 합격 `sales` · `failtest`.
 - 측정 고침: Claude 는 첫 요청 입력이 `cacheWrite` 로 오므로, 입력 토큰에 `cacheWrite` 를 더했다 (r1 의 `first=4` 는 이 때문).
 
 ## 6. 구현 순서와 확인 방법

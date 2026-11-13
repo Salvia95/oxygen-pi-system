@@ -1,8 +1,10 @@
 // results.jsonl 을 시나리오 × 구성 표로 보여 준다.  node report.mjs [--model id] [--calls] [--suite combo]
 // --suite combo: results-combo.jsonl 을 skill 사용(읽음/실행) · 비용과 함께 (docs/skill-combo-spec.md §3)
+// --gate <label 앞부분> [--baseline 파일] [--markdown 파일]: 그 label 들(반복)을 합쳐 CI 판정. 통과 0 · 실패 1. markdown 은 Job Summary 용 표
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gate } from "./gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -12,6 +14,21 @@ const combo = args.includes("--suite") && args[args.indexOf("--suite") + 1] === 
 const rows = fs.readFileSync(path.join(HERE, combo ? "results-combo.jsonl" : "results.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
   .filter((r) => !model || r.model === model);
 
+if (args.includes("--gate")) {
+  const prefix = args[args.indexOf("--gate") + 1];
+  const bf = args.includes("--baseline") ? args[args.indexOf("--baseline") + 1] : path.join(HERE, "baseline-combo.json");
+  const baseline = fs.existsSync(bf) ? JSON.parse(fs.readFileSync(bf, "utf8")) : { accepted: [] };
+  const mine = rows.filter((r) => r.label.startsWith(prefix));
+  if (!mine.length) { console.error(`${prefix} 로 시작하는 기록이 없음`); process.exit(1); }
+  const g = gate(mine, baseline);
+  const cost = mine.reduce((a, r) => a + (r.cost ?? 0), 0);
+  const md = [`### skill 상황 시험 (${prefix}, ${mine[0].model})`, "", "| 시나리오 | 합격 | 반복 | 기준선 | skill 실행 (반복별) |", "| --- | --- | --- | --- | --- |",
+    ...g.scenarios.map((s) => `| ${s.id} | ${s.accepted ? "✓" : "×"} | ${s.passCount}/${s.runs} | ${s.inBaseline ? "합격" : "-"} | ${mine.filter((r) => r.scenario === s.id).map((r) => `${r.skillsUsed}/${r.skillsExpected}${r.pass ? "" : " (결과 FAIL)"}`).join(", ")} |`),
+    "", `판정: **${g.ok ? "통과" : "실패"}**${g.regressed.length ? ` — 기준선보다 나빠짐: ${g.regressed.join(", ")}` : ""}${g.improved.length ? ` · 새로 합격: ${g.improved.join(", ")}` : ""} · 비용 ${cost.toFixed(4)}`];
+  console.log(md.join("\n"));
+  if (args.includes("--markdown")) fs.appendFileSync(args[args.indexOf("--markdown") + 1], md.join("\n") + "\n");
+  process.exit(g.ok ? 0 : 1);
+}
 const labels = [...new Set(rows.map((r) => `${r.label} @${r.model}`))];
 const scenarios = [...new Set(rows.map((r) => r.scenario))];
 for (const s of scenarios) {

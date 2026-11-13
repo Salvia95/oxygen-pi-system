@@ -62,7 +62,7 @@
 | `tui-fix/1` | 업데이트가 등록된 WT 프로필 · 바로가기를 다시 씀 (§10) | 완료 | `tests/installer-sandbox.sh` 통과 (새 검사 6개: 낡게 만든 WT 조각 · 바로가기가 업데이트로 돌아옴, 등록하지 않은 바로가기는 만들지 않음, 기록된 셸) · 단위 `# pass 72` (부모가 다시 실행, 2026-11-13) | mintty 80×24 업데이트 화면 캡처 (작업 줄 두 개, tui-implementer 2026-11-13) | `docs/tui-spec.md` §10 |
 | `tui-fix/2` | 점검 화면 `번들 구성요소` 줄: 설명을 경로 앞에 (§6) | 완료 | `tests/installer-sandbox.sh` 통과 (2026-11-13) | mintty 80×24 점검 화면 캡처: `필수 5개 확인 · C:\Users\…\workspace\oxygen-pi-system` (2026-11-13) | `docs/tui-spec.md` §6 |
 | `skill-combo/1` | combo 시나리오 · 기록 (§2 §3) | 완료 | LLM 없이 판정 검사: 손대지 않은 자료 4 FAIL · 정답 4 PASS (2026-11-13 부모) | claude-haiku-5-5 두 번 (`combo-r1` · `combo-r2`), 합격 1/4 · 1/4, SKILL.md 읽음 0 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
-| `skill-combo/2` | `report.mjs --gate` · `run.mjs --key-env` (§4) | 예정 | – | – | – |
+| `skill-combo/2` | `report.mjs --gate` · `run.mjs --key-env` · `--hide` (§4) | 완료 | 단위 `CI 판정` 시험 (`gate.mjs`), 기준 `HEAD af5bdfa + 미커밋` (2026-11-13 부모) | Python 을 숨긴 하이쿠 `hide-r1`: 합격 2/4 → `baseline-combo.json`. `--key-env` 는 CI 첫 실행에서 확인 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
 | `skill-combo/3` | `ci.yml` (mock 시험, 승인 필요) | 예정 | – | – | – |
 | `skill-combo/4` | `skill-eval.yml` (하이쿠, 승인 필요) | 예정 | – | – | – |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
