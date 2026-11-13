@@ -404,7 +404,8 @@ export class FileFlowEngine implements FlowEngine {
     // 지금 진행 중인 할 일에 커밋을 붙인다 (계획이 있을 때)
     const cur = currentItem(f.plan);
     if (cur) for (const n of made) if (!cur.nodes.includes(n.id)) cur.nodes.push(n.id);
-    f.buffer = { ...empty(), failures: f.buffer.failures, jobs: f.buffer.jobs };
+    // 커밋하면 커밋 전 작업(결정 · 파일 · 실패)을 비운다: Flow Monitor 의 Before Commit Task 가 사라진다 (docs/flow-view-spec.md). 작업 목록은 둔다
+    f.buffer = { ...empty(), jobs: f.buffer.jobs };
     this.save();
     return made;
   }

@@ -51,6 +51,12 @@ pi 세션이 시작될 때(`session_start`) 위에서부터 처음 맞는 것을
 - 모델에게 넣는 작업 상태 맨 위에 `Work repository: <경로> (pi was started elsewhere; run git and builds there)` 를 넣는다.
 - 구현 (2026-11-13): `oxy-flow/store.ts` (`repoOf` · `commandDirs` · `workRoot` · `noteWorkPath` · `syncCommits` · `renderContext`), `oxy-flow/index.ts` (`tool_result` · `/flow rollback`). 단위: git 이 아닌 시작 폴더 + 옆 저장소에서 커밋 → `n1 feat: events` (`repo` = 옆 저장소), 기록은 시작 폴더의 `.oxy/flow`, `cd` · `git -C` 풀기.
 
+## 1-3. 커밋하면 커밋 전 작업을 모두 비운다 (2026-11-13)
+
+- 커밋을 노드로 만들 때 버퍼의 결정 · 파일과 함께 **실패한 명령도** 비운다 (작업 목록은 둔다). 전에는 해결 안 된 실패를 커밋 뒤에도 남겨 모델에게 넘겼다.
+- 이유: 사용자 요청으로 Flow Monitor 의 `Before Commit Task` 는 커밋하면 사라져야 한다 (`docs/flow-view-spec.md`). 커밋했다면 그 전의 실패는 대개 해결되었다.
+- 구현: `oxy-flow/store.ts` 의 `syncCommits`. 단위: 커밋 뒤 `failures` 0, 커밋 뒤 새 실패는 같은 명령이 성공하면 풀린다.
+
 ## 2. 구현 순서와 확인 방법
 
 1. 세션 단위 기록 (§1) — 자동 검증: 단위(`tests/unit-extensions.test.ts` 의 "oxy-flow: 작업 기록은 세션 단위") + E2E(`tests/e2e-mock.sh` 의 flow 검사: 새 세션은 빈 기록, 다시 연 세션은 기록과 계획 · 다음 할 일 주입) / 실측: 대화형 pi 로 새로 시작 · `/resume`

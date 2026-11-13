@@ -99,6 +99,24 @@ q 닫기
 
 **기호**: `◀` 는 `docs/tui-spec.md` §5 표에 없는 새 기호다. `▲▼` 와 같은 모양 글자라 1칸일 것으로 보지만, mintty · Windows Terminal 캡처로 1칸인지 확인한 뒤 §5 표에 더한다. 2칸으로 그려지면 `<` 를 쓴다.
 
+### Before Commit Task (2026-11-13)
+
+요청 (사용자, 2026-11-13): "Jobs 라고 되어 있던 것들을 Task 로 바꾸고 background 와 같은 작업을 Jobs 로 표현하자, "job-1 중지됨" 과 같은 문구도 "Job-1 done!", "Job-1 stoped..", "Job-1 timeouted.." 와 같이 표현하고 부정적인 것에는 빨강색을, 긍정적인 것에는 기존과 같이 초록색을 그 둘 중 아무것도 아닐 때는 노랑색 … 하단 statusbar 에 Flow: n/n Jobs: n 과 같이 콜론 … Jobs 가 0 일 때도 표시 … Flow Monitor 에서는 커밋 전 작업을 Before Commit Task 로 명명하고 … 구분선으로 영역을 나눠줘, 이 부분은 커밋되면 사라지도록"
+
+```
+── Overall Task ───────────────────
+…
+── Before Commit Task ─────────────   ← 커밋 전 작업이 있을 때만
+테스트는 vitest 로                      ← 결정 (최근 2)
+변경 파일 3개
+× npm test                              ← 실패한 명령 (최근 3, 앞의 cd <긴 경로> 는 …/<폴더>)
+```
+
+- "커밋 전 작업" 을 Overall Task 트리에서 빼고 셋째 구역 `Before Commit Task` 로 둔다 (가로줄 안 제목, Current Task · Overall Task 와 같은 모양).
+- 커밋하면 사라진다: oxy-flow 가 커밋을 노드로 만들 때 버퍼의 결정 · 파일 · **실패**를 비운다 (전에는 해결 안 된 실패를 커밋 뒤에도 남겼다, `docs/flow-spec.md`).
+- 높이: 트리에 최소 3줄(낮은 창이면 남는 만큼)을 남기고 남는 자리만 쓴다. 모자라면 오래된 줄부터 빼고, 1줄도 안 되면 구역을 뺀다. 최대 6줄.
+- 구현 (2026-11-13, 부모): `oxy-monitor/model.ts` (`beforeCommitRows` · `flowModel`), `oxy-flow/store.ts` (`syncCommits`). 화면 프로그램은 구역 수에 매이지 않아 새 릴리스가 필요 없다 (Rust 시험만 셋째 구역을 허용하도록). 실측: oxy-tui 0.4.0 `demo monitor` 35×28 에서 `── Before Commit Task ──` 아래 결정 · `변경 파일 3개` · `× npm test`.
+
 ## 3. 걸린 시간 기록 (oxy-flow)
 
 - `PlanItem` 에 `startedAt?`(처음 `doing` 이 된 시각) · `endedAt?`(`done` 이 된 시각)을 더한다. 다시 `doing` 으로 돌아가면 `endedAt` 을 지우고 `startedAt` 은 둔다.

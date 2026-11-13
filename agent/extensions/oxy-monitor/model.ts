@@ -155,16 +155,27 @@ export function planRows(flow: FlowLike, open: Set<string>, width: number): Row[
     rows.push({ marker: "none", text: plan.length ? "계획 밖 커밋" : "커밋", indent: 0, emphasis: true });
     commitRows(outside.slice(-20), undefined, 2);
   }
-  const b = flow.buffer;
-  if (b.decisions.length || b.files.length || b.failures.length) {
-    rows.push({ marker: "none", text: "커밋 전 작업", indent: 0, emphasis: true });
-    for (const d of b.decisions) rows.push({ marker: "none", text: d.text, indent: 2 });
-    if (b.files.length) rows.push({ marker: "none", text: "변경 파일 " + b.files.length + "개", indent: 2 });
-    // 앞의 `cd <긴 경로> &&` 는 마지막 폴더만 (pi 도구 줄과 같은 규칙, 실제 명령이 잘려 보이지 않게)
-    for (const x of b.failures) rows.push({ marker: "failed", text: commandHead(x.command), indent: 2, error: true });
-  }
   if (!rows.length) rows.push({ marker: "none", text: "작업 기록이 없습니다.", indent: 0 });
   return rows;
+}
+
+/** Before Commit Task 영역이 차지할 수 있는 줄 수 */
+export const BEFORE_COMMIT_MAX = 6;
+
+/**
+ * Before Commit Task 영역 (사용자, 2026-11-13: "커밋 전 작업을 Before Commit Task 로 … 구분선으로 영역을 나눠줘, 커밋되면 사라지도록").
+ * 마지막 커밋 뒤의 결정 · 변경 파일 수 · 실패한 명령. 커밋하면 oxy-flow 가 버퍼를 비우므로(실패 포함) 영역이 사라진다.
+ * 넘치면 실패 · 결정의 오래된 것부터 뺀다 (최근 실패 3 · 결정 2 우선)
+ */
+export function beforeCommitRows(flow: FlowLike | null): Row[] {
+  const b = flow?.buffer;
+  if (!b || !(b.decisions.length || b.files.length || b.failures.length)) return [];
+  const rows: Row[] = [];
+  for (const d of b.decisions.slice(-2)) rows.push({ marker: "none", text: d.text, indent: 0 });
+  if (b.files.length) rows.push({ marker: "none", text: "변경 파일 " + b.files.length + "개", indent: 0 });
+  // 앞의 `cd <긴 경로> &&` 는 마지막 폴더만 (pi 도구 줄과 같은 규칙, 실제 명령이 잘려 보이지 않게)
+  for (const x of b.failures.slice(-3)) rows.push({ marker: "failed", text: commandHead(x.command), indent: 0, error: true });
+  return rows.slice(-BEFORE_COMMIT_MAX);
 }
 
 /** 고른 줄: 사용자가 움직인 뒤 MANUAL_HOLD_MS 동안은 사용자 위치, 그 밖에는 늘 지금 할 일 (없으면 사용자 위치 · 첫 줄) */
@@ -211,14 +222,20 @@ export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: Flo
   const keys = keyLines(["▲▼ 이동", "Enter 펼치기", "q 닫기"], width, w);
   const top = currentRows(live, plan, height, now);
   const rows = flow ? planRows(flow, ui.open, width) : [{ marker: "none" as Marker, text: "작업 기록이 없습니다.", indent: 0 }];
-  // 높이: 맨 윗줄 1 + Current Task 가로줄 1 + 그 줄들 + Overall Task 가로줄 1 + 트리 + 키 안내
-  const room = Math.max(1, height - 3 - top.length - keys.length);
+  // 높이: 맨 윗줄 1 + Current Task 가로줄 1 + 그 줄들 + Overall Task 가로줄 1 + 트리 + (Before Commit Task 가로줄 1 + 그 줄들) + 키 안내.
+  // Before Commit Task 는 트리에 최소 3줄(낮으면 남는 만큼)을 남기고 남는 자리만 쓴다 (오래된 줄부터 빼고, 1줄도 안 되면 영역을 뺀다)
+  const free = Math.max(0, height - 3 - top.length - keys.length);
+  const treeMin = Math.min(3, Math.max(1, free));
+  const bcRoom = free - treeMin - 1;
+  const before = bcRoom >= 1 ? beforeCommitRows(flow).slice(-bcRoom) : [];
+  const room = Math.max(1, free - (before.length ? 1 + before.length : 0));
   const selected = flowSelection(rows, plan, ui, now);
   const selIdx = selected ? rows.findIndex((r) => r.key === selected) : -1;
   const startAt = windowAround(rows.length, room, selIdx >= 0 ? selIdx : 0);
   return {
     op: "monitor", kind: "flow", title, right, now: [], nowAt: "top",
-    sections: [{ title: "Current Task", rows: top }, { title: "Overall Task", rows: rows.slice(startAt, startAt + room) }],
+    sections: [{ title: "Current Task", rows: top }, { title: "Overall Task", rows: rows.slice(startAt, startAt + room) },
+      ...(before.length ? [{ title: "Before Commit Task", rows: before }] : [])],
     selected, keys,
   };
 }

@@ -97,27 +97,26 @@
           "marker": "done",
           "text": "n3 fix: 린트 오류",
           "indent": 2
-        },
-        {
-          "marker": "none",
-          "text": "커밋 전 작업",
-          "indent": 0,
-          "emphasis": true
-        },
+        }
+      ]
+    },
+    {
+      "title": "Before Commit Task",
+      "rows": [
         {
           "marker": "none",
           "text": "테스트는 vitest 로",
-          "indent": 2
+          "indent": 0
         },
         {
           "marker": "none",
           "text": "변경 파일 3개",
-          "indent": 2
+          "indent": 0
         },
         {
           "marker": "failed",
           "text": "npm test",
-          "indent": 2,
+          "indent": 0,
           "error": true
         }
       ]

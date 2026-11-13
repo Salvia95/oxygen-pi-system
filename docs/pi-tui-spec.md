@@ -283,7 +283,7 @@ pi 기본 입력창의 윗줄 · 아랫줄 가로선을 상태가 들어간 테�
 
 | 도구 | 첫 줄 | 요약 줄 | 펼침 |
 | --- | --- | --- | --- |
-| `bash` (위에 해당하지 않음) | `$ <명령 첫 줄>` (넘치면 `…`) | `Jobs done!, print <n> lines` (`success`) / `Jobs failed.., print <n> lines` (`error`) / `Jobs running.., print <n> lines` / `Jobs aborted..` · `Jobs timed out after <s>s..` / 잘리면 `, truncated (<N> lines in total: <파일>)` | 마지막 3줄 → 펼치면 마지막 200줄 |
+| `bash` (위에 해당하지 않음) | `$ <명령 첫 줄>` (넘치면 `…`) | `Task done!, print <n> lines` (`success`) / `Task failed.., print <n> lines` (`error`) / `Task running.., print <n> lines` (`warning`) / `Task aborted..` · `Task timed out after <s>s..` (`error`). bash 명령 하나는 Task, background 는 Job (2026-11-13) / 잘리면 `, truncated (<N> lines in total: <파일>)` | 마지막 3줄 → 펼치면 마지막 200줄 |
 | `read` | `read <경로>[:<시작>-<끝>]` | `<n>줄` · 잘리면 `전체 <m>줄 중` | pi 기본 (코드 강조) |
 | `edit` | `edit <경로>` | `+<추가> -<삭제>` | pi 기본 diff |
 | `write` | `write <경로>` | `<n>줄 씀` | 없음 |

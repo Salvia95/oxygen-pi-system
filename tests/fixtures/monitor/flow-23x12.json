@@ -51,20 +51,17 @@
           "indent": 0,
           "prefix": "└ ",
           "emphasis": false
-        },
+        }
+      ]
+    },
+    {
+      "title": "Before Commit Task",
+      "rows": [
         {
-          "key": "p:p3",
-          "marker": "todo",
-          "text": "[3/4] 결제 연동",
+          "marker": "failed",
+          "text": "npm test",
           "indent": 0,
-          "emphasis": false
-        },
-        {
-          "key": "p:p4",
-          "marker": "blocked",
-          "text": "[4/4] 배포 설정",
-          "indent": 0,
-          "emphasis": false
+          "error": true
         }
       ]
     }

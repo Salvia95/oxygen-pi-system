@@ -30,10 +30,11 @@ export function statusOf(c: { isPartial?: boolean; isError?: boolean; executionS
 }
 
 /** 첫 줄: ` <기호> <제목> <인자>` + 오른쪽 끝 걸린 시간 */
-export function callLine(m: Measure, g: Glyphs, width: number, v: { status: ToolStatus; title: string; args: string; durationMs?: number }, p: ToolPaint): string {
+export function callLine(m: Measure, g: Glyphs, width: number, v: { status: ToolStatus; title: string; args: string; durationMs?: number; right?: string }, p: ToolPaint): string {
   const glyph = v.status === "running" ? p.fg("warning", g.running) : v.status === "fail" ? p.fg("error", g.fail) : p.fg("success", g.ok);
   const left = ` ${glyph} ${p.fg("toolTitle", p.bold(v.title))}${v.args ? ` ${p.fg("accent", v.args)}` : ""}`;
-  const dur = v.status === "running" ? "" : fmtDuration(v.durationMs);
+  // right: 이미 만든 오른쪽 글 (background 알림의 걸린 시간 등). 없으면 끝난 뒤의 durationMs
+  const dur = v.right ?? (v.status === "running" ? "" : fmtDuration(v.durationMs));
   const right = dur ? `${p.fg("muted", dur)} ` : "";
   // 넘치면 시간은 남기고 인자를 자른다
   const room = width - (right ? m.width(right) + 1 : 0);

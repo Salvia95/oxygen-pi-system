@@ -406,27 +406,28 @@ test("oxy-monitor 화면: jobs · flow 가 좁은 폭(23칸)에서도 폭 · 줄
 test("oxy-monitor 하단 바: 보일 항목 · 상태 기호 · 한 줄 · 클릭 범위 (monitor-spec §2, ui-unify-spec §2.2)", async () => {
   const { barItems, barLine, itemAt } = await import("../agent/extensions/oxy-monitor/bar.ts");
   const none = new Set<string>();
-  assert.deepEqual(barItems({ active: 0, recent: 0 }, { hasContent: false, done: 0, total: 0, node: "" }, none), []);   // 보일 것이 없으면 바도 없다
+  assert.deepEqual(barItems(null, { hasContent: false, done: 0, total: 0, node: "" }, none), []);   // 보일 것이 없으면 바도 없다
   const items = barItems({ active: 2, recent: 1 }, { hasContent: true, done: 3, total: 7, node: "n4" }, new Set(["flow"]));
-  assert.deepEqual(items.map((i) => [i.label, i.open, i.state]), [["Jobs 2 실행 중 · 1 완료", false, "running"], ["Flow 3/7", true, "running"]]);
-  assert.deepEqual(barItems(null, { hasContent: true, done: 0, total: 0, node: "n4" }, none).map((i) => [i.label, i.state]), [["Flow n4", "idle"]]);   // 계획이 없으면 마지막 단계
+  assert.deepEqual(items.map((i) => [i.label, i.open, i.state]), [["Flow: 3/7", true, "running"], ["Jobs: 2", false, "running"]], "순서는 Flow → Jobs, 콜론");
+  assert.deepEqual(barItems(null, { hasContent: true, done: 0, total: 0, node: "n4" }, none).map((i) => [i.label, i.state]), [["Flow: n4", "idle"]]);   // 계획이 없으면 마지막 단계
   assert.equal(barItems(null, { hasContent: true, done: 5, total: 5, node: "n9" }, none)[0].state, "ok");
-  assert.deepEqual(barItems({ active: 0, recent: 0 }, null, new Set(["jobs"])).map((i) => [i.label, i.state]), [["Jobs", "idle"]]);   // 열린 모니터는 닫을 수 있게 보인다
+  assert.deepEqual(barItems({ active: 0, recent: 0 }, null, none).map((i) => [i.label, i.state]), [["Jobs: 0", "idle"]], "Jobs 는 0 이어도 보인다 (Job Monitor 를 열 수 있게)");
+  assert.deepEqual(barItems(null, null, none), [], "oxy-jobs · 기록이 없으면 바도 없다");
   assert.equal(barItems({ active: 0, recent: 2, failed: 1 }, null, none)[0].state, "fail");
   assert.equal(barItems({ active: 0, recent: 2 }, null, none)[0].state, "ok");
   const w = (s: string) => [...s].reduce((n, ch) => n + (/[가-힣]/.test(ch) ? 2 : 1), 0);
   const G = { running: "◐", ok: "✓", fail: "×", idle: "·" } as const;
   const st = { width: w, glyph: (s: keyof typeof G) => G[s], item: (s: string, o: boolean) => (o ? `<${s}>` : s), focus: (s: string) => `[${s}]`, hint: (s: string) => `{${s}}` };
   const r = barLine(items, -1, 80, st);
-  assert.equal(r.line, " ◐ Jobs 2 실행 중 · 1 완료   ◐ <Flow 3/7>");
-  assert.deepEqual(r.ranges, [{ kind: "jobs", start: 1, end: 26 }, { kind: "flow", start: 29, end: 39 }]);   // 왼쪽 여백 1칸
+  assert.equal(r.line, " ◐ <Flow: 3/7>   ◐ Jobs: 2");
+  assert.deepEqual(r.ranges, [{ kind: "flow", start: 1, end: 12 }, { kind: "jobs", start: 15, end: 24 }]);   // 왼쪽 여백 1칸
   assert.equal(itemAt(r.ranges, 0), undefined);
-  assert.equal(itemAt(r.ranges, 5), "jobs");
-  assert.equal(itemAt(r.ranges, 27), undefined);                        // 항목 사이
-  assert.equal(itemAt(r.ranges, 30), "flow");
+  assert.equal(itemAt(r.ranges, 5), "flow");
+  assert.equal(itemAt(r.ranges, 13), undefined);                        // 항목 사이
+  assert.equal(itemAt(r.ranges, 16), "jobs");
   const f = barLine(items, 1, 80, st);
-  assert.match(f.line, /\[◐ Flow 3\/7\]    \{←→ 이동  Enter 열기·닫기  ↑ 입력창\}$/);   // 바에 들어오면 키 안내
-  assert.equal(barLine(items, 0, 30, st).ranges.length, 1);             // 좁으면 들어가는 항목까지만
+  assert.match(f.line, /\[◐ Jobs: 2\]    \{←→ 이동  Enter 열기·닫기  ↑ 입력창\}$/);   // 바에 들어오면 키 안내
+  assert.equal(barLine(items, 0, 20, st).ranges.length, 1);             // 좁으면 들어가는 항목까지만
 });
 
 test("oxy-jobs 중지: ps -W 에서 트리 안 MSYS 프로세스의 그룹 찾기", async () => {
@@ -505,7 +506,9 @@ test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 ·
     assert.equal(made.length, 1);
     assert.deepEqual(made[0].decisions.map((d) => d.text), ["Use JWT"]);   // 버퍼의 결정이 커밋 노드로 이동
     assert.equal(e.load().buffer.decisions.length, 0);
-    assert.equal(e.load().buffer.failures.length, 1);                          // 해결 안 된 실패는 남는다
+    assert.equal(e.load().buffer.failures.length, 0);                          // 커밋하면 커밋 전 작업(실패 포함)을 비운다 (Before Commit Task 가 사라짐, 2026-11-13)
+    e.recordCommand("npm test", false, "FAIL again");
+    assert.equal(e.load().buffer.failures.length, 1);
     e.recordCommand("npm test", true, "ok");
     assert.equal(e.load().buffer.failures.length, 0);                          // 같은 명령이 성공하면 해결
     writeFileSync(join(dir, "b.txt"), "x"); g("add", "."); g("commit", "-qm", "outside 1");
@@ -1494,15 +1497,15 @@ test("oxygen-pi-tui 도구 줄: 첫 줄 · 요약 · 접힘 · bash 결과 읽�
   assert.deepEqual(B.parseBash("(no output)", false).lines, []);
   const e1 = B.parseBash("oops\n\nCommand exited with code 2", true);
   assert.deepEqual([e1.exit, e1.lines], [2, ["oops"]]);
-  assert.deepEqual(B.bashSummary(e1, false), { text: "Jobs failed.., print 1 line", level: "error" });
-  assert.equal(B.parseBash("Command aborted", true).reason, "Jobs aborted..");
-  assert.equal(B.parseBash("partial\n\nCommand timed out after 30 seconds", true).reason, "Jobs timed out after 30s..");
+  assert.deepEqual(B.bashSummary(e1, false), { text: "Task failed.., print 1 line", level: "error" });
+  assert.equal(B.parseBash("Command aborted", true).reason, "Task aborted..");
+  assert.equal(B.parseBash("partial\n\nCommand timed out after 30 seconds", true).reason, "Task timed out after 30s..");
   assert.equal(B.parseBash("BLOCKED by oxy-bash-guard: npm install is not available offline\nmore", true).reason, "BLOCKED by oxy-bash-guard: npm install is not available offline");
   const tr = B.parseBash("29999\n30000\n\n[Showing lines 28001-30000 of 30000. Full output: C:/tmp/pi-bash-1.log]", false);
   assert.deepEqual([tr.lines, tr.truncated], [["29999", "30000"], { shown: "28001-30000", total: 30000, fullPath: "C:/tmp/pi-bash-1.log" }]);
-  assert.deepEqual(B.bashSummary(B.parseBash("", false), false), { text: "Jobs done!, print 0 lines", level: "success" });
-  assert.deepEqual(B.bashSummary(B.parseBash(Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n"), false), false), { text: "Jobs done!, print 25 lines", level: "success" });
-  assert.deepEqual(B.bashSummary(B.parseBash("a\nb", false), true), { text: "Jobs running.., print 2 lines", level: "text" });
+  assert.deepEqual(B.bashSummary(B.parseBash("", false), false), { text: "Task done!, print 0 lines", level: "success" });
+  assert.deepEqual(B.bashSummary(B.parseBash(Array.from({ length: 25 }, (_, i) => `l${i}`).join("\n"), false), false), { text: "Task done!, print 25 lines", level: "success" });
+  assert.deepEqual(B.bashSummary(B.parseBash("a\nb", false), true), { text: "Task running.., print 2 lines", level: "warning" });
   assert.equal(B.commandHead("echo a\necho b"), "echo a …");
   assert.equal(B.commandHead("  ls -la  "), "ls -la");
   assert.equal(B.commandHead(`cd "C:/Users/kim/workspace/proj/agent/extensions" && fd -e ts`), "cd …/extensions && fd -e ts");
@@ -1679,14 +1682,31 @@ test("oxygen-pi-tui background 도구 줄: 첫 줄 인자 · 결과 요약 (ui-u
   assert.equal(J.backgroundArgs({ action: "output", id: "job-2" }), "output job-2");
   assert.equal(J.backgroundArgs({ action: "stop", id: "job-2" }), "stop job-2");
   const v = (a: string, t: string) => { const x = J.backgroundView(a, t); return [x.summary, x.level, x.body, x.keep]; };
+  // 문구 (사용자, 2026-11-13): Job-1 done! · failed.. · stopped.. / 좋은 것 초록 · 나쁜 것 빨강 · 그 밖 노랑
   assert.deepEqual(v("start", "Started job-1: sleep 60\nYou will get a message when it finishes. Do not poll; continue with other work or end your turn."),
-    ["job-1 시작 · 끝나면 알림", "success", [], "head"]);
-  assert.deepEqual(v("status", "No jobs."), ["작업 없음", "text", [], "head"]);
+    ["Job-1 started..", "warning", [], "head"]);
+  assert.deepEqual(v("status", "No jobs."), ["No jobs..", "warning", [], "head"]);
   assert.deepEqual(v("status", "job-1 bash running 0:41 npm run build\njob-2 agent done exit=0 2:12 scout: 찾기"),
-    ["작업 2개 · 1개 실행 중", "text", ["job-1 bash 실행 중 0:41 npm run build", "job-2 agent 끝남 exit=0 2:12 scout: 찾기"], "head"]);
-  assert.deepEqual(v("output", "job-1 failed\nline a\nline b\n"), ["job-1 실패 · 출력 2줄", "error", ["line a", "line b"], "tail"]);
-  assert.deepEqual(v("stop", "Stopped job-1."), ["job-1 중지함", "success", [], "head"]);
-  assert.deepEqual(v("stop", "job-1 is not running (done)."), ["job-1: 실행 중이 아님 (끝남)", "warning", [], "head"]);
+    ["2 jobs, 1 running", "warning", ["Job-1 bash running 0:41 npm run build", "Job-2 agent done exit=0 2:12 scout: 찾기"], "head"]);
+  assert.equal(J.backgroundView("status", "job-3 bash failed exit=1 0:05 x").level, "error");
+  assert.deepEqual(v("output", "job-1 failed\nline a\nline b\n"), ["Job-1 failed.., print 2 lines", "error", ["line a", "line b"], "tail"]);
+  assert.deepEqual(v("output", "job-1 done\nok"), ["Job-1 done!, print 1 line", "success", ["ok"], "tail"]);
+  assert.deepEqual(v("output", "job-1 running\n"), ["Job-1 running.., print 0 lines", "warning", [], "tail"]);
+  assert.deepEqual(v("stop", "Stopped job-1."), ["Job-1 stopped..", "error", [], "head"]);
+  assert.deepEqual(v("stop", "job-1 is not running (done)."), ["Job-1 is not running (done!)", "warning", [], "head"]);
+  // 끝남 알림 (oxy-jobs 가 sendMessage 로 넣는 글)
+  const n1 = J.parseJobNotice("[oxy-jobs] job-1 done (exit 0) after 2s: cd C:/Users/kim/OneDrive/Documents/ws/library-rental && mvn -q verify\nlast output:\nBUILD OK\n");
+  assert.deepEqual([n1?.summary, n1?.tone, n1?.title, n1?.duration, n1?.body], ["Job-1 done!, print 1 line", "success", "cd …/library-rental && mvn -q verify", "2s", ["BUILD OK"]]);
+  const n2 = J.parseJobNotice("[oxy-jobs] job-2 failed (exit 1) after 1m 3s: npm test\nlast output:\na\nb");
+  assert.deepEqual([n2?.summary, n2?.tone], ["Job-2 failed.., print 2 lines", "error"]);
+  const n3 = J.parseJobNotice("[oxy-jobs] job-4 (scout: 로그 찾기) stopped in 12s, 3 turns:\npartial");
+  assert.deepEqual([n3?.summary, n3?.tone, n3?.title], ["Job-4 stopped.., 3 turns", "error", "scout: 로그 찾기"]);
+  assert.equal(J.parseJobNotice("다른 모양"), null, "모르는 모양이면 pi 기본 그리기");
+  // oxy-jobs 가 덧붙인 `$ <명령>` · `[exit N]` 은 출력 줄이 아니다 (실측: print 3 lines → 1 line)
+  const n4 = J.parseJobNotice("[oxy-jobs] job-1 done (exit 0) after 2s: sleep 2; echo ok\nlast output:\n$ sleep 2; echo ok\nok\n[exit 0]");
+  assert.deepEqual([n4?.summary, n4?.body], ["Job-1 done!, print 1 line", ["ok"]]);
+  assert.deepEqual(J.cleanTail(["$ x", "a", "[exit 3]", ""]), ["a"]);
+  assert.equal(J.backgroundView("output", "job-2 failed\n$ npm test\nFAIL\n[exit 1]").summary, "Job-2 failed.., print 1 line");
 });
 
 test("psmux 서버 · 세션 못 박기: $TMUX 의 서버 이름 · -t %N 에 세션 붙이기 · 기본 서버로 넘어간 대답은 버림 (_lib/psmux.ts)", async () => {
@@ -1759,12 +1779,14 @@ test("oxy-flow 작업 저장소: pi 를 다른 폴더(git 아님)에서 시작�
   } finally { rmSync(box, { recursive: true, force: true }); }
 });
 
-test("flow 모니터: 커밋 전 실패 줄은 앞의 cd <긴 경로> 를 줄여 실제 명령이 보인다", async () => {
-  const { planRows } = await import("../agent/extensions/oxy-monitor/model.ts");
+test("flow 모니터: Before Commit Task 의 실패 줄은 앞의 cd <긴 경로> 를 줄여 실제 명령이 보인다", async () => {
+  const { beforeCommitRows, planRows } = await import("../agent/extensions/oxy-monitor/model.ts");
   const flow: any = { goal: "g", plan: [], nodes: [], buffer: { decisions: [], files: [], failures: [
     { command: "cd C:/Users/kim/OneDrive/Documents/workspace/cozy-framework/cozy-example && git status --short" },
     { command: "export JAVA_HOME=x; mvn -q verify\nmvn test" },
   ] } };
-  const rows = planRows(flow, new Set(), 35).filter((r: any) => r.marker === "failed").map((r: any) => r.text);
+  const rows = beforeCommitRows(flow).filter((r: any) => r.marker === "failed").map((r: any) => r.text);
+  assert.ok(!planRows(flow, new Set(), 35).some((r: any) => r.marker === "failed"), "Overall Task 에는 없다 (Before Commit Task 영역으로)");
+  assert.deepEqual(beforeCommitRows({ ...flow, buffer: { decisions: [], files: [], failures: [] } }), [], "커밋해서 비면 영역이 없다");
   assert.deepEqual(rows, ["cd …/cozy-example && git status --short", "export JAVA_HOME=x; mvn -q verify …"]);
 });

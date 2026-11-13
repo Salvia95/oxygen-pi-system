@@ -65,6 +65,10 @@ psmux 하단 바(`oxy-monitor` 의 상태 바)와 Flow Monitor · Job Monitor(`o
 
 ### 2.2 하단 바
 
+바뀜 (2026-11-13) — 요청 (사용자, 2026-11-13): "Jobs 라고 되어 있던 것들을 Task 로 바꾸고 background 와 같은 작업을 Jobs 로 표현하자, "job-1 중지됨" 과 같은 문구도 "Job-1 done!", "Job-1 stoped..", "Job-1 timeouted.." 와 같이 표현하고 부정적인 것에는 빨강색을, 긍정적인 것에는 기존과 같이 초록색을 그 둘 중 아무것도 아닐 때는 노랑색 … 하단 statusbar 에 Flow: n/n Jobs: n 과 같이 콜론 … Jobs 가 0 일 때도 표시 … Flow Monitor 에서는 커밋 전 작업을 Before Commit Task 로 명명하고 … 구분선으로 영역을 나눠줘, 이 부분은 커밋되면 사라지도록"
+- 지금 모양: ` ◐ Flow: 2/5   ◐ Jobs: 1`. 순서 Flow → Jobs, 이름 뒤 콜론. Jobs 의 수는 실행 중 · 대기 작업 수이고, oxy-jobs 가 있으면 **0 이어도 늘 보인다** (Job Monitor 를 열 수 있게). Flow 는 기록이 있을 때만 (계획이 없으면 `Flow: n4`). 아래의 처음 안(`◐ Jobs 1 실행 중 · 1 완료   ✓ Flow 2/5`)을 대신한다.
+
+
 ```
 지금   ▸ jobs 1 실행 중 · 1 완료   ▸ flow 2/5
 안     ◐ Jobs 1 실행 중 · 1 완료   ✓ Flow 2/5
@@ -91,6 +95,12 @@ psmux 하단 바(`oxy-monitor` 의 상태 바)와 Flow Monitor · Job Monitor(`o
 - 그 밖의 배치 · 문구 · 키는 바꾸지 않는다 (확인된 화면 그대로: `docs/flow-view-spec.md` · `docs/jobs-view-spec.md`).
 
 ### 2.5 `background` 도구 줄 (oxy-jobs)
+
+바뀜 (2026-11-13, 위 2.2 의 요청): 문구는 영어 `Job-1 started..` (노랑) · `Job-1 done!` (초록) · `Job-1 failed..` · `Job-1 stopped..` (빨강) · `Job-1 running..` · `Job-1 queued..` (노랑). output 은 `Job-1 done!, print <n> lines`, status 는 `2 jobs, 1 running` (실패가 있으면 빨강), 없으면 `No jobs..`. 사용자 문구의 `stoped` · `timeouted` 는 `stopped` · `timed out` 으로 썼다 (background 작업에는 시간 제한 상태가 없어 `timed out` 은 bash 의 `Task timed out after <s>s..` 에 쓴다).
+- 끝남 알림 (oxy-jobs 가 넣는 `[oxy-jobs] job-1 done (exit 0) after 2s: …` 메시지)도 도구 줄 틀로: `✓ background <명령>  2s` / `└ Job-1 done!, print 1 line` + 마지막 3줄 (`registerMessageRenderer("oxy-jobs")`, 모르는 모양이면 pi 기본). subagent 는 `Job-4 stopped.., 3 turns`.
+- 줄 수에서 oxy-jobs 가 덧붙인 `$ <명령>` · `[exit N]` 은 뺀다 (실측: `print 3 lines` → `print 1 line`).
+- 실측 (2026-11-13, mock pi mintty D2Coding): `Job-1 started..` 색 `232;194;107`, `Job-1 done!` `155;219;123`, `Task failed..` 빨강, 바 `· Jobs: 0` → `✓ Jobs: 0`. 증거: scratchpad `caps/pt10-jobs-task.png`.
+
 
 - pi 기본 상자 대신 다른 도구와 같은 한 줄 틀(`docs/pi-tui-spec.md` §4): `○/✓/× background <action> <인자>` · `└ <요약>`.
 - 요약: start `job-1 시작 · 끝나면 알림` · status `작업 없음` / `작업 2개 · 1개 실행 중` (본문에 작업 줄, 상태는 한국어) · output `job-1 실패 · 출력 2줄` (본문은 마지막 줄들) · stop `job-1 중지함` / `job-1: 실행 중이 아님 (끝남)`. 상태 말: 대기 · 실행 중 · 끝남 · 실패 · 중지됨.

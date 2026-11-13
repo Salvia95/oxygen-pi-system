@@ -30,9 +30,9 @@ export function parseBash(text: string, isError: boolean): BashParsed {
   if (status) {
     t = t.slice(0, status.index);
     if (status[2] != null) exit = Number(status[2]);
-    else if (status[1] === "Command aborted") reason = "Jobs aborted..";
-    else if (status[3] != null) reason = `Jobs timed out after ${status[3]}s..`;
-    else reason = "Jobs ended without an exit code..";
+    else if (status[1] === "Command aborted") reason = "Task aborted..";
+    else if (status[3] != null) reason = `Task timed out after ${status[3]}s..`;
+    else reason = "Task ended without an exit code..";
   }
   let truncated: BashParsed["truncated"];
   const tr = t.match(/\n\n\[Showing (lines (\d+)-(\d+) of (\d+)[^\]]*?|last [^\]]*?)\. Full output: ([^\]]+)\]\s*$/);
@@ -54,16 +54,16 @@ export function parseBash(text: string, isError: boolean): BashParsed {
 
 /** bash 요약 글 (색 없이) 과 수준 */
 /**
- * bash 요약 (사용자, 2026-11-13): 끝남 `Jobs done!, print 25 lines` · 실패 `Jobs failed.., print 25 lines`.
- * 실행 중 `Jobs running.., print 3 lines`. 중단 · 시간 제한 · 막힘은 그 사유 한 줄.
+ * bash 요약 (사용자, 2026-11-13: bash 명령 하나는 Task, background 는 Job): 끝남 `Task done!, print 25 lines` · 실패 `Task failed.., print 25 lines`.
+ * 실행 중 `Task running.., print 3 lines`. 중단 · 시간 제한 · 막힘은 그 사유 한 줄.
  */
 export function bashSummary(b: BashParsed, partial: boolean): { text: string; level: "success" | "error" | "text" | "warning" } {
   const n = b.lines.length;
   const out = `print ${n} ${n === 1 ? "line" : "lines"}`;
-  if (partial) return { text: `Jobs running.., ${out}`, level: "text" };
+  if (partial) return { text: `Task running.., ${out}`, level: "warning" };
   if (b.reason) return { text: b.reason, level: "error" };
-  if (b.exit !== 0) return { text: `Jobs failed.., ${out}`, level: "error" };
-  return { text: `Jobs done!, ${out}`, level: "success" };
+  if (b.exit !== 0) return { text: `Task failed.., ${out}`, level: "error" };
+  return { text: `Task done!, ${out}`, level: "success" };
 }
 
 /** `$ <명령 첫 줄>` 의 인자 부분. 여러 줄이면 ` …` */

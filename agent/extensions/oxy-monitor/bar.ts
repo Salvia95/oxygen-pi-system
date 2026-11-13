@@ -1,6 +1,6 @@
 // 하단 바 (docs/monitor-spec.md §2, 모양은 docs/ui-unify-spec.md §2.2): 입력창 아래 한 줄.
 // 항목 Jobs · Flow 를 키보드(빈 입력창에서 ↓ → ←→ → Enter)나 클릭으로 켜고 끈다.
-//    ◐ Jobs 1 실행 중 · 1 완료   ✓ Flow 2/5
+//    ◐ Flow: 2/5   ◐ Jobs: 1
 // 상태 → 항목 · 줄 · 클릭 범위를 만드는 순수 함수만 둔다 (색 · 기호 · 폭 계산은 받는다).
 
 export type BarKind = "jobs" | "flow";
@@ -13,20 +13,21 @@ export interface BarItem { kind: BarKind; label: string; open: boolean; state: B
 export interface BarRange { kind: BarKind; start: number; end: number }  // 표시 열 [start, end)
 
 /**
- * 바에 보일 항목. Jobs: 실행 중이거나 최근 2분 안에 끝난 작업이 있을 때, Flow: 기록이 있을 때.
- * 모니터가 열려 있으면 내용이 없어도 보인다 (닫을 수 있게). 이름은 모니터 제목과 같게 첫 글자 대문자.
+ * 바에 보일 항목 (사용자, 2026-11-13: "Flow: n/n Jobs: n 과 같이 콜론 … Jobs 가 0 일 때도 표시"):
+ *   Flow: 기록이 있을 때 `Flow: 3/7` (계획이 없으면 마지막 단계 `Flow: n4`)
+ *   Jobs: oxy-jobs 가 있으면 늘 `Jobs: <실행 중 · 대기 수>` (0 이어도 보여 Job Monitor 를 열 수 있다)
+ * 모니터가 열려 있으면 내용이 없어도 보인다 (닫을 수 있게). 순서는 Flow → Jobs.
  */
 export function barItems(jobs: JobsSummary | null, flow: FlowSummary | null, open: Set<string>): BarItem[] {
   const items: BarItem[] = [];
-  if (jobs && (jobs.active || jobs.recent) || open.has("jobs")) {
-    const parts = [jobs?.active ? `${jobs.active} 실행 중` : "", jobs?.recent ? `${jobs.recent} 완료` : ""].filter(Boolean);
-    const state: BarState = jobs?.active ? "running" : jobs?.failed ? "fail" : jobs?.recent ? "ok" : "idle";
-    items.push({ kind: "jobs", label: `Jobs${parts.length ? ` ${parts.join(" · ")}` : ""}`, open: open.has("jobs"), state });
-  }
   if (flow?.hasContent || open.has("flow")) {
-    const p = flow?.total ? `${flow.done}/${flow.total}` : flow?.node ?? "";
+    const p = flow?.total ? `${flow.done}/${flow.total}` : flow?.node || "-";
     const state: BarState = flow?.total ? (flow.done < flow.total ? "running" : "ok") : "idle";
-    items.push({ kind: "flow", label: `Flow${p ? ` ${p}` : ""}`, open: open.has("flow"), state });
+    items.push({ kind: "flow", label: `Flow: ${p}`, open: open.has("flow"), state });
+  }
+  if (jobs || open.has("jobs")) {
+    const state: BarState = jobs?.active ? "running" : jobs?.failed ? "fail" : jobs?.recent ? "ok" : "idle";
+    items.push({ kind: "jobs", label: `Jobs: ${jobs?.active ?? 0}`, open: open.has("jobs"), state });
   }
   return items;
 }

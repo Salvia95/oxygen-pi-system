@@ -8,7 +8,7 @@ import { bashSummary, commandHead, diffStats, errorLines, lineCount, parseBash, 
 import { type ResultView, type ToolPaint, type ToolStatus, callLine, resultLines } from "./frame.ts";
 import { grepArgs, grepCollapsed, grepExpanded, grepSummary, matcher, parseGrep } from "./grep.ts";
 import { searchCommand, searchView } from "./search.ts";
-import { backgroundArgs, backgroundView } from "./jobs.ts";
+import { backgroundArgs, backgroundView, parseJobNotice } from "./jobs.ts";
 
 /** width 마다 줄을 만드는 컴포넌트 */
 function lines(fn: (width: number) => string[]): Component {
@@ -152,5 +152,25 @@ export function registerToolRows(pi: ExtensionAPI, isOn: () => boolean, glyphMod
         return stack([own, indented(more)]);
       },
     } as any;
+  });
+}
+
+/**
+ * background 작업이 끝났다는 알림(customType oxy-jobs, oxy-jobs 가 sendMessage 로 넣음)을 도구 줄과 같은 틀로 그린다
+ * (docs/ui-unify-spec.md §2.5): `✓ background <명령>  2s` / `└ Job-1 done!, print 12 lines` + 마지막 3줄. 모르는 모양이면 pi 기본
+ */
+export function registerJobNotices(pi: ExtensionAPI, isOn: () => boolean, glyphMode: () => "unicode" | "ascii"): void {
+  pi.registerMessageRenderer("oxy-jobs", (message: any, options: any, theme: any) => {
+    if (!isOn()) return undefined;
+    const text = typeof message?.content === "string" ? message.content : textOf(message?.content);
+    const n = parseJobNotice(text);
+    if (!n) return undefined;
+    const g = glyphs(glyphMode());
+    const status: ToolStatus = n.tone === "success" ? "ok" : n.tone === "error" ? "fail" : "running";
+    let open = "ctrl+o";
+    try { open = options?.keyText?.("app.tools.expand") || open; } catch { /* 기본 키 */ }
+    const view: ResultView = { summary: theme.fg(n.tone, n.summary), body: n.body.map((l) => theme.fg("toolOutput", l)), keep: "tail", max: 200, unit: "line" };
+    return lines((w) => ["", callLine(measure, g, w, { status, title: "background", args: n.title, right: n.duration }, theme),
+      ...resultLines(measure, g, w, view, Boolean(options?.expanded), { open, fold: FOLD_KEY }, theme, folded)]);
   });
 }
