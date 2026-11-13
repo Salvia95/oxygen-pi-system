@@ -62,6 +62,27 @@ if [ -f "$OXY_HOME/agent/oxy.env" ]; then
   set +a
 fi
 
+# --- Java: JAVA_HOME 이 없거나 틀렸으면 실제 java 위치로 (Maven · Gradle · SQLcl 은 JAVA_HOME 을 그대로 믿는다) ---
+#   `which java` 는 Oracle 의 javapath 바로가기(…/Common Files/Oracle/Java/javapath)일 수 있어 dirname 으로 구하면 틀린다
+#   (2026-11-13 실제 작업에서 Maven 이 "JAVA_HOME … not defined correctly" 로 실패). java 자신에게 java.home 을 묻는다.
+#   oxy.env 에서 JAVA_HOME 을 정했으면 그것을 쓴다. 찾은 값은 .cache/java-home 에 두어 셸마다 java 를 띄우지 않는다
+_oxy_java_ok() { [[ -n "$1" ]] && { [[ -x "$(cygpath -u "$1" 2>/dev/null)/bin/java.exe" ]] || [[ -x "$(cygpath -u "$1" 2>/dev/null)/bin/java" ]]; }; }
+if ! _oxy_java_ok "${JAVA_HOME:-}" && command -v java >/dev/null 2>&1; then
+  _oxy_jc="$OXY_HOME/.cache/java-home"
+  _oxy_jh=""
+  [[ -f "$_oxy_jc" ]] && read -r _oxy_jh < "$_oxy_jc"
+  if ! _oxy_java_ok "$_oxy_jh"; then
+    _oxy_jh="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.home = //p' | tr -d '\r' | head -n1)"
+    if [[ -n "$_oxy_jh" ]]; then
+      _oxy_jh="$(cygpath -m "$_oxy_jh")"
+      mkdir -p "$OXY_HOME/.cache" 2>/dev/null && printf '%s\n' "$_oxy_jh" > "$_oxy_jc" 2>/dev/null
+    fi
+  fi
+  _oxy_java_ok "$_oxy_jh" && export JAVA_HOME="$_oxy_jh"
+  unset _oxy_jc _oxy_jh
+fi
+unset -f _oxy_java_ok
+
 # --- agent-browser 가 쓸 브라우저: 설치 TUI 가 oxy.env 에 OXY_BROWSER(/OXY_BROWSER_PATH) 로 기록 ---
 #   chrome-for-testing | chromium (번들 위치, 하네스를 옮겨도 동작) | obscura (wrappers/agent-browser 가 CDP 서버를 띄움)
 #   | edge | chrome-system | custom (OXY_BROWSER_PATH) | none

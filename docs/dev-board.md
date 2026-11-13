@@ -114,6 +114,7 @@
 
 - 2026-11-13 `pi-tui` · `ui-unify`: 커밋 원칙 — 함께 검증한 상태만 커밋한다. 여러 명세가 같은 파일(시험 · installer · manifest)에 얽혀 중간 상태를 따로 검증하지 않았으면 한 커밋으로 두고 메시지에 영역을 나눠 적는다. 릴리스 경계(버전 올림 · sha 고정 · 설치본 기록)는 따로 커밋한다. eb18916 (기능 + 0.4.0), 725d786 (sha `807ad314…9deef` 고정, 릴리스 run 43404402213). 설치본 업데이트: 저장소 폴더를 번들로 써서 줄 입력 모드(`3 1 2 ""`)로, `verify` PASS 48 / WARN 1 (SQLcl) / FAIL 0. 업데이트 끝의 점검이 저장된 연결(vLLM · Claude Haiku)에 짧은 요청을 한 번씩 보낸다 (과금 1회).
 - 2026-11-13 cab8243: (1) psmux 서버 · 세션 못 박기 — `$TMUX` 의 서버에 닿지 못하면 psmux 가 기본 서버의 다른 세션에 pane 을 만들던 버그 (사용자 세션의 모니터가 개발 PC 캡처 세션에 쌓임, 재현함). `_lib/psmux.ts` · 런처의 `OXY_MUX_SESSION` (`docs/monitor-spec.md` §6). (2) oxy-flow 작업 저장소 — pi 를 시작한 폴더가 아니라 실제로 고치는 저장소의 커밋을 따라감 (`docs/flow-spec.md` §1-2). (3) 도구 줄 3줄 · `Jobs done!` · Ctrl+K 접기 (`docs/pi-tui-spec.md` §4). 단위 86/86, mock E2E 통과. 설치본 업데이트 (사용자 승인, 열려 있던 `oxy` 세션 종료 포함): `verify` PASS 48 / WARN 1 (SQLcl) / FAIL 0. 줄 입력 모드의 업데이트 답은 `3`, `1`, Enter(구성요소 그대로), 세션이 있으면 `1`(세션 종료), Enter — 처음 시도는 답 순서가 어긋나 업데이트 취소로 끝났다 (바뀐 것 없음).
+- 2026-11-13 JAVA_HOME: `env.sh` 가 JAVA_HOME 이 없거나 java 가 없는 폴더면 `java -XshowSettings:properties` 의 `java.home` 으로 정하고 `.cache/java-home` 에 둔다 (oxy.env 에 정한 값이 먼저). 이 PC 의 `which java` 는 Oracle `javapath` 바로가기라 `dirname` 으로 구하면 틀린다 — 사용자 작업에서 모델이 그렇게 구해 Maven 이 실패했다. 실측: 없음 · 틀린 값 · 캐시 · 다른 틀린 값 모두 `C:/Program Files/Java/jdk-25.0.5.0.2`, env.sh 시간 차이 없음(캐시). `verify.sh` 에 `JAVA_HOME` 줄.
 
 ## 회고
 

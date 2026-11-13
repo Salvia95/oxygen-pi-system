@@ -87,6 +87,7 @@ psmux 하단 바(`oxy-monitor` 의 상태 바)와 Flow Monitor · Job Monitor(`o
 
 - 띠 색: Tokyo Night 일 때도 Oxygen Sage 바탕 (기본 어두움 · 밝음 팔레트는 지금 값 그대로). 제목 앞에 `◆`.
 - 스피너: 점자 → `◐ ◓ ◑ ◒` (프레임 4개, 간격 150ms). 색은 지금 그대로.
+- Flow Monitor "커밋 전 작업" 의 실패 줄은 pi 도구 줄과 같은 규칙으로 앞의 `cd <24자 넘는 경로> &&` 를 `cd …/<마지막 폴더> &&` 로 줄이고 여러 줄 명령은 ` …` 를 붙인다 (사용자 요청 2026-11-13, `oxy-monitor/model.ts` 가 `oxygen-pi-tui/tools/basic.ts` 의 `commandHead` 를 씀). 실제 화면에서 `× cd C:/Users/…/wor…` 처럼 명령이 가려졌다.
 - 그 밖의 배치 · 문구 · 키는 바꾸지 않는다 (확인된 화면 그대로: `docs/flow-view-spec.md` · `docs/jobs-view-spec.md`).
 
 ### 2.5 `background` 도구 줄 (oxy-jobs)

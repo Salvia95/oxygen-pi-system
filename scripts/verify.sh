@@ -48,6 +48,9 @@ if command -v java >/dev/null; then
   jv=$(java -version 2>&1 | head -n1)
   major=$(sed -nE 's/.*version "([0-9]+).*/\1/p' <<< "$jv")
   (( ${major:-0} >= 17 )) && pass "java: $jv" || need "java 17 이상 필요 (SQLcl): $jv"
+  # env.sh 가 java 에게 java.home 을 물어 정한다 (Maven · Gradle · SQLcl 이 JAVA_HOME 을 믿는다)
+  if [[ -n "${JAVA_HOME:-}" && -x "$(cygpath -u "$JAVA_HOME")/bin/java.exe" ]]; then pass "JAVA_HOME: $JAVA_HOME"
+  else wrn "JAVA_HOME 이 비었거나 java 가 없는 폴더 (${JAVA_HOME:-없음}) → Maven 등이 실패할 수 있음. agent/oxy.env 에 JAVA_HOME 을 적거나 .cache/java-home 을 지우고 다시 여세요"; fi
 else need "java 없음 (SQLcl 실행 불가)"; fi
 
 section "2. 번들 도구"

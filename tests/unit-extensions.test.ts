@@ -1758,3 +1758,13 @@ test("oxy-flow 작업 저장소: pi 를 다른 폴더(git 아님)에서 시작�
     assert.deepEqual(S.commandDirs("echo cd nope; abcd x; cd $HOME"), []);
   } finally { rmSync(box, { recursive: true, force: true }); }
 });
+
+test("flow 모니터: 커밋 전 실패 줄은 앞의 cd <긴 경로> 를 줄여 실제 명령이 보인다", async () => {
+  const { planRows } = await import("../agent/extensions/oxy-monitor/model.ts");
+  const flow: any = { goal: "g", plan: [], nodes: [], buffer: { decisions: [], files: [], failures: [
+    { command: "cd C:/Users/kim/OneDrive/Documents/workspace/cozy-framework/cozy-example && git status --short" },
+    { command: "export JAVA_HOME=x; mvn -q verify\nmvn test" },
+  ] } };
+  const rows = planRows(flow, new Set(), 35).filter((r: any) => r.marker === "failed").map((r: any) => r.text);
+  assert.deepEqual(rows, ["cd …/cozy-example && git status --short", "export JAVA_HOME=x; mvn -q verify …"]);
+});

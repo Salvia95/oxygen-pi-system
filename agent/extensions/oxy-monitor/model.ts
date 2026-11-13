@@ -5,6 +5,7 @@
  * 높이 안에서 어느 줄을 보일지(스크롤)와 좁은 폭에서 뺄 열은 여기서 정해, 화면 프로그램은 받은 줄을 그대로 그린다.
  */
 import type { JobSnapshot, JobsState } from "../oxy-jobs/state.ts";
+import { commandHead } from "../oxygen-pi-tui/tools/basic.ts";
 import { type PlanItem, clock, itemDuration } from "../oxy-flow/plan.ts";
 import type { LiveState } from "./live.ts";
 
@@ -159,7 +160,8 @@ export function planRows(flow: FlowLike, open: Set<string>, width: number): Row[
     rows.push({ marker: "none", text: "커밋 전 작업", indent: 0, emphasis: true });
     for (const d of b.decisions) rows.push({ marker: "none", text: d.text, indent: 2 });
     if (b.files.length) rows.push({ marker: "none", text: "변경 파일 " + b.files.length + "개", indent: 2 });
-    for (const x of b.failures) rows.push({ marker: "failed", text: x.command, indent: 2, error: true });
+    // 앞의 `cd <긴 경로> &&` 는 마지막 폴더만 (pi 도구 줄과 같은 규칙, 실제 명령이 잘려 보이지 않게)
+    for (const x of b.failures) rows.push({ marker: "failed", text: commandHead(x.command), indent: 2, error: true });
   }
   if (!rows.length) rows.push({ marker: "none", text: "작업 기록이 없습니다.", indent: 0 });
   return rows;
