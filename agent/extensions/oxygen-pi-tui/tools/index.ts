@@ -9,6 +9,8 @@ import { type ResultView, type ToolPaint, type ToolStatus, callLine, resultLines
 import { grepArgs, grepCollapsed, grepExpanded, grepSummary, matcher, parseGrep } from "./grep.ts";
 import { searchCommand, searchView } from "./search.ts";
 import { backgroundArgs, backgroundView, parseJobNotice } from "./jobs.ts";
+import { SYSTEM_TOOLS, systemDetails, systemSentence } from "./system.ts";
+import { brandEnv, brandFg } from "../brand.ts";
 
 /** width 마다 줄을 만드는 컴포넌트 */
 function lines(fn: (width: number) => string[]): Component {
@@ -132,6 +134,7 @@ export const SUMMARIZERS: Record<string, Summarizer> = {
 
 export function registerToolRows(pi: ExtensionAPI, isOn: () => boolean, glyphMode: () => "unicode" | "ascii"): void {
   pi.registerToolRenderer((toolName, next) => {
+    if (SYSTEM_TOOLS.has(toolName)) return isOn() ? systemRenderer(toolName, glyphMode) : next();
     const s = SUMMARIZERS[toolName];
     if (!s || !isOn()) return next();
     const base = next();
@@ -153,6 +156,29 @@ export function registerToolRows(pi: ExtensionAPI, isOn: () => boolean, glyphMod
       },
     } as any;
   });
+}
+
+/**
+ * 시스템 작업 줄 (system.ts, docs/pi-tui-spec.md §7.5): 한 줄 문장(o2.mid, 실패는 오류색). 펼치면(Ctrl+O) 넘긴 값 · 결과, 기본은 접힘.
+ * 실행 줄은 그리지 않는다 (도구 이름을 보이지 않는다). 결과가 오기 전에는 아무것도 보이지 않는다
+ */
+function systemRenderer(toolName: string, glyphMode: () => "unicode" | "ascii"): any {
+  return {
+    renderShell: "self",
+    renderCall() { return lines(() => []); },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      const g = glyphs(glyphMode());
+      const text = textOf(result?.content);
+      const isError = Boolean(context?.isError);
+      const sentence = systemSentence(toolName, context?.args, text, isError);
+      const env = brandEnv(theme);
+      const mid = (x: string) => brandFg("mid", x, env);
+      const head = isError ? ` ${theme.fg("error", g.fail)} ${theme.fg("error", sentence)}` : ` ${mid(g.system)} ${mid(sentence)}`;
+      const open = Boolean(options?.expanded) && !folded;
+      return lines((w) => [measure.trunc(head, w, "…"),
+        ...(open ? systemDetails(context?.args, text).map((l) => measure.trunc(`   ${theme.fg("toolOutput", l)}`, w, "…")) : [])]);
+    },
+  };
 }
 
 /**

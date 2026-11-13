@@ -12,6 +12,7 @@ import { enabled } from "../_lib/common.ts";
 import { type ChromeState, installEditor, installFooter, installHeader, restoreChrome, sessionCost } from "./chrome.ts";
 import { type TuiConfig, loadConfig, saveConfig } from "./config.ts";
 import { FOLD_KEY, isFolded, registerJobNotices, registerToolRows, setFolded } from "./tools/index.ts";
+import { markUser } from "./user.ts";
 import { matchesKey } from "@earendil-works/pi-tui";
 
 export default function (pi: ExtensionAPI) {
@@ -63,6 +64,8 @@ export default function (pi: ExtensionAPI) {
   // 도구 줄: 등록은 한 번, 켜짐 여부는 그릴 때마다 본다 (꺼지면 pi 기본 그리기)
   registerToolRows(pi, () => cfg.enabled, () => cfg.glyphs);
   registerJobNotices(pi, () => cfg.enabled, () => cfg.glyphs);
+  // 사용자 입력 앞 `>` (user.ts). 꺼져 있으면 그대로
+  pi.registerMarkdownTransformer((md, c) => (cfg.enabled && c.messageType === "user" ? markUser(md) : md));
 
   pi.on("session_start", (_e, ctx) => apply(ctx));
   pi.on("agent_start", () => { state.workingSince = Date.now(); });

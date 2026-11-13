@@ -143,9 +143,13 @@ export function taskLabelOf(plan: PlanItem[], id: string): string {
   return id;
 }
 /** 되돌리기 줄: ↶ [2/5] 까지 되돌림 10:20 (취소했으면 표시) */
-function rollbackRows(plan: PlanItem[], flowId: string | undefined, all: RollbackLike[], prefix?: string): Row[] {
-  return all.filter((r) => r.flow === flowId).map((r) => ({ marker: "none" as Marker, indent: 0, prefix,
-    text: "↶ " + taskLabelOf(plan, r.task).replace(/^(\[\d+\/\d+\]).*/, "$1") + " 까지 되돌림" + (r.undone ? " (취소함)" : ""), right: hhmm(r.at) }));
+/**
+ * 되돌리기 줄: 되돌린 Task 바로 아래에 둔다 (사용자 2026-11-14: "되돌리기한 원본 아래 있게 해줘").
+ * 되돌리기 취소한 것은 그 Task 를 펼쳤을 때만 보인다 ("되돌리기 취소 시 … 펼쳤을 때만 보이게"). label 이 있으면 (접힌 항목 아래) 위치를 붙인다
+ */
+function rollbackRowsFor(all: RollbackLike[], flowId: string | undefined, taskId: string, opened: boolean, prefix: string | undefined, indent: number, label?: string): Row[] {
+  return all.filter((r) => r.flow === flowId && r.task === taskId && (!r.undone || opened)).map((r) => ({ marker: "none" as Marker, indent, prefix,
+    text: "↶ " + (label ? label + " 까지" : "여기까지") + " 되돌림" + (r.undone ? " (취소함)" : ""), right: hhmm(r.at) }));
 }
 
 /**
@@ -160,16 +164,18 @@ export function completedRows(h: FlowHistory | null, open: Set<string>, rollback
     rows.push({ key: "c:" + fl.id, marker: fm === "none" ? "done" : markMarker(fm, "done"), text: fl.goal || fl.id, right: mmdd(fl.updatedAt), indent: 0 });
     if (!open.has("c:" + fl.id)) continue;
     const items = fl.plan.flatMap((p, i) => [{ p, i, c: null as PlanItem | null, j: -1 }, ...p.children.map((c, j) => ({ p, i, c, j }))]);
-    const rb = rollbackRows(fl.plan, fl.id, rollbacks);
     items.forEach((x, k) => {
       const it = x.c ?? x.p;
-      const lastTop = !x.c && x.i === fl.plan.length - 1 && !x.p.children.length && !rb.length;
-      const lastAll = k === items.length - 1 && !rb.length;
+      const lastTop = !x.c && x.i === fl.plan.length - 1 && !x.p.children.length;
+      const lastAll = k === items.length - 1;
       const prefix = x.c ? (x.j === x.p.children.length - 1 ? "│ └ " : "│ ├ ") : lastTop || lastAll ? "└ " : "├ ";
       const label = x.c ? "[" + (x.j + 1) + "/" + x.p.children.length + "] " + it.text : "[" + (x.i + 1) + "/" + fl.plan.length + "] " + it.text;
-      rows.push({ key: "t:" + fl.id + ":" + it.id, marker: markMarker(marks?.[it.id]?.mark, it.status), text: label, indent: 0, prefix });
+      const key = "t:" + fl.id + ":" + it.id;
+      rows.push({ key, marker: markMarker(marks?.[it.id]?.mark, it.status), text: label, indent: 0, prefix });
+      // 이 Task 아래 되돌리기 줄 (트리 바는 이어지게)
+      const under = x.c ? (x.j === x.p.children.length - 1 ? "│   " : "│ │ ") : lastTop || lastAll ? "  " : "│ ";
+      rows.push(...rollbackRowsFor(rollbacks, fl.id, it.id, open.has(key), under, 0));
     });
-    rb.forEach((r, k) => rows.push({ ...r, prefix: k === rb.length - 1 ? "└ " : "├ " }));
   }
   return rows;
 }
@@ -229,16 +235,24 @@ export function planRows(flow: FlowLike, open: Set<string>, width: number, marks
       if (n.files.length) rows.push({ marker: "none", text: "파일 " + n.files.length + "개: " + n.files.slice(0, 5).join(", ") + (n.files.length > 5 ? " …" : ""), indent: indent + 2, prefix });
     }
   };
+  const rbs = flow.rollbacks ?? [];
   plan.forEach((p, i) => {
     rows.push({ key: "p:" + p.id, marker: mk(p), text: "[" + (i + 1) + "/" + plan.length + "] " + p.text, right: right(p), indent: 0,
       emphasis: p.status === "doing" });
     const folded = (p.status === "done") !== open.has("p:" + p.id);
-    if (folded) return;
+    // 되돌리기 줄은 되돌린 Task 바로 아래 (취소한 것은 펼쳤을 때만)
+    rows.push(...rollbackRowsFor(rbs, flow.id, p.id, open.has("p:" + p.id), p.children.length && !folded ? "│ " : undefined, p.children.length && !folded ? 0 : 2));
+    if (folded) {
+      // 접힌 항목의 할 일을 되돌렸으면 그 항목 아래에 위치를 붙여 보인다 (취소한 것은 숨김)
+      p.children.forEach((c, j) => rows.push(...rollbackRowsFor(rbs, flow.id, c.id, false, undefined, 2, "[" + (j + 1) + "/" + p.children.length + "]")));
+      return;
+    }
     if (open.has("p:" + p.id)) commitRows(p.nodes, p.children.length ? "│ " : undefined, p.children.length ? 0 : 2);
     p.children.forEach((c, j) => {
       const last = j === p.children.length - 1;
       rows.push({ key: "p:" + c.id, marker: mk(c), text: "[" + (j + 1) + "/" + p.children.length + "] " + c.text, right: right(c), indent: 0,
         prefix: last ? "└ " : "├ ", emphasis: c.status === "doing" });
+      rows.push(...rollbackRowsFor(rbs, flow.id, c.id, open.has("p:" + c.id), last ? "  " : "│ ", 2));
       if (open.has("p:" + c.id)) commitRows(c.nodes, last ? "  " : "│ ", 2);
     });
   });
@@ -249,7 +263,6 @@ export function planRows(flow: FlowLike, open: Set<string>, width: number, marks
     rows.push({ marker: "none", text: plan.length ? "계획 밖 커밋" : "커밋", indent: 0, emphasis: true });
     commitRows(outside.slice(-20), undefined, 2);
   }
-  rows.push(...rollbackRows(plan, flow.id, flow.rollbacks ?? []));
   if (!rows.length) rows.push({ marker: "none", text: "작업 기록이 없습니다.", indent: 0 });
   return rows;
 }

@@ -288,6 +288,23 @@ pi 기본 입력창의 윗줄 · 아랫줄 가로선을 상태가 들어간 테�
 | `edit` | `edit <경로>` | `+<추가> -<삭제>` | pi 기본 diff |
 | `write` | `write <경로>` | `<n>줄 씀` | 없음 |
 
+### 7.5 시스템 작업 줄 · 사용자 입력 표시 (2026-11-14)
+
+요청 (사용자, 2026-11-14): "현재 사용자 입력 의 경우 청록색 배경으로만 표시되고 있는데 앞에 > 를 붙여서 사용자 입력임을 명확히 해줘 그와 동시에 flow_plan, flow_note 등은 시스템 차원의 작업인 만큼 별도의 구분되는 색으로 표시해주고, 현재는 파라미터나 작업 내용이 나오는데 세부적인 내용은 펼치면 노출되게(ctrl + o, ctrl + k 를통한 펼치기 접기 조작 동일, 기본값이 접힌 상태) 해주고 사용자에게 기본적인 정보만 제공되게 해줘(flow_plan과 같이 표현하지 말고 추상화된 문장으로 컴팩트하지만 모든 의미가 전달되는 짧은 문장을 사용해 문구의 성향은 다른 표시들을 참고하고)"
+
+- 사용자 입력: 청록 바탕 줄 앞에 `> `. pi 는 사용자 글을 Markdown 으로 그려 줄 앞 `> ` 가 인용문이 되므로, 폭 0 글자(U+2060)를 앞에 둔다 (`\>` 는 백슬래시가 보이고 `&gt;` 는 글자 그대로 보였다, 실측). `registerMarkdownTransformer` (messageType user), 모델이 받는 글은 그대로 (`user.ts`).
+- 시스템 작업 (`flow_plan` · `flow_note` · `flow_show`): 도구 이름 · 인자 줄을 그리지 않고 한 줄 문장만, 기호 `◇` 와 문장은 시그니처 둘째 색 o2.mid (`#7FA98A`, 실패는 `×` 와 오류색). 기본은 접힘, Ctrl+O 로 펼치면 넘긴 값 한 줄 + 결과 글, Ctrl+K 는 다른 도구 줄처럼 접는다 (`tools/system.ts`).
+  | 작업 | 문장 |
+  | --- | --- |
+  | 계획 쓰기 | `Plan set, 2 tasks, 3 sub-tasks` |
+  | 항목 더하기 | `Task added, [3/3] Report` (할 일이면 `Sub-task added, …`) |
+  | 상태 바꾸기 | `Started [1/2] Write a..` · `Finished [1/2] Write a!` · `Dropped [3/5] ..` · `Blocked on [2/3] ..` · `Reopened [1/2] ..` · 글만 바꾸면 `Renamed [1/2] …` |
+  | 메모 | `Decision noted, <글>` · `Next step noted, <글>` · `Blocker noted, <글>` · `Goal set, <글>` · `Flow finished!` |
+  | 기록 보기 | `Flow log read` · `Step n2 read` · `Decisions searched, "<말>"` |
+  | 실패 | `Plan update failed.., <첫 줄>` · `Note failed.., …` · `Flow log failed.., …` |
+  위치 `[i/n]` 은 결과 글의 계획 줄에서 같은 단계 안의 순서로 센다 (화면의 Overall Task 와 같은 꼴). 색은 상태 뜻이 아니라 "시스템 작업" 구분이라 시그니처 둘째 단계를 썼다 (`.claude/rules/oxygen-design.md`: 시그니처 o2.sage 는 1~2곳, 상태색은 쓰지 않음).
+- 실측 (mock pi, mintty 80×34 D2Coding): 접힘 `◇ Plan set, 2 tasks` · `◇ Finished [1/2] Write a!` 색 `127;169;138`, 사용자 줄 `> scenario:…`. Ctrl+O 로 `action="update" id="p1" status="done"` 과 결과 글. 증거: scratchpad `caps/system-rows.png`.
+
 ## 8. 글꼴 D2Coding 반입 · 적용
 
 ### 반입 (fetch · 번들)

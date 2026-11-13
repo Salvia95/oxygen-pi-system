@@ -2010,7 +2010,38 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   const u = C.flowKeyEx(ui, rolled, 35, "u", Date.now(), history).ui;
   assert.deepEqual([u.confirm?.op, u.confirm?.label, u.confirm?.files], ["undo", "[2/3] 반납", 2]);
   assert.deepEqual(M.flowModel(rolled, null, u, 35, 28, Date.now(), w, history).popup!.buttons, ["닫기", "되돌리기 취소"]);
-  // ↶ 줄: 되돌린 Flow 아래
-  const rb = M.completedRows(history, new Set(["c:fa"]), rolled.rollbacks).at(-1)!;
-  assert.deepEqual([rb.prefix + rb.text, rb.right], ["└ ↶ [2/3] 까지 되돌림", "10:20"]);
+  // ↶ 줄: 되돌린 Task 바로 아래 (사용자 2026-11-14), 맨 아래가 아니라
+  const cr = M.completedRows(history, new Set(["c:fa"]), rolled.rollbacks).map((r: any) => (r.prefix ?? "") + r.text);
+  assert.deepEqual(cr.slice(1), ["├ [1/3] 마이그레이션", "├ [2/3] 반납", "│ ↶ 여기까지 되돌림", "└ [3/3] 표시"]);
+  // 되돌리기를 취소한 줄은 그 Task 를 펼쳤을 때만
+  const undone = [{ ...rolled.rollbacks[0], undone: Date.now() }];
+  assert.ok(!M.completedRows(history, new Set(["c:fa"]), undone).some((r: any) => r.text.startsWith("↶")), "취소한 것은 숨김");
+  assert.equal(M.completedRows(history, new Set(["c:fa", "t:fa:p2"]), undone).find((r: any) => r.text.startsWith("↶"))!.text, "↶ 여기까지 되돌림 (취소함)");
+  // 지금 Flow 의 Overall Task 도 같은 규칙
+  const cur: any = { ...flow, plan: [it("p1", "준비", "done", snap), it("p2", "구현", "done", snap), it("p3", "마무리", "doing")],
+    rollbacks: [{ at: Date.parse("2026-11-14T11:00:00"), flow: "cur", task: "p1", text: "준비" }, { at: Date.parse("2026-11-14T11:05:00"), flow: "cur", task: "p2", text: "구현", undone: 1 }] };
+  const pr = M.planRows(cur, new Set(), 35).map((r: any) => r.text);
+  assert.deepEqual(pr, ["[1/3] 준비", "↶ 여기까지 되돌림", "[2/3] 구현", "[3/3] 마무리"]);
+  assert.deepEqual(M.planRows(cur, new Set(["p:p2"]), 35).map((r: any) => r.text).slice(2, 4), ["[2/3] 구현", "↶ 여기까지 되돌림 (취소함)"]);
+});
+
+test("oxygen-pi-tui 시스템 작업 줄: flow_plan · flow_note · flow_show 를 짧은 문장으로 (pi-tui-spec §7.5)", async () => {
+  const S = await import("../agent/extensions/oxygen-pi-tui/tools/system.ts");
+  const res = "Updated p1 [done].\n- p1 [done] Write a.txt\n- p2 [doing] Write b.txt (commits n2)\n  - p2.1 [todo] sub one\nNext: p2 Write b.txt";
+  assert.equal(S.systemSentence("flow_plan", { action: "update", id: "p1", status: "done" }, res, false), "Finished [1/2] Write a.txt!");
+  assert.equal(S.systemSentence("flow_plan", { action: "update", id: "p2", status: "doing" }, res, false), "Started [2/2] Write b.txt..");
+  assert.equal(S.systemSentence("flow_plan", { action: "update", id: "p2.1", status: "dropped" }, res, false), "Dropped [1/1] sub one..");
+  assert.equal(S.systemSentence("flow_plan", { action: "set", items: [{ text: "a", children: [{ text: "x" }, { text: "y" }] }, { text: "b" }] }, "Plan saved.", false), "Plan set, 2 tasks, 2 sub-tasks");
+  assert.equal(S.systemSentence("flow_plan", { action: "add", text: "Report" }, "Added p3.\n- p1 [done] A\n- p2 [done] B\n- p3 [todo] Report", false), "Task added, [3/3] Report");
+  assert.equal(S.systemSentence("flow_plan", { action: "update", id: "p9", status: "done" }, 'unknown item "p9". Items: p1 p2', true), 'Plan update failed.., unknown item "p9". Items: p1 p2');
+  assert.equal(S.systemSentence("flow_note", { kind: "decision", text: "Use JWT", why: "stateless" }, "Recorded decision.", false), "Decision noted, Use JWT");
+  assert.equal(S.systemSentence("flow_note", { kind: "next", text: "브라우저 확인" }, "Recorded next.", false), "Next step noted, 브라우저 확인");
+  assert.equal(S.systemSentence("flow_note", { kind: "done", text: "" }, "Recorded done.", false), "Flow finished!");
+  assert.equal(S.systemSentence("flow_show", {}, "[oxy-flow] Task state …", false), "Flow log read");
+  assert.equal(S.systemSentence("flow_show", { query: "JWT" }, "…", false), 'Decisions searched, "JWT"');
+  assert.deepEqual(S.systemDetails({ action: "update", id: "p1", status: "done" }, "Updated p1 [done].\n"), ['action="update" id="p1" status="done"', "Updated p1 [done]."]);
+  assert.ok(S.SYSTEM_TOOLS.has("flow_plan") && !S.SYSTEM_TOOLS.has("bash"));
+  const U = await import("../agent/extensions/oxygen-pi-tui/user.ts");
+  assert.equal(U.markUser("hello"), "⁠> hello", "인용문이 되지 않게 폭 0 글자를 앞에");
+  assert.equal(U.markUser(U.markUser("hi")), "⁠> hi");
 });

@@ -9,6 +9,7 @@ export interface Glyphs {
   elbow: string; vbar: string; hline: string;
   tl: string; tr: string; bl: string; br: string; teeDown: string; teeUp: string;
   brand: string; prompt: string; sep: string; more: string;
+  system: string;   // 시스템 작업 줄 (flow_plan · flow_note · flow_show, docs/pi-tui-spec.md §7.5)
   spinner: readonly string[];
 }
 
@@ -17,14 +18,14 @@ export const GLYPHS: Record<GlyphMode, Glyphs> = {
     running: "○", ok: "✓", fail: "×",   // 끝남은 모든 화면에서 ✓ (docs/ui-unify-spec.md D1)
     elbow: "└", vbar: "│", hline: "─",
     tl: "╭", tr: "╮", bl: "╰", br: "╯", teeDown: "┬", teeUp: "┴",
-    brand: "◆", prompt: "›", sep: "·", more: "…",
+    brand: "◆", prompt: "›", sep: "·", more: "…", system: "◇",
     spinner: ["◐", "◓", "◑", "◒"],
   },
   ascii: {
     running: "o", ok: "v", fail: "x",
     elbow: "\\", vbar: "|", hline: "-",
     tl: "+", tr: "+", bl: "+", br: "+", teeDown: "+", teeUp: "+",
-    brand: "*", prompt: ">", sep: ".", more: "...",
+    brand: "*", prompt: ">", sep: ".", more: "...", system: "+",
     spinner: ["|", "/", "-", "\\"],
   },
 };
