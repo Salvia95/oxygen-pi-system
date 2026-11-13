@@ -53,15 +53,24 @@ function javaFiles() {
       "    public long newTotal(long price, int qty) {", "        return Math.multiplyExact(price, qty);", "    }", "}", "",
     ].join("\n"),
   };
+  // 호출 모양을 여러 가지로 둔다 (받는 객체 · this · 메서드 체인 · 여러 줄). 로그 문자열에는 호출과 같은 글자("orders.legacyTotal(")가 들어 있어,
+  // 글자 바꾸기(sed)로는 문자열까지 바뀌어 틀린다. 구문으로 찾아야(ast-grep) 호출만 바뀐다 (2026-11-13 skill-evaluator 지적)
+  const call = (i, args) => [
+    `        long a${i} = orders.legacyTotal(${args});`,
+    `        long a${i} = this.orders.legacyTotal(${args});`,
+    `        long a${i} = service().legacyTotal(${args});`,
+    `        long a${i} = orders\n            .legacyTotal(${args});`,
+  ][i % 4];
   CALLERS.forEach((name, i) => {
     files[`src/main/java/com/acme/${name.toLowerCase()}/${name}Handler.java`] = [
       `package com.acme.${name.toLowerCase()};`, "", "import com.acme.order.OrderService;", "",
       `public class ${name}Handler {`, "    private final OrderService orders = new OrderService();", "",
+      "    private OrderService service() { return orders; }", "",
       "    // TODO: legacyTotal() 호출을 정리한다",
       `    public long handle(long price, int qty) {`,
-      `        log("${name}: legacyTotal() fallback path");`,
-      `        long a = orders.legacyTotal(price, qty);`,
-      ...(i % 2 === 0 ? [`        long b = orders.legacyTotal(price + ${i}, 1);`, "        return a + b;"] : ["        return a;"]),
+      `        log("${name}: fallback via orders.legacyTotal(price, qty)");`,
+      call(i, "price, qty"),
+      ...(i % 2 === 0 ? [call(i + 1, `price + ${i}, 1`).replace(`a${i + 1}`, `b${i}`), `        return a${i} + b${i};`] : [`        return a${i};`]),
       "    }", "", "    private void log(String s) { System.out.println(s); }", "}", "",
     ].join("\n");
   });

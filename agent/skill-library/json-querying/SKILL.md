@@ -1,6 +1,6 @@
 ---
 name: json-querying
-description: Extract, filter, reshape, and edit JSON with `jq`. Use when you need specific fields from a JSON file or command output (API responses, package.json, config, logs), want to filter or count records, convert JSON to CSV, or change a value in a JSON file.
+description: Pick fields from, filter, count, total or edit JSON (files too big to read whole, API responses, config, reports, logs) with `jq`. Use when a task involves a JSON file or JSON output, matching its records with other data, converting it to CSV, or changing one value in a JSON file without touching the rest.
 ---
 
 # Query and transform JSON (jq)

@@ -1,6 +1,6 @@
 ---
 name: sql-querying
-description: Query PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, Oracle and other databases with the `usql` command. Use when the user asks to look up table data, inspect a schema or table structure, count or compare records, or run a .sql file against a database.
+description: Look up, count, sum or join data stored in a database (a .db/.sqlite file, PostgreSQL, MySQL/MariaDB, SQL Server, Oracle) with `usql`, the bundled client for all of them (instead of sqlite3, psql or a script). Use when a task mentions a database or .db file, tables, records such as orders or users, a schema, or a .sql file to run.
 ---
 
 # Query databases (usql)

@@ -1,6 +1,6 @@
 ---
 name: http-api-testing
-description: Call and verify HTTP/REST endpoints by writing `.hurl` files and running `hurl`. Use when the user asks to call an API, check what an endpoint returns, reproduce an API bug, or write automated API tests.
+description: Check what an HTTP/REST API returns and keep the check as a re-runnable `.hurl` file, run with `hurl` (instead of curl or a shell script). Use when the user asks to call or verify an endpoint, check a filter, field or status code, reproduce an API bug, or leave an API check or test to run again.
 ---
 
 # HTTP API testing (hurl)

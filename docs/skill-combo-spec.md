@@ -111,6 +111,11 @@ CI 는 Claude Haiku 로 잰다. 사이트의 vLLM(Qwen)은 GitHub 러너에서 �
 - 읽기 전 편집 금지(`oxy-read-before-edit`)에 막힌 편집이 `deprecate` 에서 매번 7번 나왔다 (호출 낭비의 대부분).
 - **Python 을 숨기면 (C0-1, `hide-r1`, $0.010)**: 결과는 4개 모두 PASS. `sales` 가 `usql` + `jq` 로 바뀌어 2/2, `failtest` 3/3 (`jq` 까지), `api` 1/2(`hurl` 안 씀), `deprecate` 1/2(`ast-grep` 안 씀, 이번에는 bash 로 바꿈). 합격 2/4. 여전히 `SKILL.md` 를 읽은 적은 없다.
   두 번째(`hide-r2`)는 이 PC 의 메모리가 부족해 Claude Code 가 중간에 멈췄다 (기록 없음). 기준선(`baseline-combo.json`)은 `hide-r1` 하나로 정했다: 합격 `sales` · `failtest`.
+- **skill 튜닝 (C0, skill-evaluator, $0.044)**: description 4개(sql-querying · json-querying · http-api-testing · structural-code-search)를 도구 이름이 아니라 상황으로 시작하게 바꾸고, AGENTS.md 에 "스크립트나 curl · sed · python 을 쓰기 전에 skill 목록을 보고, 맞는 것이 있으면 읽고 그 도구를 쓴다" 한 줄.
+  before(`hide-r1` · `before-r2`) 합격 2/4 → after(`after-r1` · `after-r2`) 3/4 (api 새로 합격), 기본 suite 8/8 → 8/8, 첫 요청 +141 토큰. 반영했다. 본문은 바꾸지 않았다.
+  찾은 측정 결함 두 가지 (부모가 고침): (1) `--hide` 가 WindowsApps 의 앱 실행 별칭 · `C:\Windows\py.exe` 를 숨기지 못해 before-r2 · after 의 sales 가 실제로 python3 을 썼다 → PATH 맨 앞에 "command not found" 대역을 두는 방식으로 (폴더를 빼면 C:\Windows 까지 빠진다).
+  (2) `deprecate` 는 모든 호출이 `orders.legacyTotal(` 한 모양이라 sed 한 줄로 풀렸다 → 받는 객체 · this · 메서드 체인 · 여러 줄 호출로 다양하게, 로그 문자열에 같은 글자를 넣어 글자 바꾸기는 FAIL (LLM 없이 확인: 손대지 않음 FAIL · sed FAIL · 구문 바꾸기 PASS).
+- **고친 조건으로 다시 (`v2-r1` · `v2-r2`, $0.027)**: 두 번 모두 **합격 4/4**. skill 실행 2/2 · 2/2 · 2/2 · 2~3/3, `SKILL.md` 읽음 sql · http-api · structural-code-search (처음으로 읽기 시작). 기준선(`baseline-combo.json`)을 4개 모두 합격으로 갱신했다.
 - 측정 고침: Claude 는 첫 요청 입력이 `cacheWrite` 로 오므로, 입력 토큰에 `cacheWrite` 를 더했다 (r1 의 `first=4` 는 이 때문).
 
 ## 6. 구현 순서와 확인 방법

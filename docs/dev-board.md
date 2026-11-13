@@ -17,7 +17,7 @@
 | `flow-view` | `docs/flow-view-spec.md` flow 모니터 구성 개편 (Current · Next · Overall) · Tokyo Night | 완료 | – | 없음 | 2026-11-13 | f8b4b5c 4ce6514 | 2026-11-13 (`oxygen-pi-20261113.zip`, oxy-tui 0.3.0) |
 | `jobs-view` | `docs/jobs-view-spec.md` Job Monitor 구성 개편 (Main · Sub Context, subagent 의 셸) | 완료 | – | 없음. 후속: 업데이트가 WT 프로필을 다시 쓰지 않음 (아래 메모) | 2026-11-13 | f8b4b5c 4ce6514 | 2026-11-13 (`oxygen-pi-20261113.zip`, oxy-tui 0.3.0) |
 | `tui-fix` | `docs/tui-spec.md` §10 업데이트가 등록 항목을 다시 씀 · §6 값 열의 경로 | 검증 | 사용자: 커밋 · 다음 번들에 반영 | 커밋 후 다음 번들 · 설치본 업데이트 때 반영 (부모) | 2026-11-13 | – | 안 됨 |
-| `skill-combo` | `docs/skill-combo-spec.md` 여러 skill 상황 시험 · CI 계획 | 구현 | 사용자: C4 비밀 등록 · 월 한도 (`skill-combo/4` 실행 전) | `skill-combo/2` (부모) | 2026-11-13 | – | 해당 없음 |
+| `skill-combo` | `docs/skill-combo-spec.md` 여러 skill 상황 시험 · CI 계획 | 구현 | 사용자: C4 비밀 등록 · 월 한도 (`skill-combo/4` 실행 전) | 비밀이 등록되면 `skill-eval.yml` 수동 실행 1번 (부모) | 2026-11-13 | – | 해당 없음 |
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
@@ -65,6 +65,7 @@
 | `skill-combo/2` | `report.mjs --gate` · `run.mjs --key-env` · `--hide` (§4) | 완료 | 단위 `CI 판정` 시험 (`gate.mjs`), 기준 `HEAD af5bdfa + 미커밋` (2026-11-13 부모) | Python 을 숨긴 하이쿠 `hide-r1`: 합격 2/4 → `baseline-combo.json`. `--key-env` 는 CI 첫 실행에서 확인 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
 | `skill-combo/3` | `ci.yml` (mock 시험) | 완료 | GitHub Actions run 43363974266 성공: 구성요소 받기 · 위생 · 단위 · E2E · Rust (2026-11-13). 첫 실행에서 E2E 의 skill 읽기 검사가 선택 구성요소(SQLcl) skill 에 기대어 실패 → find-code 로 바꿈 | 해당 없음 (CI) | 40e3126 |
 | `skill-combo/4` | `skill-eval.yml` (하이쿠) | 구현 | workflow 작성 (2b5bbe3). 비밀 · Environment 등록 전이라 아직 실행하지 않음 | – | 2b5bbe3 |
+| `skill-combo/5` | skill 튜닝 (C0, skill-evaluator) · 측정 결함 수정 | 완료 | 단위 frontmatter 시험 · `CI 판정` 시험, `just unit` 통과 (2026-11-13) | 하이쿠: before 합격 2/4 → after 3/4 → 측정 결함 수정 뒤 `v2` 4/4 · 4/4, 기본 suite 8/8 유지 (2026-11-13) | `docs/skill-combo-spec.md` §5 |
 | `skill-eval/1` | before 기준선 28문장 | 구현 | 해당 없음 (실측만) | 13 / 28 (Groq qwen/qwen3.8-27b, 한도로 중단). 13개 통과, #6 은 모델 오류 | 751a808 `tests/skill-eval/README.md` |
 | `skill-eval/2` | after 후보 측정 | 예정 | – | – | – |
 | `skill-eval/3` | 반영 (P · N · G 어느 것도 나빠지지 않을 때) + SKILL.md frontmatter 단위 테스트 | 예정 | – | – | – |

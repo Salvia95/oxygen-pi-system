@@ -1298,3 +1298,20 @@ test("skill 상황 시험 CI 판정: 반복 중 1번 합격이면 통과 · 기�
   assert.deepEqual(gate(rows, { accepted: ["d"] }).regressed, ["d"]);  // 기준선 시나리오가 돌지 않음도 실패
   assert.equal(gate(rows, null).ok, true);
 });
+
+test("skill-library: 모든 SKILL.md 의 frontmatter 가 pi 의 파서로 읽히고 name = 폴더 이름 · description 있음 (1024자 이하)", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const { pathToFileURL } = await import("node:url");
+  const fm: any = await import(pathToFileURL(join(import.meta.dirname, "..", "vendor", "pi", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "utils", "frontmatter.js")).href);
+  const lib = join(import.meta.dirname, "..", "agent", "skill-library");
+  const dirs = readdirSync(lib, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  assert.ok(dirs.length > 0);
+  for (const d of dirs) {
+    const text = readFileSync(join(lib, d, "SKILL.md"), "utf8");
+    assert.ok(text.startsWith("---\n"), `${d}: frontmatter 로 시작`);
+    const { frontmatter } = fm.parseFrontmatter(text);   // YAML 이 깨지면 여기서 예외
+    assert.equal(frontmatter.name, d, `${d}: name 이 폴더 이름과 같음`);
+    assert.equal(typeof frontmatter.description, "string", `${d}: description 있음`);
+    assert.ok(frontmatter.description.trim().length > 0 && frontmatter.description.length <= 1024, `${d}: description 길이 ${frontmatter.description.length}`);
+  }
+});

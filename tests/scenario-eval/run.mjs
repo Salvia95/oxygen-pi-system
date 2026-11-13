@@ -4,7 +4,7 @@
 // --suite combo: 여러 skill 을 함께 쓰는 상황 시나리오(combo.mjs). 결과는 results-combo.jsonl, 읽은 SKILL.md · 실행한 명령 · 비용을 함께 남긴다.
 // --llm-from: LLM 연결(llm.json)과 키(secrets.json, DPAPI)를 이 agent 폴더에서 읽는다 (기본: 저장소 agent/). 예: 설치본의 agent 폴더
 // --key-env <변수>: 키를 DPAPI 대신 이 환경변수에서 (CI). 값은 대상 연결의 키로만 쓰고 기록하지 않는다
-// --hide a,b: pi 의 PATH 에서 이 명령이 있는 폴더를 뺀다. combo 는 기본 python,python3,py (사이트 PC 처럼 번들 도구만, docs/skill-combo-spec.md C0-1). --hide none 이면 빼지 않는다
+// --hide a,b: pi 의 PATH 맨 앞에 이 명령들을 "command not found" 로 끝내는 대역을 둔다. combo 는 기본 python,python3,py (사이트 PC 처럼 번들 도구만, docs/skill-combo-spec.md C0-1). --hide none 이면 두지 않는다
 // 모델: agent/llm.json 의 LLM 연결 (docs/tui-spec.md §11). 기본은 기본 모델(main). --level 은 그 작업 수준의 연결 · 모델 · thinking.
 //   --model 이 연결에 없는 모델이면 스냅샷의 llm.json 에만 더한다. --base-url 은 스냅샷에서 그 연결의 주소만 바꾼다.
 //   키는 스냅샷에 복사하지 않는다: 저장소의 secrets.json(DPAPI)에서 한 번 복호화해 pi 에 OXY_LLM_INHERIT_KEYS 로 넘기고 pi 가 받자마자 지운다.
@@ -276,12 +276,17 @@ function skillUsage(skills, m) {
     ran: (BIN[skill] ?? []).some((b) => heads.has(b)) }));
 }
 
-/** PATH 에서 숨길 명령(HIDE)이 있는 폴더를 뺀 환경 (Windows 는 Path 키일 수 있다). 숨길 것이 없으면 빈 객체 */
+/**
+ * 숨길 명령(HIDE)의 대역을 PATH 맨 앞에 둔 환경 (Windows 는 Path 키일 수 있다). 숨길 것이 없으면 빈 객체.
+ * 폴더를 PATH 에서 빼지 않는다: python 이 C:\Windows(py.exe) · WindowsApps(앱 실행 별칭) 같은 시스템 폴더에도 있어서, 빼면 다른 명령까지 사라진다.
+ * 대역은 Git Bash 가 찾는 확장자 없는 sh 스크립트로, 실제로 없을 때처럼 127 로 끝난다.
+ */
 function hiddenPath() {
   if (!HIDE.length) return {};
   const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   const sep = process.platform === "win32" ? ";" : ":";
-  const has = (dir) => HIDE.some((n) => ["", ".exe", ".cmd", ".bat"].some((x) => { try { return fs.statSync(path.join(dir, n + x)).isFile(); } catch { return false; } }));
-  const kept = String(process.env[key] ?? "").split(sep).filter((d) => d && !has(d));
-  return { [key]: kept.join(sep) };
+  const dir = path.join(T, "hide-bin");
+  fs.mkdirSync(dir, { recursive: true });
+  for (const n of HIDE) fs.writeFileSync(path.join(dir, n), `#!/bin/sh\necho "bash: ${n}: command not found" >&2\nexit 127\n`, { mode: 0o755 });
+  return { [key]: dir + sep + String(process.env[key] ?? "") };
 }

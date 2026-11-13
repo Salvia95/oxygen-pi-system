@@ -1,6 +1,6 @@
 ---
 name: structural-code-search
-description: Find or rewrite code by its syntax with `ast-grep` instead of text. Use when text search gives false hits (matches in comments or strings), when you need every call of a method with any arguments, every class with a given annotation or shape, or when a refactor must change many call sites consistently (rename a call, reorder or wrap arguments).
+description: Replace or find every real call of a function or method across many files, leaving comments and strings untouched, with `ast-grep` (matches code syntax, not text like grep or sed). Use when a deprecated or renamed method's calls must be changed, call arguments reordered or wrapped, or text search hits comments and strings; also for every class with a given annotation or shape.
 ---
 
 # Search and rewrite code by syntax (ast-grep)
