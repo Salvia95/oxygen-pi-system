@@ -87,6 +87,14 @@ const SCENARIOS = {
     { tool: "flow_plan", args: { action: "update", id: "p2", status: "done" } },
     { text: "two tasks done" },
   ],
+  // 같은 응답에서 파일을 쓰고 Task 를 끝낸다 (병렬 실행): 스냅숏은 먼저 부른 도구가 끝난 뒤여야 한다 (실제 Haiku 에서 a.txt 가 빠졌다)
+  "flow-rollback-par": [
+    { tool: "flow_plan", args: { action: "set", items: [{ text: "Write a" }, { text: "Write b" }] } },
+    { tool: "flow_plan", args: { action: "update", id: "p1", status: "doing" } },
+    { calls: [bash("sleep 1; echo a1 > a.txt"), { tool: "flow_plan", args: { action: "update", id: "p1", status: "done" } }, { tool: "flow_plan", args: { action: "update", id: "p2", status: "doing" } }] },
+    { calls: [{ tool: "write", args: { path: "b.txt", content: "b1\n" } }, { tool: "flow_plan", args: { action: "update", id: "p2", status: "done" } }] },
+    { text: "parallel tasks done" },
+  ],
   "flow-big": [bash("echo step-one"), { ...bash("echo step-two"), usage: 120000 }, { text: "after-compaction" }],
   "flow-half": [{ text: "half-full", usage: 75000 }],
   // 작업 수준: 본 모델이 level 을 정해 맡긴다 (e2e 에서 deep = 범용 모델 + thinking)
@@ -180,10 +188,14 @@ http.createServer((req, res) => {
     }
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
     const item = script[step];
-    if (item?.tool) {
-      const toolName = typeof item.tool === "function" ? item.tool(body) : item.tool;
-      sse(res, choice({ role: "assistant", tool_calls: [{ index: 0, id: `call_${step}`, type: "function", function: { name: toolName, arguments: "" } }] }));
-      sse(res, choice({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify(typeof item.args === "function" ? item.args(body) : item.args) } }] }));
+    // calls: 한 응답에 도구 여러 개 (pi 는 병렬로 실행한다 — 실제 모델이 그렇게 부른다, docs/flow-rollback-spec.md §8)
+    const calls = item?.calls ?? (item?.tool ? [item] : null);
+    if (calls) {
+      calls.forEach((c, k) => {
+        const toolName = typeof c.tool === "function" ? c.tool(body) : c.tool;
+        sse(res, choice({ ...(k === 0 ? { role: "assistant" } : {}), tool_calls: [{ index: k, id: k === 0 ? `call_${step}` : `call_${step}_${k}`, type: "function", function: { name: toolName, arguments: "" } }] }));
+        sse(res, choice({ tool_calls: [{ index: k, function: { arguments: JSON.stringify(typeof c.args === "function" ? c.args(body) : c.args) } }] }));
+      });
       sse(res, choice({}, "tool_calls"));
     } else {
       const text = item?.text ?? `MOCK-DONE ${body.messages.at(-1).role}: ${contentText(body.messages.at(-1).content).trim()}`;

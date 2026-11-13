@@ -225,6 +225,18 @@ FWD="$FW2" FSID=flowc frun "scenario:flow-plan add g with a plan"
 FWD="$FW2" FSID=flowd frun "scenario:env switch to another task"
 FWD="$FW2" FSID=flowc frun "scenario:env plan check"
 chk "flow 계획: 다시 연 세션의 첫 요청에 계획과 다음 할 일" '[[ $(first "$CONV") == *"Next: p2 Report"*"Plan (update it with flow_plan):"*"- p1 [done] Add g file"*"(2/2 sub-tasks done)"*"- p2 [todo] Report"* ]]'
+# 되돌리기 (docs/flow-rollback-spec.md): 같은 응답에서 파일 쓰기와 Task done 을 부르면(병렬 실행) 스냅숏은 쓰기 뒤여야 한다
+FW3="$TMP/flowwork3"; mkdir -p "$FW3"; (cd "$FW3" && git init -q)
+FWD="$FW3" FSID=flowr frun "scenario:flow-rollback-par two tasks"
+shadow_has() { local gd; gd=$(ls -d "$FW3"/.oxy/flow/shadow/*/ | head -1); git --git-dir="$gd" ls-tree -r --name-only "$1" 2>/dev/null | tr '\n' ' '; }
+p1snap=$(jq -r '.plan[0].snaps | to_entries[0].value' "$FW3/.oxy/flow/flow.json"); p2snap=$(jq -r '.plan[1].snaps | to_entries[0].value' "$FW3/.oxy/flow/flow.json")
+chk "되돌리기: Task 끝 스냅숏이 같은 응답의 앞선 쓰기를 담음 (병렬 실행)" '[[ "$(shadow_has "$p1snap")" == *"a.txt"* && "$(shadow_has "$p1snap")" != *"b.txt"* && "$(shadow_has "$p2snap")" == *"b.txt"* ]]'
+chk "되돌리기: 그림자 저장소는 사용자 git 에 안 잡힘" '[[ -z "$(cd "$FW3" && git status --porcelain | grep -v "a.txt\|b.txt")" ]]'
+rbcli() { "$OXY_NODE" --experimental-strip-types --no-warnings "$(winpath "$OXY_HOME/tests/flow-rollback-cli.mjs")" "$(winpath "$FW3")" "$@"; }
+rb=$(rbcli rollback p1 2>&1) || true; printf '\n\033[1m[rollback p1]\033[0m %s\n' "$rb"
+chk "되돌리기: p1 까지 → a.txt 남고 b.txt 지움 (pi 가 만든 기록 · 엔진)" '[[ "$(cat "$FW3/a.txt")" == a1 && ! -e "$FW3/b.txt" ]]'
+rb=$(rbcli undo 2>&1) || true; printf '\n\033[1m[undo]\033[0m %s\n' "$rb"
+chk "되돌리기 취소: b.txt 돌아옴" '[[ "$(cat "$FW3/b.txt")" == b1 && "$(jq -r ".rollbacks[0].undone != null" "$FW3/.oxy/flow/flow.json")" == true ]]'
 cp "$TMP/agent/settings.json" "$TMP/settings.bak"
 jq '.compaction.keepRecentTokens = 50' "$TMP/settings.bak" > "$TMP/agent/settings.json"   # 작은 대화로도 compaction 이 일어나게
 FSID=flowa frun "scenario:flow-big refactor the parser"

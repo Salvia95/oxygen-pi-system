@@ -147,6 +147,34 @@ export default function (pi: ExtensionAPI) {
     return { message: { customType: CUSTOM, content: finished ? `${context}\n\n${PLAN_DONE_HINT}` : context, display: false } };
   });
 
+  // ---------------------------------------------------------------- 실행 중인 도구 (Task 끝 스냅숏의 순서를 지키려고)
+  // 모델이 한 응답에 "파일 쓰기 · Task done" 을 같이 부르면 pi 가 병렬로 실행해, 스냅숏이 쓰기보다 먼저 찍혔다
+  // (실제 Haiku, 2026-11-14: p1 까지 되돌리니 p1 에서 쓴 a.txt 가 사라짐). done · dropped 는 같은 응답에서 먼저 부른 도구가 끝난 뒤 찍는다
+  let callSeq = 0;
+  const inflight = new Map<string, { seq: number; done: Promise<void>; resolve: () => void }>();
+  const track = (id: unknown) => {
+    if (typeof id !== "string" || inflight.has(id)) return;
+    let resolve!: () => void;
+    const done = new Promise<void>((r) => { resolve = r; });
+    inflight.set(id, { seq: ++callSeq, done, resolve });
+  };
+  const finish = (id: unknown) => {
+    if (typeof id !== "string") return;
+    inflight.get(id)?.resolve();
+    inflight.delete(id);
+  };
+  /** 이 호출보다 먼저 시작한 도구가 끝날 때까지 (최대 maxMs). 끝나지 않은 것이 있으면 false */
+  const settleBefore = async (id: string, maxMs = 120000): Promise<boolean> => {
+    const me = inflight.get(id)?.seq ?? Number.MAX_SAFE_INTEGER;
+    const earlier = [...inflight.entries()].filter(([k, v]) => k !== id && v.seq < me).map(([, v]) => v.done);
+    if (!earlier.length) return true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), maxMs); });
+    const ok = await Promise.race([Promise.all(earlier).then(() => true), timeout]);
+    if (timer) clearTimeout(timer);
+    return ok;
+  };
+
   // ---------------------------------------------------------------- 그림자 저장소: 고치기 전에 작업 폴더를 따라간다 (docs/flow-rollback-spec.md §4)
   const folderCache = new Map<string, string | null>();
   const folderOf = (abs: string): string | null => {
@@ -155,6 +183,7 @@ export default function (pi: ExtensionAPI) {
     return folderCache.get(key)!;
   };
   pi.on("tool_call", async (event: any, ctx: any) => {
+    track(event.toolCallId);
     const e = engine;
     if (!e?.writable) return undefined;
     try {
@@ -252,7 +281,12 @@ export default function (pi: ExtensionAPI) {
   };
 
   // ---------------------------------------------------------------- 사실 자동 기록 · 커밋 → 노드
+  // 끝남: 막혀서 실행되지 않은 도구도 tool_execution_end 가 온다. 응답이 끝나면 남은 것을 모두 푼다
+  pi.on("tool_execution_end", async (event: any) => { finish(event.toolCallId); });
+  pi.on("turn_end", async () => { for (const id of [...inflight.keys()]) finish(id); });
+
   pi.on("tool_result", async (event: any, ctx: any) => {
+    finish(event.toolCallId);
     const e = eng(ctx);
     if (!e.writable) return undefined;
     const name = event.toolName;
@@ -405,6 +439,8 @@ export default function (pi: ExtensionAPI) {
       else if (params.action === "add") { const it = e.addPlan(String(params.text ?? ""), params.parent || undefined); head = `Added ${it.id}.`; }
       else {
         if (!params.id) throw new Error("id is required for action=update");
+        // Task 끝 스냅숏은 같은 응답에서 먼저 부른 도구(파일 쓰기 등)가 끝난 뒤에 (병렬 실행)
+        if ((params.status === "done" || params.status === "dropped") && !(await settleBefore(_id))) e.noteIncomplete("스냅숏 때 끝나지 않은 도구가 있었습니다");
         const it = e.updatePlan(String(params.id), { status: params.status, text: params.text });
         if (params.status === "done" || params.status === "dropped") refreshMarks();
         head = `Updated ${it.id} [${it.status}].`;
