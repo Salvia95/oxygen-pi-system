@@ -312,16 +312,56 @@ export function windowAround(total: number, room: number, target: number): numbe
   return Math.min(Math.max(0, target - Math.floor(room / 3)), total - room);
 }
 
-/** flow 화면 (flow-view-spec §2): 맨 윗줄 "Flow Monitor" · "Total d/t", Current Task 구역, Overall Task 구역 */
+/** Current Task 구역의 높이 (내용이 없으면 가운데에 "-") */
+export const CURRENT_ROWS = 3;
+export const OVERALL_TITLE = "Overall Flow";
+
+/** 도구 이름 → 하는 일 (명령어는 보이지 않는다) */
+const TOOL_WORK: Record<string, string> = {
+  bash: "셸 명령", read: "파일 읽기", write: "파일 쓰기", edit: "파일 고치기", grep: "검색",
+  background: "백그라운드 작업 시작", subagent: "subagent 맡기기", flow_plan: "작업 기록", flow_note: "작업 기록", flow_show: "작업 기록 보기",
+};
+
+/**
+ * Current Task 구역 (사용자 2026-11-14: "Current Task는 현재 진행 중인 셸 실행이나 작업들을 요약한 정보를 보여주도록 하자(명령어는 안보여줘도 될 것 같아)
+ * 그리고 current Task도 내용이 없을때는 중앙에 정렬된 - 로 표시되도록 하자"). 계획 항목 · Next Task 는 보이지 않는다 (Overall Flow 의 반복이었다).
+ *   실행 중인 도구를 하는 일별로 세고(가장 먼저 시작한 것의 경과), 백그라운드 작업 · subagent, 도구가 없으면 응답 생성 · compaction.
+ *   높이는 CURRENT_ROWS 로 고정, 비면 가운데 "-"
+ */
+export function currentWorkRows(live: LiveState | null, jobs: JobSnapshot[], width: number, now: number, rowsMax = CURRENT_ROWS): Row[] {
+  const out: Row[] = [];
+  const fresh = live && !live.closed && now - live.updatedAt <= LIVE_STALE_MS ? live : null;
+  const groups = new Map<string, { n: number; since: number }>();
+  for (const t of fresh?.tools ?? []) {
+    const k = TOOL_WORK[t.name] ?? t.name;
+    const g = groups.get(k);
+    groups.set(k, g ? { n: g.n + 1, since: Math.min(g.since, t.startedAt) } : { n: 1, since: t.startedAt });
+  }
+  for (const [k, g] of groups) out.push({ marker: "spinner", text: k + (g.n > 1 ? " " + g.n + "개" : "") + " 실행 중", since: g.since, indent: 0, emphasis: true });
+  const active = jobs.filter((j) => j.state === "running" || j.state === "queued");
+  const bg = active.filter((j) => j.kind !== "agent"), ag = active.filter((j) => j.kind === "agent");
+  const first = (xs: JobSnapshot[]) => Math.min(...xs.map((j) => j.startedAt ?? j.createdAt));
+  if (bg.length) out.push({ marker: "spinner", text: "백그라운드 " + bg.length + "개 실행 중", since: first(bg), indent: 0 });
+  if (ag.length) out.push({ marker: "spinner", text: "subagent " + ag.length + "개 작업 중", since: first(ag), indent: 0 });
+  if (!groups.size && fresh && (fresh.agent.state === "thinking" || fresh.agent.state === "compacting")) {
+    out.unshift({ marker: "spinner", text: STATE_TEXT[fresh.agent.state], since: fresh.agent.since, indent: 0, emphasis: true });
+  }
+  const h = Math.max(1, rowsMax);
+  if (!out.length) return Array.from({ length: h }, (_, i) => (i === Math.floor((h - 1) / 2) ? { marker: "none" as Marker, text: "-", indent: Math.floor((width - 1) / 2) } : { marker: "none" as Marker, text: "", indent: 0 }));
+  const shown = out.slice(0, h);
+  return [...shown, ...Array.from({ length: h - shown.length }, () => ({ marker: "none" as Marker, text: "", indent: 0 }))];
+}
+
+/** flow 화면 (flow-view-spec §2): 맨 윗줄 "Flow Monitor" · "Total d/t", Current Task(지금 돌고 있는 일), Overall Flow, Completed Flow */
 export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: FlowUiState, width: number, height: number, now: number,
-  w: (s: string) => number, history: FlowHistory | null = null): MonitorModel {
+  w: (s: string) => number, history: FlowHistory | null = null, jobs: JobSnapshot[] = []): MonitorModel {
   const plan = flow?.plan ?? [];
   const leaves = leavesOf(plan).filter((x) => x.status !== "dropped");
   const right = leaves.length ? "Total " + leaves.filter((x) => x.status === "done").length + "/" + leaves.length : "";
   const title = !right || TITLE_MARK_WIDTH + w(FLOW_TITLE) + 1 + w(right) <= width ? FLOW_TITLE : "Flow";
   const noticeLines = ui.notice ? [ui.notice] : [];
   const keys = [...noticeLines, ...keyLines(ui.confirm ? ["←→ 이동", "Enter 선택", "Esc 취소"] : ["▲▼ 이동", "Enter 펼치기", "r 되돌리기", "u 되돌리기 취소", "q 닫기"], width, w)];
-  const top = currentRows(live, plan, height, now, { next: flow?.next, blocked: flow?.blocked });
+  const top = currentWorkRows(live, jobs, width, now, height >= STATE_ROW_MIN_HEIGHT ? CURRENT_ROWS : 2);
   const rows = flow ? planRows(flow, ui.open, width, history?.marks[flow.id ?? ""]) : [{ marker: "none" as Marker, text: "작업 기록이 없습니다.", indent: 0 }];
   const done = completedRows(history, ui.open, flow?.rollbacks ?? []);
   // 높이: 맨 윗줄 1 + Current Task 가로줄 1 + 그 줄들 + Overall Task 가로줄 1 + 트리 + (Completed Flow 가로줄 1 + 그 줄들) + 키 안내.
@@ -338,7 +378,7 @@ export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: Flo
   const popup = ui.confirm ? { popup: flowPopup(ui.confirm) } : {};
   return {
     op: "monitor", kind: "flow", title, right, now: [], nowAt: "top",
-    sections: [{ title: "Current Task", rows: top }, { title: "Overall Task", rows: rows.slice(startAt, startAt + room) },
+    sections: [{ title: "Current Task", rows: top }, { title: OVERALL_TITLE, rows: rows.slice(startAt, startAt + room) },
       ...(compRoom ? [{ title: COMPLETED_TITLE, rows: done.slice(compAt, compAt + compRoom) }] : [])],
     selected, keys, ...popup,
   };

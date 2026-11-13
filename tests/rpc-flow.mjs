@@ -34,7 +34,12 @@ const reqs = readFileSync(reqlog, "utf8").trim().split("\n").map((l) => JSON.par
 const last = reqs.findLast((b) => b.messages.some((m) => m.role === "user" && text(m.content).includes("scenario:env next-step")));
 const msgs = last?.messages ?? [];
 result.newSession = Boolean(last) && !msgs.some((m) => m.role === "assistant" && text(m.content).includes("half-full"));
-result.stateInjected = msgs.some((m) => text(m.content).includes("[oxy-flow] Task state"));
+// 시스템 프롬프트에도 같은 말이 있으므로 작업 상태 메시지 자체(맨 앞)를 찾는다
+result.stateInjected = msgs.some((m) => text(m.content).trimStart().startsWith("[oxy-flow] Task state"));
+// 앞 세션의 마지막 답이 새 세션에 넘어간다 (답의 선택지에 대답하며 넘어가는 경우, docs/flow-spec.md §1-5)
+result.lastReplyCarried = msgs.some((m) => text(m.content).includes("You replied: half-full"));
+const injectedText = msgs.map((m) => text(m.content)).find((t) => t.trimStart().startsWith("[oxy-flow] Task state")) ?? "(작업 상태 메시지 없음)";
+if (!result.lastReplyCarried) console.error("injected tail: " + injectedText.slice(-400).split("\n").join(" | "));
 console.log(JSON.stringify(result));
 pi.kill();
 process.exit(Object.values(result).every(Boolean) ? 0 : 1);

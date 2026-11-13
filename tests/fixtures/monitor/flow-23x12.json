@@ -11,20 +11,21 @@
       "rows": [
         {
           "marker": "spinner",
-          "text": "테스트 작성",
-          "since": 1794499880629,
+          "text": "셸 명령 실행 중",
+          "since": 1794499910629,
           "indent": 0,
           "emphasis": true
         },
         {
-          "marker": "none",
-          "text": "Next Task: 오류 처리",
+          "marker": "spinner",
+          "text": "백그라운드 1개 실행 중",
+          "since": 1794499881629,
           "indent": 0
         }
       ]
     },
     {
-      "title": "Overall Task",
+      "title": "Overall Flow",
       "rows": [
         {
           "key": "p:p2.2",

@@ -138,7 +138,7 @@ async function runExe() {
         pendingFlow = null;
       }
       if (flowUi.notice && now - flowNoticeAt > NOTICE_MS && !pendingFlow) flowUi = { ...flowUi, notice: undefined };
-      const m = flowModel(flow, live, flowUi, size.width, size.height, now, displayWidth, history);
+      const m = flowModel(flow, live, flowUi, size.width, size.height, now, displayWidth, history, jobs?.state.jobs ?? []);
       if (!flowUi.sel && m.selected) flowUi = { ...flowUi, sel: m.selected };
       return m;
     }

@@ -13,6 +13,7 @@ import { type ChromeState, installEditor, installFooter, installHeader, restoreC
 import { type TuiConfig, loadConfig, saveConfig } from "./config.ts";
 import { FOLD_KEY, isFolded, registerJobNotices, registerToolRows, setFolded } from "./tools/index.ts";
 import { markUser } from "./user.ts";
+import { RateWindow, isVllmProvider, usageTokens } from "./rate.ts";
 import { matchesKey } from "@earendil-works/pi-tui";
 
 export default function (pi: ExtensionAPI) {
@@ -20,7 +21,9 @@ export default function (pi: ExtensionAPI) {
   const file = join(getAgentDir(), "oxygen-pi-tui.json");
   let cfg: TuiConfig = loadConfig(file);
   let applied = false;
-  const state: ChromeState = { workingSince: null, cost: 0 };
+  // vLLM 연결: 금액 대신 1분 요청 · 토큰 수 (rate.ts, docs/pi-tui-spec.md §6.1)
+  const llmJson = () => (globalThis as any)[Symbol.for("oxy.llm")]?.llm;
+  const state: ChromeState = { workingSince: null, cost: 0, rates: new RateWindow(), isVllm: (p) => isVllmProvider(p, llmJson()) };
 
   let offKeys: (() => void) | undefined;
   /**
@@ -70,7 +73,16 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_e, ctx) => apply(ctx));
   pi.on("agent_start", () => { state.workingSince = Date.now(); });
   pi.on("agent_settled", () => { state.workingSince = null; });
-  pi.on("message_end", (_e, ctx) => { state.cost = sessionCost(ctx); });
+  pi.on("message_end", (e: any, ctx) => {
+    state.cost = sessionCost(ctx);
+    const m = e?.message;
+    if (m?.role === "assistant" && isVllmProvider(m.provider, llmJson())) state.rates!.tokens(Date.now(), usageTokens(m.usage));
+  });
+  // 요청 하나 (재시도 포함). 내용은 바꾸지 않는다
+  pi.on("before_provider_request", (_e: any, ctx) => {
+    if (isVllmProvider(ctx.model?.provider, llmJson())) state.rates!.request(Date.now());
+    return undefined;
+  });
 
   pi.registerCommand("oxygen-pi-tui", {
     description: "Oxygen 화면 켜기 · 끄기 (on | off)",

@@ -614,6 +614,16 @@ test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 ·
     assert.equal(e.writable, true);
     assert.equal(e.hasContent(), false);
     e.ensureGoal("Add login API");
+    // 세션 넘기기: 마지막 요청 · 답을 새 세션의 첫 요청에 넣는다 (선택지에 "2번으로 할게" 로 대답하며 넘어간 경우, 2026-11-14)
+    const { renderContext: rc, HANDOFF_REPLY_MAX } = await import("../agent/extensions/oxy-flow/store.ts");
+    e.setHandoff("추천 순서대로 전부 진행해줘", "두 가지 선택이 있습니다. 1. 테스트 대여 삭제 2. 도서를 새로 등록. 어느 쪽으로 진행할지 알려 주세요.");
+    const ctxText = rc(e.load(), 6000, "continue");
+    assert.match(ctxText, /The last exchange in the previous session:\nUser: 추천 순서대로 전부 진행해줘\nYou replied: 두 가지 선택이 있습니다\. 1\. 테스트 대여 삭제 2\. 도서를 새로 등록/);
+    assert.ok(!rc(e.load(), 6000, "reference").includes("You replied"), "새 작업(reference)에는 넣지 않는다");
+    e.setHandoff("q", "x".repeat(HANDOFF_REPLY_MAX + 500) + "끝의 선택지");
+    assert.ok(e.load().handoff!.reply.endsWith("끝의 선택지") && e.load().handoff!.reply.length <= HANDOFF_REPLY_MAX + 2, "답은 끝부분을 남긴다");
+    e.clearHandoff();
+    assert.ok(!rc(e.load(), 6000, "continue").includes("You replied"), "한 번 넣고 지운다");
     // 막힘은 새 다음 단계 · 할 일 시작(doing)으로 풀린다 (2026-11-14)
     e.note("blocked", "사용자 지시로 중단");
     e.note("next", "브라우저 확인");
@@ -1182,7 +1192,7 @@ test("oxy-monitor 실시간 활동: 작업 · 할 일 · 커밋 변화 → 이�
   assert.deepEqual(f.events.map((e) => `${e.kind}:${e.text}`), ["plan:p1 완료 API", "commit:커밋 n2 feat: api"]);
 });
 
-test("oxy-monitor 보기 모델: flow (Current · Next · Overall, [i/n] 트리, 걸린 시간, 기본 포커스, 23 · 35칸 × 11 · 15 · 24줄, flow-view-spec §2)", async () => {
+test("oxy-monitor 보기 모델: flow (Current Task = 지금 돌고 있는 일 · Overall Flow, [i/n] 트리, 걸린 시간, 기본 포커스, 23 · 35칸 × 11 · 15 · 24줄, flow-view-spec §2)", async () => {
   const M = await import("../agent/extensions/oxy-monitor/model.ts");
   const L = await import("../agent/extensions/oxy-monitor/live.ts");
   const { displayWidth: w } = await import("../installer/tui.mjs");
@@ -1209,12 +1219,12 @@ test("oxy-monitor 보기 모델: flow (Current · Next · Overall, [i/n] 트리,
     const tag = width + "x" + height;
     assert.ok(M.modelHeight(m) <= height, tag + ": " + M.modelHeight(m) + " 줄");
     assert.deepEqual([m.title, m.right, m.now.length], [width < 30 ? "Flow" : "Flow Monitor", "Total 10/14", 0], tag);   // 23칸에서 "Total 10/14" 와 함께 넘치면 Flow
-    assert.deepEqual(m.sections.map((x) => x.title), ["Current Task", "Overall Task"]);                       // 최근 구역 없음 (R2)
+    assert.deepEqual(m.sections.map((x) => x.title), ["Current Task", "Overall Flow"]);                       // Overall Task → Overall Flow (2026-11-14)
     const top = m.sections[0].rows;
-    assert.deepEqual([top[0].text, top[0].since, top[0].marker], ["테스트 작성", now - 42000, "spinner"], tag);   // 위치 표시 없이 이름 · 경과
-    assert.equal(top.at(-1)!.text, "Next Task: 오류 처리", tag);
-    assert.equal(top.length, height >= M.STATE_ROW_MIN_HEIGHT ? 3 : 2, tag);                                  // 14줄 미만이면 상태 줄을 뺀다 (R1)
-    if (height >= M.STATE_ROW_MIN_HEIGHT) assert.equal(top[1].text, "도구 실행 중 · bash npm test");
+    // Current Task: 계획 항목 · Next Task 대신 지금 돌고 있는 일 (명령어 없이). 높이 고정 (14줄 미만이면 2줄)
+    assert.deepEqual([top[0].text, top[0].since, top[0].marker], ["셸 명령 실행 중", now - 3000, "spinner"], tag);
+    assert.ok(!top.some((r) => r.text.includes("npm test") || r.text.startsWith("Next Task")), tag);
+    assert.equal(top.length, height >= M.STATE_ROW_MIN_HEIGHT ? M.CURRENT_ROWS : 2, tag);
     const tree = m.sections[1].rows;
     const cur = tree.find((r) => r.key === "p:p10.2")!;
     assert.ok(cur, tag + ": 지금 할 일이 보여야 함");
@@ -1235,24 +1245,23 @@ test("oxy-monitor 보기 모델: flow (Current · Next · Overall, [i/n] 트리,
   const f2: any = { ...flow, nodes: [flow.nodes[0]], plan: [item("p1", "A", "doing", [item("p1.1", "a1", "done", [], { nodes: ["n1"] }), item("p1.2", "a2", "doing")])] };
   const opened = M.planRows(f2, new Set(["p:p1.1"]), 35);
   assert.deepEqual(opened.map((r) => [r.prefix ?? "", r.text]), [["", "[1/1] A"], ["├ ", "[1/2] a1"], ["│ ", "n1 c1"], ["└ ", "[2/2] a2"]]);
-  // live.json 이 오래되면 상태를 모른다고 보인다
-  const stale = M.flowModel(flow as any, live, ui, 35, 24, now + M.LIVE_STALE_MS + 1, w);
-  assert.equal(stale.sections[0].rows[1].text, "pi 상태를 알 수 없습니다");
-  // 도구가 여럿이면 "외 N개"
+  // live.json 이 오래되면(pi 상태를 모르면) 돌고 있는 일이 없는 것으로: 가운데 "-"
+  const stale = M.flowModel(flow as any, live, ui, 35, 24, now + M.LIVE_STALE_MS + 1, w).sections[0].rows;
+  assert.deepEqual(stale.map((r) => [r.text, r.indent]), [["", 0], ["-", 17], ["", 0]]);
+  // 하는 일별로 센다 · 백그라운드 작업 · subagent
   let many = live;
   for (const id of ["b", "c"]) many = L.reduceLive(many, { type: "tool_start", id, name: "read", input: { path: id } }, now);
-  assert.equal(M.flowModel(flow as any, many, ui, 35, 24, now, w).sections[0].rows[1].text, "도구 실행 중 · bash npm test 외 2개");
+  const jobs: any[] = [{ id: "job-1", kind: "bash", state: "running", startedAt: now - 9000, createdAt: 0 }, { id: "job-2", kind: "agent", state: "queued", startedAt: null, createdAt: now - 1000 },
+    { id: "job-3", kind: "bash", state: "done", startedAt: 0, createdAt: 0 }];
+  assert.deepEqual(M.currentWorkRows(many, jobs, 35, now, 5).map((r: any) => r.text),
+    ["셸 명령 실행 중", "파일 읽기 2개 실행 중", "백그라운드 1개 실행 중", "subagent 1개 작업 중", ""]);
+  // 도구가 없고 응답을 만드는 중이면 그 상태
+  const thinking = L.reduceLive(L.reduceLive(live, { type: "tool_end", id: "a", name: "bash", ok: true }, now), { type: "turn_start", turnIndex: 1 }, now);
+  assert.equal(M.currentWorkRows(thinking, [], 35, now)[0].text, "응답 생성 중");
   // 진행 중인 할 일이 없으면 · 다음이 없으면 · 기록이 없으면
   const idle: any = { ...flow, plan: [item("p1", "끝", "done", [], { startedAt: 0, endedAt: 5000 })] };
-  const im = M.flowModel(idle, live, ui, 35, 24, now, w);
-  assert.deepEqual([im.sections[0].rows[0].text, im.sections[0].rows.at(-1)!.text, im.right], ["진행 중인 할 일이 없습니다", "Next Task: 없음", "Total 1/1"]);
-  // 계획이 끝난 뒤 모델이 남긴 다음 단계 · 막힘을 보인다 (2026-11-14: 새 일을 메모로만 남겨 "없음"만 보였다)
-  const noted = M.flowModel({ ...idle, next: "브라우저로 대여 폼 제출" }, live, ui, 35, 24, now, w).sections[0].rows;
-  assert.deepEqual([noted[0].marker, noted[0].text, noted.at(-1)!.text], ["todo", "브라우저로 대여 폼 제출", "Next Task: 없음"]);
-  const blockedRows: any = M.flowModel({ ...idle, next: "브라우저로 대여 폼 제출", blocked: "사용자 확인 필요" }, live, ui, 35, 24, now, w).sections[0].rows;
-  assert.deepEqual([blockedRows[0].marker, blockedRows[0].text, blockedRows.at(-1)!.text], ["blocked", "사용자 확인 필요", "Next Task: 브라우저로 대여 폼 제출"]);
-  const doingNote = M.flowModel({ ...flow, next: "메모" }, live, ui, 35, 24, now, w).sections[0].rows;
-  assert.equal(doingNote[0].marker, "spinner", "진행 중인 할 일이 있으면 그것이 먼저");
+  const im = M.flowModel(idle, null, ui, 35, 24, now, w);
+  assert.deepEqual([im.sections[0].rows.map((r) => r.text).join("|"), im.right], ["|-|", "Total 1/1"], "돌고 있는 일이 없으면 가운데 -");
   const empty = M.flowModel(null, null, ui, 23, 11, now, w);
   assert.deepEqual([empty.sections[1].rows[0].text, empty.right, empty.title], ["작업 기록이 없습니다.", "", "Flow Monitor"]);
   // 다음 할 일: 같은 항목의 다음 할 일, 없으면 다음 항목의 첫 할 일 (할 일 없는 항목은 그 항목)
@@ -1979,7 +1988,7 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   };
   const ui: any = { sel: null, open: new Set(), manualAt: 0 };
   const m = M.flowModel(flow, null, ui, 35, 28, Date.now(), w, history);
-  assert.deepEqual(m.sections.map((x: any) => x.title), ["Current Task", "Overall Task", "Completed Flow"], "Before Commit Task 대신 Completed Flow");
+  assert.deepEqual(m.sections.map((x: any) => x.title), ["Current Task", "Overall Flow", "Completed Flow"], "Before Commit Task 대신 Completed Flow");
   const comp = m.sections[2].rows;
   assert.deepEqual([comp[0].key, comp[0].marker, comp[0].text, comp[0].right], ["c:fa", "failed", "반납 기능", "11-14"], "Flow 기호는 가장 나쁜 Task 의 것");
   assert.equal(m.sections[1].rows.find((r: any) => r.key === "p:p1").marker, "blocked", "지금 Flow 의 끝난 Task 도 기호 (D8)");
@@ -2023,6 +2032,30 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   const pr = M.planRows(cur, new Set(), 35).map((r: any) => r.text);
   assert.deepEqual(pr, ["[1/3] 준비", "↶ 여기까지 되돌림", "[2/3] 구현", "[3/3] 마무리"]);
   assert.deepEqual(M.planRows(cur, new Set(["p:p2"]), 35).map((r: any) => r.text).slice(2, 4), ["[2/3] 구현", "↶ 여기까지 되돌림 (취소함)"]);
+});
+
+test("oxygen-pi-tui vLLM 요청 속도: 1분 슬라이딩 윈도우 RPM · TPM, 금액 자리에 (pi-tui-spec §6.1)", async () => {
+  const R = await import("../agent/extensions/oxygen-pi-tui/rate.ts");
+  const E = await import("../agent/extensions/oxygen-pi-tui/editor.ts");
+  const r = new R.RateWindow();
+  const t0 = 1_000_000;
+  r.request(t0); r.tokens(t0 + 2000, 1200);
+  r.request(t0 + 30_000); r.tokens(t0 + 31_000, 800);
+  assert.deepEqual(r.stats(t0 + 40_000), { rpm: 2, tpm: 2000 });
+  assert.deepEqual(r.stats(t0 + 62_500), { rpm: 1, tpm: 800 }, "60초 지난 것은 빠진다 (슬라이딩)");
+  assert.equal(r.active(t0 + 92_000), false);
+  assert.equal(R.rateLabel({ rpm: 3, tpm: 12_400 }), "3 rpm · 12.4K tpm");
+  assert.equal(R.rateLabel({ rpm: 0, tpm: 0 }), "0 rpm · 0 tpm");
+  assert.equal(R.rateLabel({ rpm: 40, tpm: 250_000 }), "40 rpm · 250K tpm");
+  assert.equal(R.usageTokens({ input: 1000, output: 200, cacheRead: 50 }), 1250);
+  const llm = { connections: [{ id: "vllm", kind: "vllm" }, { id: "anthropic-claude", kind: "anthropic" }] };
+  assert.equal(R.isVllmProvider("oxy-vllm", llm), true);
+  assert.equal(R.isVllmProvider("oxy-anthropic-claude", llm), false);
+  assert.equal(R.isVllmProvider("anthropic", llm), false);
+  // 푸터: vLLM 이면 금액 대신, 좁으면 ctx 만
+  assert.equal(E.usageLabel({ percent: 23, tokens: 29000, contextWindow: 128000, cost: 0.01, rate: "3 rpm · 12.4K tpm" }, "wide"), "ctx 23% · 29K/128K · 3 rpm · 12.4K tpm");
+  assert.equal(E.usageLabel({ percent: 23, tokens: 29000, contextWindow: 128000, cost: 0.012 }, "wide"), "ctx 23% · 29K/128K · $0.012");
+  assert.equal(E.usageLabel({ percent: 23, rate: "3 rpm · 0 tpm" }, "narrow"), "ctx 23%");
 });
 
 test("oxygen-pi-tui 기본 도구 한 줄: read · write · edit · grep 문장 (pi-tui-spec §7.6)", async () => {

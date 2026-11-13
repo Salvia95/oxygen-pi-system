@@ -6,6 +6,7 @@ import { CustomEditor, type ExtensionAPI, type ExtensionContext, type Keybinding
 import { type EditorTheme, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { enabled, harnessHome } from "../_lib/common.ts";
 import { brandEnv, brandFg } from "./brand.ts";
+import { type RateWindow, rateLabel } from "./rate.ts";
 import type { TuiConfig } from "./config.ts";
 import { bottomLeftLabel, borderLine, modelLabel, topLeftLabel, usageLabel, usageLevel, withPrompt } from "./editor.ts";
 import { footerLine, footerStatuses } from "./footer.ts";
@@ -22,6 +23,9 @@ export const measure: Measure = {
 export interface ChromeState {
   workingSince: number | null;
   cost: number;
+  /** vLLM 연결의 1분 요청 · 토큰 수 (rate.ts). 지금 모델이 vLLM 이면 금액 자리에 보인다 */
+  rates?: RateWindow;
+  isVllm?: (provider: string | undefined) => boolean;
 }
 
 /** 하단 바(oxy-monitor)가 그려지는가. oxy-monitor 는 OXY_MONITOR 가 꺼져 있지 않으면 psmux 안팎 모두 바를 그린다 (2단계 실측) */
@@ -40,6 +44,8 @@ export function sessionCost(ctx: ExtensionContext): number {
   return cost;
 }
 
+let rateTimer: ReturnType<typeof setInterval> | null = null;
+
 export function installEditor(pi: ExtensionAPI, ctx: ExtensionContext, cfg: TuiConfig, state: ChromeState): void {
   const g = glyphs(cfg.glyphs);
   class OxygenEditor extends CustomEditor {
@@ -47,6 +53,10 @@ export function installEditor(pi: ExtensionAPI, ctx: ExtensionContext, cfg: TuiC
     private hiddenAbove = 0;
     constructor(tui: TUI, theme: EditorTheme, kb: KeybindingsManager) {
       super(tui, theme, kb, { paddingX: 3, embedWorkingStatus: true });
+      // 1분 윈도우의 값은 쉬는 동안에도 줄어든다: 남은 것이 있으면 5초마다 다시 그린다 (입력창이 바뀌면 앞 타이머를 멈춘다)
+      if (rateTimer) clearInterval(rateTimer);
+      rateTimer = setInterval(() => { if (state.rates?.active(Date.now())) tui.requestRender(); }, 5000);
+      rateTimer.unref?.();
     }
     // pi 는 새 입력창에 사용자 설정 editorPaddingX 를 다시 넣는다. ` › ` 자리(3칸)를 지키려고 늘 3으로 둔다
     setPaddingX(_padding: number): void { super.setPaddingX(3); }
@@ -82,7 +92,8 @@ export function installEditor(pi: ExtensionAPI, ctx: ExtensionContext, cfg: TuiC
       const th = ctx.ui.theme;
       const wc = widthClass(width);
       const u = (() => { try { return ctx.getContextUsage(); } catch { return undefined; } })();
-      const label = usageLabel({ tokens: u?.tokens, contextWindow: u?.contextWindow, percent: u?.percent, cost: state.cost }, wc, g.sep);
+      const rate = state.rates && state.isVllm?.(ctx.model?.provider) ? rateLabel(state.rates.stats(Date.now()), g.sep) : undefined;
+      const label = usageLabel({ tokens: u?.tokens, contextWindow: u?.contextWindow, percent: u?.percent, cost: state.cost, rate }, wc, g.sep);
       const lv = usageLevel(u?.percent);
       const right = th.fg(lv === "normal" ? "muted" : lv, label);
       const bl = bottomLeftLabel(hiddenLineCount);

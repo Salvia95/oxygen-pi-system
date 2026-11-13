@@ -103,7 +103,7 @@ export async function writeFixtures({ outDir = DEFAULT_DIR, now = Date.now(), si
   for (const size of sizes) {
     const [width, height] = size.split("x").map(Number);
     const models = {
-      flow: M.flowModel(flow, live, { sel: "p:p2.2", open: new Set(["c:flow-b"]), manualAt: 0 }, width, height, now, displayWidth, history),
+      flow: M.flowModel(flow, live, { sel: "p:p2.2", open: new Set(["c:flow-b"]), manualAt: 0 }, width, height, now, displayWidth, history, jobsState(now).jobs),
       jobs: M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), sel: "s:job-2" }, width, height, now, displayWidth),
       "jobs-sub": M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), mode: "sub", sub: "job-2", sel: "c:job-1" }, width, height, now, displayWidth),
       "jobs-popup": M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), sel: "s:job-2", confirm: { scope: "main", id: "job-2", label: "scout: 로그 찾기", agent: true, focus: "no" } }, width, height, now, displayWidth),

@@ -99,6 +99,22 @@ q 닫기
 
 **기호**: `◀` 는 `docs/tui-spec.md` §5 표에 없는 새 기호다. `▲▼` 와 같은 모양 글자라 1칸일 것으로 보지만, mintty · Windows Terminal 캡처로 1칸인지 확인한 뒤 §5 표에 더한다. 2칸으로 그려지면 `<` 를 쓴다.
 
+### Current Task · Overall Flow (2026-11-14)
+
+요청 (사용자, 2026-11-14): "Flow Monitor에 Current Task가 사실상 Overall Task의 반복이고 Next Task는 확인하는데 쓸모가 없는 것 같아 Overall Task는 Overall Flow로 명칭을 변경하고 Current Task는 현재 진행 중인 셸 실행이나 작업들을 요약한 정보를 보여주도록 하자(명령어는 안보여줘도 될 것 같아) 그리고 current Task도 내용이 없을때는 중앙에 정렬된 - 로 표시되도록 하자"
+
+```
+── Current Task ───────────────────
+◐ 셸 명령 실행 중              0:12     ← 실행 중인 도구를 하는 일별로 (명령어 없이), 가장 먼저 시작한 것의 경과
+◐ 백그라운드 1개 실행 중       0:41     ← oxy-jobs 의 셸 작업
+◐ subagent 1개 작업 중         0:12
+── Overall Flow ───────────────────     ← 예전 Overall Task
+```
+- 하는 일: 셸 명령 · 파일 읽기 · 파일 쓰기 · 파일 고치기 · 검색 · 백그라운드 작업 시작 · subagent 맡기기 · 작업 기록. 같은 일이 여럿이면 `파일 읽기 2개 실행 중`. 도구가 없고 모델이 답을 만드는 중이면 `응답 생성 중`, compaction 중이면 `compaction 중`.
+- 계획 항목 · `Next Task` 줄은 보이지 않는다 (Overall Flow 의 반복이었다). 바로 위 절의 "막힘 · 다음 단계" 표시도 Current Task 에서는 빠진다 (모델에게는 그대로 전달).
+- 높이는 3줄 고정 (모니터가 14줄 미만이면 2줄). 아무것도 돌고 있지 않으면 가운데에 `-` (Job Monitor 의 빈 영역과 같다).
+- 구현: `oxy-monitor/model.ts` `currentWorkRows` · `OVERALL_TITLE`, 모니터가 jobs 상태를 넘긴다. 실측: oxy-tui 0.5.0 `demo monitor` 35×28 · 35×14.
+
 ### 계획 밖의 일 · 막힘 (2026-11-14)
 
 요청 (사용자, 2026-11-14): "현재 메인 컨텍스트가 진행하고 있는 flow와 flow 모니터에 있는 내용이 서로 다른 것 같은데 확인해줘" → 원인 1~3 고치기 승인 ("1~3은 진행시키고").

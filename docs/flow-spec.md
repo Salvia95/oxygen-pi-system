@@ -78,6 +78,14 @@ pi 세션이 시작될 때(`session_start`) 위에서부터 처음 맞는 것을
 - 기본 모델 저장: `docs/tui-spec.md` §11 (render 가 pi 에서 저장한 기본 모델을 지킨다).
 - 실측 (2026-11-13, mock pi mintty D2Coding): `/model qwen3.8-27b` → `scenario:bg-long`(60초 작업) → `/oxy-rollover`. 안내 색 `232;194;107` · Oxygen `169;203;164` · Pi `167;152;215`, 새 세션(부모 있음)의 첫 메시지 전에 `model_change qwen3.8-27b`, 입력창 `vllm · qwen3.8-27b · off`, job-1 이 새 세션에서 끝나 `Job-1 done!, print 2 lines` 알림, crashes.json 없음. 증거: scratchpad `caps/rollover-countdown.png` (한 줄 시절 캡처, 이후 두 줄로 고침).
 
+## 1-5. 세션 넘기기: 마지막 요청 · 답을 넘긴다 (2026-11-14)
+
+요청 (사용자, 2026-11-14): "세션을 새로시작하는 과정에서 선택지가 있었을 때 선택지를 다음 세션이 받지 못하는 현상이 있어 이 부분을 분석하고 개선해줘"
+
+- 원인 (설치본 세션 기록): 넘기기는 사용자의 새 메시지를 새 세션의 첫 요청으로 보내고, 작업 기록만 함께 넣었다. 앞 세션의 마지막 답은 넘어가지 않았다. 17:47 넘기기는 첫 요청이 "2번으로 할게" 였는데 1번 · 2번을 낸 답이 새 세션에 없었다 (다른 세 번의 넘기기도 같음).
+- 고침: `/oxy-rollover` 가 넘기기 직전 세션의 마지막 사용자 요청과 마지막 답(끝에서 3000자)을 `flow.handoff` 에 남기고, 새 세션의 첫 요청에 넣는 작업 상태(continue)에 "The last exchange in the previous session: User: … / You replied: … The user's next message may answer that reply" 를 더한다. 한 번 넣고 지운다.
+- 단위: setHandoff · renderContext(continue/reference) · clearHandoff. E2E: rpc-flow 의 `lastReplyCarried`.
+
 ## 2. 구현 순서와 확인 방법
 
 1. 세션 단위 기록 (§1) — 자동 검증: 단위(`tests/unit-extensions.test.ts` 의 "oxy-flow: 작업 기록은 세션 단위") + E2E(`tests/e2e-mock.sh` 의 flow 검사: 새 세션은 빈 기록, 다시 연 세션은 기록과 계획 · 다음 할 일 주입) / 실측: 대화형 pi 로 새로 시작 · `/resume`

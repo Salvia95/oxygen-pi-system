@@ -49,6 +49,11 @@ export interface Flow {
    */
   work?: { root: string; baseCommit: string | null };
   continueAt?: number;       // 세션 넘기기 표시 (store.markContinue)
+  /**
+   * 세션 넘기기 직전의 마지막 요청과 답 (docs/flow-spec.md §1-5). 새 세션의 첫 요청에 넣고 지운다.
+   * 답에 선택지가 있었는데 사용자가 "2번으로 할게" 로 답하며 넘어가면, 새 세션이 그 선택지를 몰랐다 (2026-11-14)
+   */
+  handoff?: { user: string; reply: string; at: number };
   continueBy?: string;       // 그 표시를 이어받은 세션 (bindSession). 한 세션만 이어받는다
   sessions?: string[];       // 이 작업을 한 pi 세션 id (세션 넘기기로 이어진 세션 포함). 예전 파일에는 없다
   plan: PlanItem[];          // 앞으로 할 일: 항목 → 할 일 (plan.ts). 예전 파일에는 없다 (load 가 빈 배열로 채움)
@@ -119,6 +124,8 @@ export function workFolderOf(path: string): string | null {
   return null;
 }
 const MAX_COMMANDS = 15, MAX_FAILURES = 5, MAX_FILES = 200, MAX_JOBS = 10;
+/** 넘기기 때 남기는 마지막 답의 길이 (끝에서부터) */
+export const HANDOFF_REPLY_MAX = 3000;
 const empty = (): Buffer => ({ decisions: [], files: [], commands: [], failures: [], jobs: [] });
 
 export function git(cwd: string, args: string[]): string | null {
@@ -359,6 +366,23 @@ export class FileFlowEngine implements FlowEngine {
     pruneArchive(arch, flowKeep(), file);
     this.pruneShadow();
     return file;
+  }
+
+  /** 넘기기 직전의 마지막 요청 · 답을 남긴다 (답은 끝부분 — 선택지 · 질문은 대개 끝에 있다) */
+  setHandoff(user: string, reply: string): void {
+    const f = this.load();
+    const u = user.trim(), r = reply.trim();
+    if (!u && !r) { delete f.handoff; this.save(); return; }
+    f.handoff = { user: u.length > 800 ? `${u.slice(0, 800)} …` : u, reply: r.length > HANDOFF_REPLY_MAX ? `… ${r.slice(-HANDOFF_REPLY_MAX)}` : r, at: Date.now() };
+    this.save();
+  }
+
+  /** 넘기기 기록을 지운다 (새 세션의 첫 요청에 넣은 뒤) */
+  clearHandoff(): void {
+    const f = this.load();
+    if (!f.handoff) return;
+    delete f.handoff;
+    this.save();
   }
 
   /** 이어 가기 표시가 있으면 지우고 true */
@@ -698,7 +722,12 @@ export function renderContext(f: Flow, maxChars = 6000, mode: "continue" | "refe
   const mid: string[] = [];
   if (full.length) mid.push("", "Steps (commits, newest first):", ...full);
   if (titles.length) mid.push(`Older steps: ${titles.join(" | ")}`);
-  return [...head, ...mid, ...tail].join("\n");
+  // 세션 넘기기: 앞 세션의 마지막 요청 · 답 (사용자의 새 메시지는 이 답에 대한 대답일 수 있다 — 선택지 번호 · 승인)
+  const h = mode === "continue" && f.handoff ? f.handoff : null;
+  const hand = h ? ["", "The session was switched to save context. The last exchange in the previous session:",
+    ...(h.user ? [`User: ${h.user}`] : []), ...(h.reply ? [`You replied: ${h.reply}`] : []),
+    "The user's next message may answer that reply (for example a choice number or an approval). Read it in that light."] : [];
+  return [...head, ...mid, ...hand, ...tail].join("\n");
 }
 
 export function renderNode(n: FlowNode): string {

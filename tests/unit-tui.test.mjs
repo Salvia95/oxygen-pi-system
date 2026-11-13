@@ -475,7 +475,7 @@ test("모니터 예시 모델: model.ts 가 지금 만드는 것과 tests/fixtur
     // since 는 now 기준 몇 초 전, 모든 모델의 줄 수는 높이 안
     for (const f of files) assert.ok(f.modelHeight <= f.height, `${f.file}: ${f.modelHeight} > ${f.height}`);
     const flow = JSON.parse(readFileSync(join(dir, "flow-23x12.json"), "utf8"));
-    assert.deepEqual([flow.op, flow.kind, flow.title, flow.sections[0].title, flow.sections[0].rows[0].since], ["monitor", "flow", "Flow", "Current Task", index.generatedAt - 42000]);   // 23칸: `◆ ` 를 더하면 `Flow Monitor` 가 들어가지 않는다 (ui-unify-spec §2.3)
+    assert.deepEqual([flow.op, flow.kind, flow.title, flow.sections[0].title, flow.sections[0].rows[0].since], ["monitor", "flow", "Flow", "Current Task", index.generatedAt - 12000]);   // Current Task = 지금 돌고 있는 셸 명령 (12초 전 시작)   // 23칸: `◆ ` 를 더하면 `Flow Monitor` 가 들어가지 않는다 (ui-unify-spec §2.3)
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -497,7 +497,7 @@ test("oxy-tui.exe: --version 에 monitor, demo monitor --model --exit-after 가 
     assert.match(lines.join("\n"), /[◐◓◑◒]/, `${name}: 스피너 (D2Coding 1칸 원 기호)`);
     assert.doesNotMatch(lines.join("\n"), /[⠀-⣿]/, `${name}: 점자 스피너는 D2Coding 에 없다`);
     assert.ok(lines[0].startsWith("◆ "), `${name}: 띠 제목 앞에 ◆: ${lines[0]}`);
-    const clock = name.startsWith("flow") ? "0:47" : "0:17";   // flow: 지금 할 일 42초 전 시작, jobs: 작업 12초 전 시작 (+ 5초)
+    const clock = "0:17";   // flow: 셸 명령 12초 전 시작 (Current Task), jobs: 작업 12초 전 시작 (+ 5초)
     assert.ok(new RegExp("\\b" + clock + "\\b").test(lines.join("\n")), `${name}: 경과 m:ss (${clock})`);
   }
   const bad = spawnSync(exe, ["demo", "monitor", "--model", join(DEFAULT_DIR, "없는파일.json")], { encoding: "utf8" });

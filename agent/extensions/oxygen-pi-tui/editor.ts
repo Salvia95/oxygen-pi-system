@@ -46,7 +46,7 @@ export function formatTokens(n: number): string {
   return n < 1000 ? String(Math.round(n)) : `${Math.round(n / 1000)}K`;
 }
 
-export interface UsageInfo { tokens?: number | null; contextWindow?: number | null; percent?: number | null; cost?: number }
+export interface UsageInfo { tokens?: number | null; contextWindow?: number | null; percent?: number | null; cost?: number; rate?: string }
 export type Level = "normal" | "warning" | "error";
 
 /** 컨텍스트 색 기준 (D6): 50% 이상 warning (oxy-flow 가 다음 메시지에서 새 세션으로 넘어감) · 85% 이상 error */
@@ -55,14 +55,15 @@ export function usageLevel(percent: number | null | undefined): Level {
   return percent >= 85 ? "error" : percent >= 50 ? "warning" : "normal";
 }
 
-/** 아랫줄 오른쪽: `ctx 23% · 29K/128K · $0.012` (좁음: `ctx 23%`). 퍼센트를 모르면 `ctx ?` */
+/** 아랫줄 오른쪽: `ctx 23% · 29K/128K · $0.012` (좁음: `ctx 23%`). 퍼센트를 모르면 `ctx ?`. vLLM 연결이면 금액 대신 `3 rpm · 12K tpm` (§6.1) */
 export function usageLabel(u: UsageInfo, wc: WidthClass, sep = "·"): string {
   if (u.percent == null) return "ctx ?";
   const pct = `ctx ${Math.round(u.percent)}%`;
   if (wc === "narrow") return pct;
   const parts = [pct];
   if (u.tokens != null && u.contextWindow) parts.push(`${formatTokens(u.tokens)}/${formatTokens(u.contextWindow)}`);
-  if (u.cost && u.cost > 0) parts.push(`$${u.cost.toFixed(3)}`);
+  if (u.rate) parts.push(u.rate);
+  else if (u.cost && u.cost > 0) parts.push(`$${u.cost.toFixed(3)}`);
   return parts.join(` ${sep} `);
 }
 

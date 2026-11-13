@@ -140,10 +140,13 @@ export default function (pi: ExtensionAPI) {
     if (e.writable) e.ensureGoal(prompt);
     status(ctx);
     const finished = planFinished(e.load().plan);
-    if (!work || injected(ctx)) {
+    // 세션 넘기기로 넘어온 마지막 답이 있으면 진행 기록이 없어도 넣는다 (그 답에 대한 대답일 수 있다, docs/flow-spec.md §1-5)
+    const handoff = continuing && Boolean(e.load().handoff);
+    if ((!work && !handoff) || injected(ctx)) {
       return finished && !prompt.startsWith("[oxy-") ? { message: { customType: `${CUSTOM}-hint`, content: PLAN_DONE_HINT, display: false } } : undefined;
     }
     const context = renderContext(e.load(), ctxMax, continuing ? "continue" : "reference");
+    if (continuing && e.writable) e.clearHandoff();   // 넘긴 마지막 답은 한 번만 넣는다
     return { message: { customType: CUSTOM, content: finished ? `${context}\n\n${PLAN_DONE_HINT}` : context, display: false } };
   });
 
@@ -364,6 +367,14 @@ export default function (pi: ExtensionAPI) {
       if (e.writable) e.syncCommits(true);
       const kickoff = args.trim() || "Continue the task from the recorded state. Start with the Next step.";
       e.markContinue(); // 새 세션의 첫 요청은 같은 작업의 연속으로 표시한다
+      // 마지막 요청 · 답을 새 세션에 넘긴다 (답의 선택지에 사용자가 대답하며 넘어가는 경우, docs/flow-spec.md §1-5)
+      try {
+        const msgs = (ctx.sessionManager.getEntries?.() ?? []).filter((x: any) => x?.type === "message");
+        const textOfMsg = (m: any) => (typeof m?.content === "string" ? m.content : textOf(m?.content)).trim();
+        const lastReply = [...msgs].reverse().find((x: any) => x.message?.role === "assistant" && textOfMsg(x.message));
+        const lastUser = [...msgs].reverse().find((x: any) => x.message?.role === "user" && !textOfMsg(x.message).startsWith("[oxy-") && !textOfMsg(x.message).startsWith("/"));
+        e.setHandoff(lastUser ? textOfMsg(lastUser.message) : "", lastReply ? textOfMsg(lastReply.message) : "");
+      } catch { /* 넘기지 못하면 작업 기록만으로 이어 간다 */ }
       const parentSession = ctx.sessionManager.getSessionFile();
       // 넘어가기 전 5초 동안 입력창 위에 안내를 세며 보인다 (사용자가 새 세션으로 넘어간다는 것을 알 수 있게)
       if (ctx.hasUI) {
