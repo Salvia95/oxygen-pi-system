@@ -141,3 +141,8 @@ Enter 로 펼치면 Task 와 롤백 가능 여부가 보인다.
 - `!` 인 되돌리기: 스냅숏 부분을 되돌린 뒤 에이전트에게 남은 변경 · 그 뒤 Task · 결정을 담은 메시지를 보내 되돌리기를 맡긴다 (`rollback-ui.ts` `partialRollbackPrompt`). 다 되돌렸으면 다음 요청에 "파일이 바뀌었으니 다시 읽으라" 는 짧은 알림만 붙인다.
 - 3단계 화면: `oxy-monitor/model.ts` `completedRows` · `flowPopup` · `markMarker`, `controller.ts` `flowKeyEx` (r · u · 팝업). Before Commit Task 영역은 걷어냈다 (5단계). 화면 프로그램은 `r` · `u` 키를 넘기도록 고쳤다 (`installer/oxy-tui/src/main.rs` `monitor_key`) — 설치본에 쓰려면 oxy-tui 새 릴리스가 필요하다 (그 전까지 모니터의 r · u 는 동작하지 않고 `/flow rollback` 은 동작한다).
 - 실측 (mock pi, mintty 90×40 D2Coding): `scenario:flow-rollback` 로 Task 둘이 끝나며 스냅숏, `/flow rollback p1` 확인 창(처음 포커스 `취소`) — 증거 scratchpad `caps/rollback-confirm.png`. oxy-tui 0.4.0 `demo monitor` 35×28 에 Completed Flow (`× 회원 가입 화면` 펼침 · `✓ 프로젝트 골격`).
+- 실제 LLM 실측 (2026-11-14, 설치본 + Claude Haiku 5.5 thinking low, git 아닌 임시 프로젝트, 합계 약 $0.005)
+  - 1차: Haiku 가 `write a.txt` 와 `flow_plan done p1` 을 한 응답에 불러 pi 가 병렬로 실행했고, p1 스냅숏이 쓰기보다 먼저 찍혀 p1 까지 되돌리니 `a.txt` 도 사라졌다. 에이전트는 이 어긋남을 알아채고 보고했다.
+  - 고침 (09d1780): done · dropped 는 같은 응답에서 먼저 부른 도구가 끝난 뒤 스냅숏 (`tool_execution_end`, 응답 끝 `turn_end` 로 정리). mock 이 한 응답에 도구 여러 개를 부르게 하고 E2E 에 병렬 경우 · 엔진 되돌리기 · 취소를 더했다 (`tests/flow-rollback-cli.mjs`).
+  - 2차: p1 까지 되돌리기 → `a.txt` 남고 `b.txt` 지움, 확인 창에 `!` 문구. 에이전트가 작업 폴더 밖 `../outside-note.txt` 를 찾아 지우기 전에 물었고, 허락하자 지웠다.
+- 아직 실제 psmux 모니터 pane 에서 `r` · `u` 를 눌러 보지는 않았다 (exe 의 키 전달은 Rust 시험, 요청 파일 경로는 mock pi 에서 확인).
