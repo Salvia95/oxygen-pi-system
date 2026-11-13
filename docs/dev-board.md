@@ -21,8 +21,8 @@
 | `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
-| `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 구현 | 사용자: 웰컴 카드 캡처 확인 (`pi-tui/6`) · 9단계 보류 | `pi-tui/8` 작업 줄 (tui-implementer) → 설치본 반영 승인 | 2026-11-13 | – | 안 됨 |
-| `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 커밋 · push · `oxy-tui-v0.4.0` 릴리스 승인 | 승인되면 Cargo 0.4.0 → 커밋 · push → 릴리스 워크플로 → sha 고정 → 설치본 업데이트 (부모) | 2026-11-13 | – | 안 됨 |
+| `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 검증 | 사용자: 웰컴 카드 · 화면 캡처 확인. 9단계(실제 LLM)는 사용자가 보류 | 사용자 확인 뒤 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (저장소 폴더로 업데이트, oxy-tui 0.4.0) |
+| `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 릴리스 반영 뒤 화면 확인 | 확인되면 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (oxy-tui 0.4.0) |
 
 ## 단계
 
@@ -80,7 +80,7 @@
 | `pi-tui/5` | `bash` 안의 `fd` · `rg` (§7.2 §7.3) | 완료 | 단위 `# tests 80` `# pass 80` `# fail 0` (새 시험: 명령 알아보기 17가지 · 폴더 묶음 · rg 출력 · 결과 없음), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock `tui-search` 80×24 · 펼침, mintty D2Coding PNG. 실측으로 `cd <긴 경로>` 줄임 · 한글 회색 없앰 (2026-11-13) | `docs/pi-tui-spec.md` §7.2 §7.3 |
 | `pi-tui/6` | 헤더(웰컴 카드) · 작업 표시 · 생각 라벨 (§3 §4) | 검증 | 단위 `# tests 81` `# pass 81` `# fail 0` (웰컴 카드: 30–160칸 폭 · 배너 64칸부터 · 오른쪽 열 100칸부터 · ASCII), 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13 부모) | mock pi mintty 80×24 · 56×24 D2Coding PNG. 사용자가 2줄 헤더를 웰컴 카드로 바꾸라고 함 → 다시 구현. 사용자 확인 대기 · 생각 라벨은 9단계 (2026-11-13) | `docs/pi-tui-spec.md` §3 |
 | `pi-tui/7` | 글꼴 반입 (§8) | 완료 | `fetch-bundle.sh --only=d2coding` sha256 확인 · 세 파일, `package-bundle.sh --check` 통과, `tests/repo-hygiene.sh` 통과, 단위 `# pass 81` (2026-11-13 부모) | 해당 없음 (반입만) | `docs/pi-tui-spec.md` §8 |
-| `pi-tui/8` | 글꼴 설치 · 터미널 적용 (§8, `docs/tui-spec.md` §12) | 검증 | 단위 `# tests 83` `# pass 83` `# fail 0` (부모가 다시 실행) · `just tui-test` `45 passed` · `tests/installer-sandbox.sh` PASS 73 (tui-implementer, 새 검사 8건) · 위생 통과, 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13) | mintty 80×24 sandbox 설치 · 업데이트 · 업데이트 실패(`!`) · 제거 진행 캡처 (tui-implementer). 남음: 설치본 반영 [승인 필요] · `!` 노란색은 다음 oxy-tui 릴리스 | `docs/tui-spec.md` §12 |
+| `pi-tui/8` | 글꼴 설치 · 터미널 적용 (§8, `docs/tui-spec.md` §12) | 완료 | 단위 `# tests 83` `# pass 83` `# fail 0` (부모가 다시 실행) · `just tui-test` `45 passed` · `tests/installer-sandbox.sh` PASS 73 (tui-implementer, 새 검사 8건) · 위생 통과, 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13) | mintty 80×24 sandbox 설치 · 업데이트 · 업데이트 실패(`!`) · 제거 진행 캡처 (tui-implementer). 설치본 업데이트 2회 (2026-11-13): `글꼴 설치 (D2Coding)  이미 있음` (이 PC 는 1단계에서 직접 깐 글꼴이라 기록 없음), WT 프로필 `Oxygen / font=D2Coding`, `!` 노란색은 oxy-tui 0.4.0 | `docs/tui-spec.md` §12 |
 | `pi-tui/9` | 실제 LLM 확인 (승인 필요: 과금 LLM) | 예정 | 사용자가 보류 (2026-11-13: "9단계는 나중에 생각하고") | – | – |
 
 ## 메모
@@ -111,6 +111,8 @@
 - `완료` 조건: 다음 위임 한 번에서 부모가 `.claude/rules/delegation-rule.md` 와 `docs/dev-process.md` §4 로 넘기고, 에이전트가 새 보고 항목(결과 줄 · 기준 · 확인한 것과 추측 · 뺀 검사)으로 돌려주고, 부모가 이 진행판에 옮긴 것을 확인했을 때.
 - `dev-process/1` 의 `just test` 결과 (2026-11-12, `bash -c 'cd /c/… && source ./env.sh && just test'`, 종료코드 0, 4분 54초): `저장소 위생 검사 통과` · `진행판 검사 통과 (WARN 2)` · 단위 `# tests 59` `# pass 59` `# fail 0` · `[oxy] E2E 통과` (E2E PASS 65, FAIL 0).
 - A9 증거: E2E 와 `just test` 전에 다른 실행처럼 보이는 `sleep 41 500` · `sleep 41.5 500` 을 띄워 두었고, 끝난 뒤에도 살아 있었다. 같은 두 프로세스에 예전 정리 명령(시스템 전체의 `*41*` 종료)을 돌리자 둘 다 죽었다. 새 세기 조건은 이 실행의 표식으로 남은 sleep 은 1 로 세고, 표식의 앞부분만 같은 값은 0 으로 센다.
+
+- 2026-11-13 `pi-tui` · `ui-unify`: 커밋 원칙 — 함께 검증한 상태만 커밋한다. 여러 명세가 같은 파일(시험 · installer · manifest)에 얽혀 중간 상태를 따로 검증하지 않았으면 한 커밋으로 두고 메시지에 영역을 나눠 적는다. 릴리스 경계(버전 올림 · sha 고정 · 설치본 기록)는 따로 커밋한다. eb18916 (기능 + 0.4.0), 725d786 (sha `807ad314…9deef` 고정, 릴리스 run 43404402213). 설치본 업데이트: 저장소 폴더를 번들로 써서 줄 입력 모드(`3 1 2 ""`)로, `verify` PASS 48 / WARN 1 (SQLcl) / FAIL 0. 업데이트 끝의 점검이 저장된 연결(vLLM · Claude Haiku)에 짧은 요청을 한 번씩 보낸다 (과금 1회).
 
 ## 회고
 
