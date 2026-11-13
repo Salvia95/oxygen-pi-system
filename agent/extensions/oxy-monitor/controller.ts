@@ -3,10 +3,11 @@
  * 선택은 Node 가 정해 보기 모델의 selected 로 보낸다 (exe 는 선택을 기억하지 않는다). 파일 · 프로세스를 건드리지 않는 순수 함수다.
  */
 import type { JobsState } from "../oxy-jobs/state.ts";
-import { type FlowLike, type FlowUiState, type JobsUiState, type StopTarget, flowSelection, isActive, jobLists, planRows } from "./model.ts";
+import { type FlowHistory, type FlowLike, type FlowRequest, type FlowUiState, type JobsUiState, type StopTarget, completedRows, findPlanItem, flowSelection, isActive,
+  jobLists, planRows, taskLabelOf } from "./model.ts";
 
-export type MonitorKey = "up" | "down" | "left" | "right" | "enter" | "esc" | "s" | "q";
-export const KEYS: readonly MonitorKey[] = ["up", "down", "left", "right", "enter", "esc", "s", "q"];
+export type MonitorKey = "up" | "down" | "left" | "right" | "enter" | "esc" | "s" | "q" | "r" | "u";
+export const KEYS: readonly MonitorKey[] = ["up", "down", "left", "right", "enter", "esc", "s", "q", "r", "u"];
 
 /** exe 의 --version 출력에 모니터 모드 표시가 있는가 (예전 v0.1.0 exe 는 --mode 를 모르고 설치 화면 규약으로 기다린다) */
 export const supportsMonitor = (versionOutput: string): boolean => /^oxy-tui \S+ .*\bmonitor\b/m.test(versionOutput);
@@ -28,11 +29,63 @@ function move(keys: string[], cur: string | null, step: number): string | null {
 }
 
 /** flow 화면: ▲▼ 선택 이동(사용자 위치를 잠시 둔다), Enter 펼치기 · 접기. 움직임은 지금 고른 줄(기본: 지금 할 일)에서 시작한다 */
-export function flowKey(ui: FlowUiState, flow: FlowLike | null, width: number, key: MonitorKey, now: number): FlowUiState {
-  if (!flow) return ui;
-  const rows = planRows(flow, ui.open, width);
+export function flowKey(ui: FlowUiState, flow: FlowLike | null, width: number, key: MonitorKey, now: number, history: FlowHistory | null = null): FlowUiState {
+  return flowKeyEx(ui, flow, width, key, now, history).ui;
+}
+
+/**
+ * flow 화면의 키 (docs/flow-rollback-spec.md §3): 위 + r 되돌리기 · u 되돌리기 취소 (확인 팝업, 처음 포커스 취소).
+ * 팝업에서 되돌리기를 고르면 request 를 돌려준다 (모니터가 .oxy/flow/requests/ 에 쓰고 pi 의 oxy-flow 가 실행)
+ */
+export function flowKeyEx(ui: FlowUiState, flow: FlowLike | null, width: number, key: MonitorKey, now: number,
+  history: FlowHistory | null = null): { ui: FlowUiState; request?: FlowRequest } {
+  const base: FlowUiState = { ...ui, notice: undefined };
+  if (ui.confirm) {
+    const c = ui.confirm;
+    if (key === "left" || key === "right") return { ui: { ...base, confirm: { ...c, focus: c.focus === "yes" ? "no" : "yes" } } };
+    if (key === "enter" && c.focus === "yes") {
+      return { ui: { ...base, confirm: null, notice: c.op === "undo" ? "되돌리기 취소를 요청했습니다." : "되돌리기를 요청했습니다." },
+        request: { op: c.op, flow: c.flow, task: c.task } };
+    }
+    if (key === "enter" || key === "esc" || key === "q") return { ui: { ...base, confirm: null } };
+    return { ui };
+  }
+  if (!flow) return { ui };
+  const rows = [...planRows(flow, ui.open, width, history?.marks[flow.id ?? ""]), ...completedRows(history, ui.open, flow.rollbacks ?? [])];
   const keys = rows.filter((r) => r.key).map((r) => r.key!);
   const cur = flowSelection(rows, flow.plan ?? [], ui, now);
+  if (key === "r") {
+    const target = rollbackTarget(cur, flow, history);
+    if (typeof target === "string") return { ui: { ...base, notice: target } };
+    return { ui: { ...base, confirm: { op: "rollback", ...target, focus: "no" } } };
+  }
+  if (key === "u") {
+    const last = [...(flow.rollbacks ?? [])].reverse().find((r) => !r.undone);
+    if (!last) return { ui: { ...base, notice: "취소할 되돌리기가 없습니다." } };
+    const plan = last.flow === flow.id ? flow.plan ?? [] : history?.completed.find((x) => x.id === last.flow)?.plan ?? [];
+    const files = (last as any).files?.length ?? 0;
+    return { ui: { ...base, confirm: { op: "undo", flow: last.flow, task: last.task, label: taskLabelOf(plan, last.task), files, partial: false, focus: "no" } } };
+  }
+  return { ui: flowMove(base, keys, cur, key, now) };
+}
+
+/** 고른 줄의 되돌리기 대상 (안 되면 그 이유) */
+function rollbackTarget(cur: string | null, flow: FlowLike, history: FlowHistory | null): { flow: string; task: string; label: string; files: number; partial: boolean } | string {
+  let flowId: string, taskId: string, plan;
+  if (cur?.startsWith("p:")) { flowId = flow.id ?? ""; taskId = cur.slice(2); plan = flow.plan ?? []; }
+  else if (cur?.startsWith("t:")) {
+    const rest = cur.slice(2), i = rest.lastIndexOf(":");
+    flowId = rest.slice(0, i); taskId = rest.slice(i + 1);
+    plan = history?.completed.find((x) => x.id === flowId)?.plan ?? [];
+  } else return "되돌릴 Task 를 고르세요.";
+  const item = findPlanItem(plan, taskId);
+  if (!item || !item.snaps || !Object.keys(item.snaps).length) return "이 Task 에는 되돌릴 지점이 없습니다.";
+  const m = history?.marks[flowId]?.[taskId];
+  if (m?.mark === "conflict") return "되돌리면 뒤의 작업과 충돌합니다.";
+  return { flow: flowId, task: taskId, label: taskLabelOf(plan, taskId), files: m?.files ?? 0, partial: m?.mark === "partial" };
+}
+
+function flowMove(ui: FlowUiState, keys: string[], cur: string | null, key: MonitorKey, now: number): FlowUiState {
   if (key === "up" || key === "down") return { ...ui, sel: move(keys, cur, key === "up" ? -1 : 1), manualAt: now };
   if (key === "enter") {
     const k = cur && keys.includes(cur) ? cur : keys[0];

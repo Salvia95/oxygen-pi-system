@@ -37,7 +37,16 @@ function scenario(now) {
     nodes: [node("n1", "chore: 환경 구성"), node("n2", "feat: 로그인 라우트", [{ text: "세션은 쿠키로", why: "사내 SSO 와 같은 방식" }], ["src/login.ts", "src/routes.ts"]), node("n3", "fix: 린트 오류")],
     buffer: { decisions: [{ text: "테스트는 vitest 로" }], files: ["a.ts", "b.ts", "c.ts"], failures: [{ command: "npm test" }] },
   };
-  return { plan, flow };
+  // 끝난 Flow 둘 (docs/flow-rollback-spec.md §3): 하나는 충돌 예상(×), 하나는 완전히 되돌릴 수 있음(✓). 첫 Flow 는 펼쳐 둔다
+  const snap = { snaps: { "C:/w": "s" }, snapAt: now - sec(86400) };
+  const history = {
+    completed: [
+      { id: "flow-b", goal: "회원 가입 화면", updatedAt: now - sec(3600), plan: [item("p1", "폼 만들기", "done", [], [], snap), item("p2", "검증 추가", "done", [], [], snap)] },
+      { id: "flow-a", goal: "프로젝트 골격", updatedAt: now - sec(86400), plan: [item("p1", "빌드 설정", "done", [], [], snap)] },
+    ],
+    marks: { "flow-b": { p1: { mark: "conflict", files: 3 }, p2: { mark: "ok", files: 1 } }, "flow-a": { p1: { mark: "ok", files: 5 } } },
+  };
+  return { plan, flow: { ...flow, id: "flow-c" }, history };
 }
 
 async function liveState(L, now) {
@@ -85,7 +94,7 @@ function subStates(now) {
 export async function writeFixtures({ outDir = DEFAULT_DIR, now = Date.now(), sizes = DEFAULT_SIZES } = {}) {
   const M = await import("../agent/extensions/oxy-monitor/model.ts");
   const L = await import("../agent/extensions/oxy-monitor/live.ts");
-  const { flow } = scenario(now);
+  const { flow, history } = scenario(now);
   const live = await liveState(L, now);
   const jobs = jobsState(now);
   const subs = subStates(now);
@@ -94,7 +103,7 @@ export async function writeFixtures({ outDir = DEFAULT_DIR, now = Date.now(), si
   for (const size of sizes) {
     const [width, height] = size.split("x").map(Number);
     const models = {
-      flow: M.flowModel(flow, live, { sel: "p:p2.2", open: new Set(), manualAt: 0 }, width, height, now, displayWidth),
+      flow: M.flowModel(flow, live, { sel: "p:p2.2", open: new Set(["c:flow-b"]), manualAt: 0 }, width, height, now, displayWidth, history),
       jobs: M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), sel: "s:job-2" }, width, height, now, displayWidth),
       "jobs-sub": M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), mode: "sub", sub: "job-2", sel: "c:job-1" }, width, height, now, displayWidth),
       "jobs-popup": M.jobsModel(jobs, subs, live, { ...M.jobsUiInit(), sel: "s:job-2", confirm: { scope: "main", id: "job-2", label: "scout: 로그 찾기", agent: true, focus: "no" } }, width, height, now, displayWidth),

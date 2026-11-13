@@ -75,6 +75,18 @@ const SCENARIOS = {
     { tool: "flow_plan", args: { action: "update", id: "p1", status: "done" } },
     { text: "planned" },
   ],
+  // 되돌리기 (docs/flow-rollback-spec.md): Task 두 개가 각각 파일을 바꾸고 끝난다 → Task 끝 스냅숏
+  "flow-rollback": [
+    { tool: "flow_plan", args: { action: "set", items: [{ text: "Write a" }, { text: "Write b" }] } },
+    { tool: "flow_plan", args: { action: "update", id: "p1", status: "doing" } },
+    { tool: "write", args: { path: "a.txt", content: "a1\n" } },
+    { tool: "flow_plan", args: { action: "update", id: "p1", status: "done" } },
+    { tool: "flow_plan", args: { action: "update", id: "p2", status: "doing" } },
+    { tool: "write", args: { path: "b.txt", content: "b1\n" } },
+    bash("echo a2 > a.txt"),
+    { tool: "flow_plan", args: { action: "update", id: "p2", status: "done" } },
+    { text: "two tasks done" },
+  ],
   "flow-big": [bash("echo step-one"), { ...bash("echo step-two"), usage: 120000 }, { text: "after-compaction" }],
   "flow-half": [{ text: "half-full", usage: 75000 }],
   // 작업 수준: 본 모델이 level 을 정해 맡긴다 (e2e 에서 deep = 범용 모델 + thinking)

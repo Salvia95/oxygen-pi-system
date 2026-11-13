@@ -6,15 +6,15 @@
 //   flow: 프로젝트의 .oxy/flow/flow.json (읽기만). 두 화면 모두 같은 실행 폴더의 live.json 으로 pi 의 지금 상태를 보인다
 // pi 가 끝나면(pid 가 사라지면) 스스로 종료한다.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync, watch } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { harnessHome } from "../_lib/common.ts";
 import { type JobsState, findRun, readState, readSubStates, sendControl, subRunDir } from "../oxy-jobs/state.ts";
-import { projectRoot } from "../oxy-flow/store.ts";
+import { flowKeep, projectRoot, readCompleted } from "../oxy-flow/store.ts";
 import type { LiveState } from "./live.ts";
-import { type FlowUiState, type JobsUiState, type StopTarget, flowModel, jobOrder, jobsModel, jobsUiInit } from "./model.ts";
-import { KEYS, type MonitorKey, flowKey, jobsKey, monitorTheme, supportsMonitor } from "./controller.ts";
+import { type FlowHistory, type FlowRequest, type FlowUiState, type JobsUiState, type StopTarget, flowModel, jobOrder, jobsModel, jobsUiInit } from "./model.ts";
+import { KEYS, type MonitorKey, flowKeyEx, jobsKey, monitorTheme, supportsMonitor } from "./controller.ts";
 import { type Fit, type FlowLike, type FlowUi, type JobsUi, flowKeys, flowView, jobsView } from "./view.ts";
 
 const args = process.argv.slice(2);
@@ -53,9 +53,38 @@ function loadFlow() {
   flowFile ??= join(projectRoot(cwd), ".oxy", "flow", "flow.json");
   try {
     const f = JSON.parse(readFileSync(flowFile, "utf8"));
-    flow = { goal: f.goal ?? "", next: f.next, blocked: f.blocked, status: f.status, plan: Array.isArray(f.plan) ? f.plan : [], nodes: f.nodes ?? [],
+    flow = { id: f.id, goal: f.goal ?? "", next: f.next, blocked: f.blocked, status: f.status, plan: Array.isArray(f.plan) ? f.plan : [], nodes: f.nodes ?? [],
+      rollbacks: Array.isArray(f.rollbacks) ? f.rollbacks : [],
       buffer: { decisions: [], files: [], failures: [], ...f.buffer } };
   } catch { flow = null; }
+  loadHistory();
+}
+
+/** Completed Flow (docs/flow-rollback-spec.md §3): archive/ 의 끝난 Flow · oxy-flow 가 쓴 기호(marks.json) · 마지막 되돌리기 결과 */
+let history: FlowHistory | null = null;
+let rollbackResult: { at: number; ok: boolean; text: string } | null = null;
+function loadHistory() {
+  if (!flowFile) return;
+  const dir = join(flowFile, "..");
+  let marks: FlowHistory["marks"] = {};
+  try { marks = JSON.parse(readFileSync(join(dir, "marks.json"), "utf8")).flows ?? {}; } catch { /* 아직 없음 */ }
+  const completed = readCompleted(dir, flowKeep()).map((x) => ({ id: x.id, goal: x.goal, updatedAt: x.updatedAt, plan: x.plan ?? [] }));
+  history = { completed, marks };
+  try { rollbackResult = JSON.parse(readFileSync(join(dir, "rollback-result.json"), "utf8")); } catch { rollbackResult = null; }
+}
+
+/** 확인한 되돌리기 요청을 pi(oxy-flow)에 넘긴다: .oxy/flow/requests/<시각>.json */
+function sendFlowRequest(req: FlowRequest): number {
+  const at = Date.now();
+  if (!flowFile) return at;
+  const dir = join(flowFile, "..", "requests");
+  try {
+    mkdirSync(dir, { recursive: true });
+    const tmp = join(dir, `${at}.tmp`);
+    writeFileSync(tmp, JSON.stringify({ ...req, at }));
+    renameSync(tmp, join(dir, `${at}.json`));   // 다 쓴 뒤에만 보이게
+  } catch { /* 못 쓰면 알림만 */ }
+  return at;
 }
 
 /** 화면에 필요한 것을 다시 읽는다 (flow 화면도 지금 상태 · 실행 폴더를 위해 jobs 를 읽는다) */
@@ -93,6 +122,8 @@ async function runExe() {
   let jobsUi: JobsUiState = jobsUiInit();
   let scroll = 0;
   let pendingStop: { seq: string; target: StopTarget } | null = null;
+  let pendingFlow: number | null = null;   // 보낸 되돌리기 요청 시각 (결과를 기다림)
+  let flowNoticeAt = 0;
   let notice: { text: string; at: number } | null = null;   // 키 안내 줄의 알림은 잠시만 (docs/jobs-view-spec.md §2)
   let last = "";
   let quitting = false;
@@ -100,7 +131,14 @@ async function runExe() {
   const model = () => {
     const now = Date.now();
     if (kind === "flow") {
-      const m = flowModel(flow, live, flowUi, size.width, size.height, now, displayWidth);
+      // pi 가 되돌리기를 마치면 결과를 알림 줄에 잠시 보인다
+      if (pendingFlow && rollbackResult && rollbackResult.at >= pendingFlow) {
+        flowUi = { ...flowUi, notice: rollbackResult.text };
+        flowNoticeAt = now;
+        pendingFlow = null;
+      }
+      if (flowUi.notice && now - flowNoticeAt > NOTICE_MS && !pendingFlow) flowUi = { ...flowUi, notice: undefined };
+      const m = flowModel(flow, live, flowUi, size.width, size.height, now, displayWidth, history);
       if (!flowUi.sel && m.selected) flowUi = { ...flowUi, sel: m.selected };
       return m;
     }
@@ -135,8 +173,13 @@ async function runExe() {
     setTimeout(() => { link.killAndRestore(process.stdout); process.exit(code); }, 1500).unref();
   };
   const onKey = (key: MonitorKey) => {
-    if (key === "q" && !(kind === "jobs" && jobsUi.confirm)) return quit(0);   // 팝업이 떠 있으면 q 는 취소
-    if (kind === "flow") flowUi = flowKey(flowUi, flow, size.width, key, Date.now());
+    if (key === "q" && !(kind === "jobs" && jobsUi.confirm) && !(kind === "flow" && flowUi.confirm)) return quit(0);   // 팝업이 떠 있으면 q 는 취소
+    if (kind === "flow") {
+      const r = flowKeyEx(flowUi, flow, size.width, key, Date.now(), history);
+      flowUi = r.ui;
+      if (flowUi.notice) flowNoticeAt = Date.now();
+      if (r.request) pendingFlow = sendFlowRequest(r.request);
+    }
     else {
       const r = jobsKey(jobsUi, scroll, jobs?.state ?? null, subs, key);
       jobsUi = r.ui; scroll = r.scroll;

@@ -23,7 +23,7 @@
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 검증 | 사용자: 웰컴 카드 · 화면 캡처 확인. 9단계(실제 LLM)는 사용자가 보류 | 사용자 확인 뒤 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (저장소 폴더로 업데이트, oxy-tui 0.4.0) |
 | `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 릴리스 반영 뒤 화면 확인 | 확인되면 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (oxy-tui 0.4.0) |
-| `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 초안 | 사용자: 명세 승인 | 승인되면 §7 1단계 그림자 저장소 (부모) | – | – | – |
+| `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 구현 | 사용자: O6 Tweak 문구 · oxy-tui 0.5.0 릴리스(r · u 키) · 실제 LLM 1회(4단계) · 설치본 반영 | 승인되면 Tweak 행 · 릴리스 · 실측 (부모 · tui-implementer) | 2026-11-14 | – | – |
 
 ## 단계
 

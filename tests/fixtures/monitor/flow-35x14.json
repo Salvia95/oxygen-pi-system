@@ -60,29 +60,28 @@
       ]
     },
     {
-      "title": "Before Commit Task",
+      "title": "Completed Flow",
       "rows": [
         {
-          "marker": "none",
-          "text": "테스트는 vitest 로",
-          "indent": 0
-        },
-        {
-          "marker": "none",
-          "text": "변경 파일 3개",
-          "indent": 0
-        },
-        {
+          "key": "c:flow-b",
           "marker": "failed",
-          "text": "npm test",
+          "text": "회원 가입 화면",
+          "right": "11-13",
+          "indent": 0
+        },
+        {
+          "key": "t:flow-b:p1",
+          "marker": "failed",
+          "text": "[1/2] 폼 만들기",
           "indent": 0,
-          "error": true
+          "prefix": "├ "
         }
       ]
     }
   ],
   "selected": "p:p2.2",
   "keys": [
-    "▲▼ 이동  Enter 펼치기  q 닫기"
+    "▲▼ 이동  Enter 펼치기  r 되돌리기",
+    "u 되돌리기 취소  q 닫기"
   ]
 }

@@ -567,9 +567,9 @@ mod tests {
         assert!(seen >= 2, "구역 제목이 있는 예시 모델이 flow 에 있어야 한다");
         // flow 는 구역 0 이 Current Task, 다음이 Overall Task 다 (flow-view-spec §2)
         for (name, width, _, _, m) in fx.iter().filter(|(n, ..)| n.starts_with("flow-")) {
-            // 커밋 전 작업이 있으면 셋째 구역 Before Commit Task (2026-11-13, 커밋하면 사라진다)
+            // 끝난 Flow 가 있으면 셋째 구역 Completed Flow (docs/flow-rollback-spec.md §3, Before Commit Task 를 대신함)
             let titles: Vec<_> = m.sections.iter().map(|s| s.title.as_deref()).collect();
-            assert!(titles == [Some("Current Task"), Some("Overall Task")] || titles == [Some("Current Task"), Some("Overall Task"), Some("Before Commit Task")], "{name}: {titles:?}");
+            assert!(titles == [Some("Current Task"), Some("Overall Task")] || titles == [Some("Current Task"), Some("Overall Task"), Some("Completed Flow")], "{name}: {titles:?}");
             let (body, _) = lines(m, *width as usize, 0, at);
             assert_eq!(line_text(&body[1]), format!("── Current Task {}", "─".repeat(*width as usize - 16)), "{name}: 맨 윗줄 바로 아래가 구역 0 가로줄");
         }

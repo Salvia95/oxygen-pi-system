@@ -460,6 +460,9 @@ fn monitor_key(k: &KeyEvent) -> Option<&'static str> {
         KeyCode::Esc => Some("esc"),
         KeyCode::Char('s' | 'S') => Some("s"),
         KeyCode::Char('q' | 'Q') => Some("q"),
+        // Flow Monitor 되돌리기 · 되돌리기 취소 (docs/flow-rollback-spec.md §3)
+        KeyCode::Char('r' | 'R') => Some("r"),
+        KeyCode::Char('u' | 'U') => Some("u"),
         _ => None,
     }
 }
@@ -608,6 +611,8 @@ mod tests {
             (KeyCode::Char('s'), "s"),
             (KeyCode::Char('S'), "s"),
             (KeyCode::Char('q'), "q"),
+            (KeyCode::Char('r'), "r"),
+            (KeyCode::Char('u'), "u"),
         ] {
             assert_eq!(monitor_key(&key(code)), Some(name), "{code:?}");
         }

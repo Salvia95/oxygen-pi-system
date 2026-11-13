@@ -484,6 +484,122 @@ test("oxy-jobs 중지 요청: 모니터 sendControl → pi ControlInbox → 결�
   } finally { rmSync(jobsDir, { recursive: true, force: true }); }
 });
 
+test("oxy-flow 그림자 저장소: git 아닌 폴더 스냅숏 · Task 까지 되돌리기 · 되돌리기 취소 · 충돌 예상 · 제외 (flow-rollback-spec §4 §5)", async () => {
+  const { ShadowRepo } = await import("../agent/extensions/oxy-flow/shadow.ts");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const top = mkdtempSync(join(tmpdir(), "oxysh-"));
+  const work = join(top, "app"), flowDir = join(top, "proj", ".oxy", "flow");
+  mkdirSync(work, { recursive: true });
+  const put = (p: string, v: string) => writeFileSync(join(work, p), v);
+  const get = (p: string) => existsSync(join(work, p)) ? readFileSync(join(work, p), "utf8") : null;
+  try {
+    const sh = new ShadowRepo(flowDir, work, 1000);
+    put("a.txt", "1\n"); put(".gitignore", "secret.txt\n"); put("secret.txt", "s"); mkdirSync(join(work, "node_modules")); put("node_modules/x.js", "x");
+    const base = sh.snapshot("F1", "base", "start");
+    put("a.txt", "2\n"); put("b.txt", "b\n"); put("big.bin", "z".repeat(2000));
+    const t1 = sh.snapshot("F1", "task", "t1");
+    assert.deepEqual(t1.skipped, ["big.bin"], "상한을 넘는 파일은 넣지 않는다");
+    assert.deepEqual(sh.changed(base.sha, t1.sha).sort(), ["a.txt", "b.txt"], ".gitignore · node_modules · 큰 파일은 빠진다");
+    put("a.txt", "3\n"); put("c.txt", "c\n");
+    const t2 = sh.snapshot("F1", "task", "t2");
+    // 지금 Flow 에서 t1 까지 되돌리기: base = ours = 지금
+    const pre = sh.snapshot("F1", "pre", "before rollback");
+    const pv = sh.preview(pre.sha, pre.sha, t1.sha);
+    assert.equal(pv.clean, true);
+    assert.deepEqual(pv.files.sort(), ["a.txt", "c.txt"]);
+    const done = sh.apply(pre.sha, pv.tree!, "F1", "rollback", "to t1");
+    assert.deepEqual([get("a.txt"), get("b.txt"), get("c.txt"), get("big.bin")?.length, get("secret.txt")], ["2\n", "b\n", null, 2000, "s"], "넣지 않은 파일은 그대로");
+    // 되돌리기 취소 = 되돌리기를 다시 되돌린다 (D3)
+    const now = sh.snapshot("F1", "pre", "before undo");
+    const un = sh.preview(done.sha, now.sha, pre.sha);
+    assert.equal(un.clean, true);
+    sh.apply(now.sha, un.tree!, "F1", "undo", "undo");
+    assert.deepEqual([get("a.txt"), get("c.txt")], ["3\n", "c\n"]);
+    // 끝난 Flow(F1, 끝 = t2) 를 뒤의 Flow 가 같은 줄을 고친 뒤 되돌리면 충돌 예상 (D4 의 X)
+    put("a.txt", "4\n");
+    const later = sh.snapshot("F2", "task", "later");
+    const x = sh.preview(t2.sha, later.sha, t1.sha);
+    assert.equal(x.clean, false);
+    assert.deepEqual(x.conflicts, ["a.txt"]);
+    // 다른 파일만 고쳤으면 충돌이 아니다
+    const y = sh.preview(t2.sha, later.sha, base.sha);
+    assert.equal(y.clean, false, "a.txt 는 base 와도 부딪힌다");
+    // 정리: F1 을 보관하지 않으면 그 ref 를 지운다
+    assert.ok(sh.prune(new Set(["F2"])) > 0);
+    assert.equal(sh.prune(new Set(["F2"])), 0);
+  } finally { rmSync(top, { recursive: true, force: true }); }
+});
+
+test("oxy-flow 되돌리기: Task 끝 스냅숏 · 지금 Flow 의 Task 까지 · 취소 · 끝난 Flow 충돌은 X · 스냅숏 밖은 ! (flow-rollback-spec §5)", async () => {
+  const { FileFlowEngine, workFolderOf } = await import("../agent/extensions/oxy-flow/store.ts");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const top = mkdtempSync(join(tmpdir(), "oxyrb-"));
+  const proj = join(top, "cozy-example"), app = join(top, "library-rental");
+  mkdirSync(proj); mkdirSync(join(app, "src"), { recursive: true });
+  writeFileSync(join(app, "pom.xml"), "<project/>");
+  const put = (p: string, v: string) => writeFileSync(join(app, p), v);
+  const get = (p: string) => existsSync(join(app, p)) ? readFileSync(join(app, p), "utf8") : null;
+  try {
+    assert.equal(workFolderOf(join(app, "src", "A.java")), app, "git 이 아니어도 pom.xml 이 있는 폴더가 작업 폴더");
+    assert.equal(workFolderOf(join(top, "nowhere", "x.txt")), null);
+    put("src/A.java", "v0\n");
+    const e = new FileFlowEngine(proj);
+    e.bindSession("S1"); e.ensureGoal("반납 기능");
+    e.setPlan([{ text: "마이그레이션" }, { text: "반납" }, { text: "테스트" }]);
+    assert.equal(e.trackFolder(app), true);
+    assert.equal(e.trackFolder(app), false, "한 번만 기준 스냅숏");
+    e.updatePlan("p1", { status: "doing" }); put("src/A.java", "v1\n"); put("src/M.sql", "m\n"); e.updatePlan("p1", { status: "done" });
+    e.updatePlan("p2", { status: "doing" }); put("src/A.java", "v2\n"); put("src/R.java", "r\n"); e.updatePlan("p2", { status: "done" });
+    e.noteIncomplete("명령: npm install");
+    e.updatePlan("p3", { status: "doing" }); put("src/T.java", "t\n"); e.updatePlan("p3", { status: "done" });
+    const plan = e.load().plan;
+    assert.ok(plan.every((x) => x.snaps && x.snaps[app]), "Task 마다 스냅숏");
+    assert.deepEqual(plan[2].incomplete, ["명령: npm install"]);
+    // 기호: p1 · p2 뒤에 ! 가 있는 p3 → partial, p3 는 뒤가 없음 → ok
+    const m1 = e.writeMarks()[e.load().id];
+    assert.deepEqual([m1.p1, m1.p2, m1.p3], ["partial", "partial", "ok"]);
+    // 지금 Flow 의 p1 까지 되돌리기
+    const dry = e.rollbackTo(e.load().id, "p1", true);
+    assert.equal(dry.ok, true);
+    assert.deepEqual(dry.files.sort(), ["src/A.java", "src/R.java", "src/T.java"]);
+    assert.equal(get("src/A.java"), "v2\n", "미리 보기는 바꾸지 않는다");
+    const rb = e.rollbackTo(e.load().id, "p1");
+    assert.equal(rb.ok, true);
+    assert.deepEqual([get("src/A.java"), get("src/M.sql"), get("src/R.java"), get("src/T.java")], ["v1\n", "m\n", null, null]);
+    assert.deepEqual(rb.incomplete, ["p3 명령: npm install"], "스냅숏 밖 변경은 에이전트에게");
+    // 취소
+    const un = e.undoLast();
+    assert.equal(un.ok, true);
+    assert.deepEqual([get("src/A.java"), get("src/R.java"), get("src/T.java")], ["v2\n", "r\n", "t\n"]);
+    assert.equal(e.undoLast().ok, false, "취소할 것이 없다");
+    const mk = JSON.parse(readFileSync(join(proj, ".oxy", "flow", "marks.json"), "utf8"));
+    e.writeMarks();
+    const mk2 = JSON.parse(readFileSync(join(proj, ".oxy", "flow", "marks.json"), "utf8")).flows[e.load().id];
+    assert.deepEqual([mk2.p1.files, mk2.p2.files], [3, 1], "되돌리기 취소 뒤 바뀔 파일 수는 지금 상태 기준");
+    void mk;
+    const firstId = e.load().id;
+    // 새 목표 → 끝난 Flow 로 보관. 뒤의 Flow 가 A.java 를 고치면 p1 까지 되돌리기는 충돌 (X)
+    e.startNew("다음 일");
+    assert.equal(e.completedFlows()[0].id, firstId);
+    assert.ok(e.completedFlows()[0].shadow![app].end, "보관할 때 끝 스냅숏");
+    e.setPlan([{ text: "수정" }]);
+    e.trackFolder(app);
+    e.updatePlan("p1", { status: "doing" }); put("src/A.java", "v3\n"); e.updatePlan("p1", { status: "done" });
+    const marks = e.writeMarks();
+    assert.equal(marks[firstId].p1, "conflict");
+    const x = e.rollbackTo(firstId, "p1");
+    assert.equal(x.ok, false);
+    assert.deepEqual(x.conflicts.map((c) => c.split(": ").pop()), ["src/A.java"]);
+    assert.equal(get("src/A.java"), "v3\n", "충돌이면 바꾸지 않는다");
+    // 다른 파일만 고친 Flow 의 Task 는 되돌릴 수 있다: 끝난 Flow 의 p3 (T.java 추가 뒤) → 바뀔 것 없음
+    assert.equal(e.rollbackTo(firstId, "p3", true).ok, true);
+    assert.ok(existsSyncTop(join(proj, ".oxy", "flow", "marks.json")));
+    e.release();
+  } finally { rmSync(top, { recursive: true, force: true }); }
+});
+
 test("oxy-flow: 커밋 단위 노드 · 결정 기록 · pi 밖 커밋 · 락 · 렌더 상한", async () => {
   const { FileFlowEngine, renderContext, traceDecisions } = await import("../agent/extensions/oxy-flow/store.ts");
   const { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } = await import("node:fs");
@@ -983,13 +1099,17 @@ test("oxy-flow: 작업 기록은 세션 단위 (새 세션은 빈 기록 · /res
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("oxy-flow: 보관 기록은 최근 50개만 남긴다 (flow-spec F1)", async () => {
-  const { FileFlowEngine, ARCHIVE_KEEP, pruneArchive } = await import("../agent/extensions/oxy-flow/store.ts");
+test("oxy-flow: 보관 Flow 는 기본 10개, OXY_FLOW_KEEP 로 조절 (flow-rollback-spec D10, 예전 flow-spec F1 은 50개)", async () => {
+  const { FileFlowEngine, FLOW_KEEP_DEFAULT, flowKeep, pruneArchive } = await import("../agent/extensions/oxy-flow/store.ts");
   const { mkdtempSync, rmSync, readdirSync, writeFileSync, utimesSync, mkdirSync, existsSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const dir = mkdtempSync(join(tmpdir(), "oxy-flow-arch-"));
   try {
-    assert.equal(ARCHIVE_KEEP, 50);
+    assert.equal(FLOW_KEEP_DEFAULT, 10);
+    assert.equal(flowKeep(), 10);
+    process.env.OXY_FLOW_KEEP = "3"; assert.equal(flowKeep(), 3);
+    process.env.OXY_FLOW_KEEP = "0"; assert.equal(flowKeep(), 10, "잘못된 값은 기본");
+    process.env.OXY_FLOW_KEEP = "50";
     const arch = join(dir, ".oxy/flow/archive");
     mkdirSync(arch, { recursive: true });
     const base = Date.now() / 1000 - 10000;
@@ -1007,7 +1127,7 @@ test("oxy-flow: 보관 기록은 최근 50개만 남긴다 (flow-spec F1)", asyn
     assert.equal(existsSync(join(arch, "old-54.json")), true);          // 최근 것은 남고
     assert.equal(existsSync(join(arch, "old-05.json")), false);         // 오래된 것은 지운다
     assert.equal(pruneArchive(join(dir, "nope"), 50), 0);               // 폴더가 없어도 오류 없음
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { delete process.env.OXY_FLOW_KEEP; rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("oxy-monitor 실시간 활동: 이벤트 → live 상태 (도구 · 병렬 · compaction · 대기 · 최근 이벤트)", async () => {
@@ -1845,14 +1965,52 @@ test("oxy-flow 작업 저장소: pi 를 다른 폴더(git 아님)에서 시작�
   } finally { rmSync(box, { recursive: true, force: true }); }
 });
 
-test("flow 모니터: Before Commit Task 의 실패 줄은 앞의 cd <긴 경로> 를 줄여 실제 명령이 보인다", async () => {
-  const { beforeCommitRows, planRows } = await import("../agent/extensions/oxy-monitor/model.ts");
-  const flow: any = { goal: "g", plan: [], nodes: [], buffer: { decisions: [], files: [], failures: [
-    { command: "cd C:/Users/kim/OneDrive/Documents/workspace/cozy-framework/cozy-example && git status --short" },
-    { command: "export JAVA_HOME=x; mvn -q verify\nmvn test" },
-  ] } };
-  const rows = beforeCommitRows(flow).filter((r: any) => r.marker === "failed").map((r: any) => r.text);
-  assert.ok(!planRows(flow, new Set(), 35).some((r: any) => r.marker === "failed"), "Overall Task 에는 없다 (Before Commit Task 영역으로)");
-  assert.deepEqual(beforeCommitRows({ ...flow, buffer: { decisions: [], files: [], failures: [] } }), [], "커밋해서 비면 영역이 없다");
-  assert.deepEqual(rows, ["cd …/cozy-example && git status --short", "export JAVA_HOME=x; mvn -q verify …"]);
+test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확인 팝업 · 요청 · 충돌이면 막음 · u (flow-rollback-spec §3 §3.1)", async () => {
+  const M = await import("../agent/extensions/oxy-monitor/model.ts");
+  const C = await import("../agent/extensions/oxy-monitor/controller.ts");
+  const w = (s: string) => [...s].reduce((n, c) => n + (/[\u1100-\u115f\uac00-\ud7a3]/.test(c) ? 2 : 1), 0);
+  const snap = { snaps: { "C:/w": "x" }, snapAt: 1 };
+  const it = (id: string, text: string, status: string, extra: any = {}) => ({ id, text, status, at: 0, nodes: [], children: [], ...extra });
+  const flow: any = { id: "cur", goal: "지금 일", plan: [it("p1", "준비", "done", snap), it("p2", "구현", "doing")], nodes: [], buffer: { decisions: [], files: [], failures: [] },
+    rollbacks: [] };
+  const history: any = {
+    completed: [{ id: "fa", goal: "반납 기능", updatedAt: Date.parse("2026-11-14T10:00:00"), plan: [it("p1", "마이그레이션", "done", snap), it("p2", "반납", "done", snap), it("p3", "표시", "dropped")] }],
+    marks: { fa: { p1: { mark: "conflict", files: 4 }, p2: { mark: "partial", files: 2 }, p3: { mark: "none", files: 0 } }, cur: { p1: { mark: "partial", files: 1 } } },
+  };
+  const ui: any = { sel: null, open: new Set(), manualAt: 0 };
+  const m = M.flowModel(flow, null, ui, 35, 28, Date.now(), w, history);
+  assert.deepEqual(m.sections.map((x: any) => x.title), ["Current Task", "Overall Task", "Completed Flow"], "Before Commit Task 대신 Completed Flow");
+  const comp = m.sections[2].rows;
+  assert.deepEqual([comp[0].key, comp[0].marker, comp[0].text, comp[0].right], ["c:fa", "failed", "반납 기능", "11-14"], "Flow 기호는 가장 나쁜 Task 의 것");
+  assert.equal(m.sections[1].rows.find((r: any) => r.key === "p:p1").marker, "blocked", "지금 Flow 의 끝난 Task 도 기호 (D8)");
+  assert.match(m.keys.join(" "), /r 되돌리기/);
+  // 펼치면 Task 와 기호: × 충돌 · ! 불완전 · - 뺀 것
+  const open = M.completedRows(history, new Set(["c:fa"]));
+  assert.deepEqual(open.slice(1).map((r: any) => [r.key, r.marker, r.prefix + r.text]),
+    [["t:fa:p1", "failed", "├ [1/3] 마이그레이션"], ["t:fa:p2", "blocked", "├ [2/3] 반납"], ["t:fa:p3", "dropped", "└ [3/3] 표시"]]);
+  // r: 충돌이면 막고 이유를 알린다
+  const sel1: any = { ...ui, sel: "t:fa:p1", open: new Set(["c:fa"]), manualAt: Date.now() };
+  assert.equal(C.flowKeyEx(sel1, flow, 35, "r", Date.now(), history).ui.notice, "되돌리면 뒤의 작업과 충돌합니다.");
+  // r: 불완전(!)이면 확인 팝업에 사용자 문구를 더한다. 처음 포커스는 취소
+  const sel2: any = { ...sel1, sel: "t:fa:p2" };
+  const ask = C.flowKeyEx(sel2, flow, 35, "r", Date.now(), history).ui;
+  assert.deepEqual(ask.confirm, { op: "rollback", flow: "fa", task: "p2", label: "[2/3] 반납", files: 2, partial: true, focus: "no" });
+  const pop = M.flowModel(flow, null, ask, 35, 28, Date.now(), w, history).popup!;
+  assert.deepEqual([pop.title, pop.buttons, pop.focus], ["되돌리기", ["취소", "되돌리기"], 0]);
+  assert.deepEqual(pop.lines, ["\"[2/3] 반납\" 이 끝난 상태로", "되돌립니다.", "파일 2개가 바뀌거나 삭제됩니다.", "원격저장소에 없는 변경은 작업기록을 토대로 에이전트가 되돌리기를 시도합니다.", "계속할까요?"]);
+  assert.equal(C.flowKeyEx(ask, flow, 35, "enter", Date.now(), history).request, undefined, "취소에서 Enter 는 닫기만");
+  const yes = C.flowKeyEx(C.flowKeyEx(ask, flow, 35, "left", Date.now(), history).ui, flow, 35, "enter", Date.now(), history);
+  assert.deepEqual(yes.request, { op: "rollback", flow: "fa", task: "p2" });
+  assert.equal(yes.ui.notice, "되돌리기를 요청했습니다.");
+  // 되돌릴 지점이 없는 Task · 진행 중인 Task
+  assert.equal(C.flowKeyEx({ ...ui, sel: "p:p2", manualAt: Date.now() }, flow, 35, "r", Date.now(), history).ui.notice, "이 Task 에는 되돌릴 지점이 없습니다.");
+  // u: 마지막 되돌리기 취소
+  assert.equal(C.flowKeyEx(ui, flow, 35, "u", Date.now(), history).ui.notice, "취소할 되돌리기가 없습니다.");
+  const rolled: any = { ...flow, rollbacks: [{ at: Date.parse("2026-11-14T10:20:00"), flow: "fa", task: "p2", text: "반납", files: ["a", "b"] }] };
+  const u = C.flowKeyEx(ui, rolled, 35, "u", Date.now(), history).ui;
+  assert.deepEqual([u.confirm?.op, u.confirm?.label, u.confirm?.files], ["undo", "[2/3] 반납", 2]);
+  assert.deepEqual(M.flowModel(rolled, null, u, 35, 28, Date.now(), w, history).popup!.buttons, ["닫기", "되돌리기 취소"]);
+  // ↶ 줄: 되돌린 Flow 아래
+  const rb = M.completedRows(history, new Set(["c:fa"]), rolled.rollbacks).at(-1)!;
+  assert.deepEqual([rb.prefix + rb.text, rb.right], ["└ ↶ [2/3] 까지 되돌림", "10:20"]);
 });

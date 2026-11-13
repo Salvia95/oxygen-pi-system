@@ -86,13 +86,103 @@ export function doingItem(plan: PlanItem[]): PlanItem | null {
 // ------------------------------------------------------------------ flow
 
 export interface FlowLike {
+  id?: string;
   goal: string; plan?: PlanItem[];
+  rollbacks?: RollbackLike[];   // 이 Flow 에서 한 되돌리기 (docs/flow-rollback-spec.md §3: ↶ 줄)
   next?: string;      // 모델이 flow_note(kind=next) 로 남긴 다음 단계
   blocked?: string;   // flow_note(kind=blocked) 로 남긴 막힘 (할 일을 다시 시작하면 oxy-flow 가 지운다)
   nodes: Array<{ id: string; commit: string; title: string; decisions: Array<{ text: string; why?: string }>; files: string[] }>;
   buffer: { decisions: Array<{ text: string; why?: string }>; files: string[]; failures: Array<{ command: string }> };
 }
-export interface FlowUiState { sel: string | null; open: Set<string>; manualAt: number }
+export interface FlowUiState {
+  sel: string | null; open: Set<string>; manualAt: number;
+  confirm?: FlowConfirm | null;   // 되돌리기 · 되돌리기 취소 확인 (§3.1, 처음 포커스는 취소)
+  notice?: string;                // 키 안내 줄 위에 잠시 보이는 알림
+}
+
+// ------------------------------------------------------------------ Completed Flow · 되돌리기 (docs/flow-rollback-spec.md §3)
+
+export type RollMark = "ok" | "partial" | "conflict" | "none";
+export interface TaskMark { mark: RollMark; files?: number }
+export interface RollbackLike { at: number; flow: string; task: string; text: string; undone?: number; files?: string[] }
+/** 계획에서 항목 · 할 일 찾기 */
+export function findPlanItem(plan: PlanItem[], id: string): PlanItem | null {
+  for (const p of plan) { if (p.id === id) return p; const c = p.children.find((x) => x.id === id); if (c) return c; }
+  return null;
+}
+export interface CompletedFlowLike { id: string; goal: string; updatedAt: number; plan: PlanItem[] }
+/** 모니터가 읽는 되돌리기 정보: 끝난 Flow (archive/) · 기호(oxy-flow 가 쓴 marks.json) */
+export interface FlowHistory { completed: CompletedFlowLike[]; marks: Record<string, Record<string, TaskMark>> }
+export interface FlowConfirm { op: "rollback" | "undo"; flow: string; task: string; label: string; files: number; partial: boolean; focus: "yes" | "no" }
+/** 모니터 → pi 요청 (oxy-flow 가 .oxy/flow/requests/ 에서 읽어 실행) */
+export interface FlowRequest { op: "rollback" | "undo"; flow: string; task: string }
+
+export const COMPLETED_TITLE = "Completed Flow";
+/** D12: 사용자 문구 그대로 (oxy-flow/rollback-ui.ts 와 같은 글) */
+export const PARTIAL_LINE = "원격저장소에 없는 변경은 작업기록을 토대로 에이전트가 되돌리기를 시도합니다.";
+
+/** 기호 → 화면 기호: ✓ ok · ! partial · × conflict (D4 의 X) · 되돌릴 지점이 없으면 계획 상태 그대로 */
+export function markMarker(m: RollMark | undefined, status: string): Marker {
+  if (status === "dropped") return "dropped";
+  return m === "conflict" ? "failed" : m === "partial" ? "blocked" : m === "ok" ? "done" : planMarker(status);
+}
+/** Flow 의 기호: 가장 나쁜 Task 의 것 */
+export function worstMark(marks: Record<string, TaskMark> | undefined): RollMark {
+  const v = Object.values(marks ?? {}).map((x) => x.mark);
+  return v.includes("conflict") ? "conflict" : v.includes("partial") ? "partial" : v.includes("ok") ? "ok" : "none";
+}
+const mmdd = (t: number) => { const d = new Date(t); return String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const hhmm = (t: number) => { const d = new Date(t); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+/** 같은 단계 안의 위치가 붙은 Task 이름 */
+export function taskLabelOf(plan: PlanItem[], id: string): string {
+  for (const [i, p] of plan.entries()) {
+    if (p.id === id) return "[" + (i + 1) + "/" + plan.length + "] " + p.text;
+    const j = p.children.findIndex((c) => c.id === id);
+    if (j >= 0) return "[" + (j + 1) + "/" + p.children.length + "] " + p.children[j].text;
+  }
+  return id;
+}
+/** 되돌리기 줄: ↶ [2/5] 까지 되돌림 10:20 (취소했으면 표시) */
+function rollbackRows(plan: PlanItem[], flowId: string | undefined, all: RollbackLike[], prefix?: string): Row[] {
+  return all.filter((r) => r.flow === flowId).map((r) => ({ marker: "none" as Marker, indent: 0, prefix,
+    text: "↶ " + taskLabelOf(plan, r.task).replace(/^(\[\d+\/\d+\]).*/, "$1") + " 까지 되돌림" + (r.undone ? " (취소함)" : ""), right: hhmm(r.at) }));
+}
+
+/**
+ * Completed Flow 영역 (§3): 끝난 Flow 한 줄씩(최근 것 위, 기호는 가장 나쁜 Task 의 것, 오른쪽 날짜). Enter 로 펼치면 Task 와 되돌리기 기호.
+ * 키: c:<flow> · t:<flow>:<task>
+ */
+export function completedRows(h: FlowHistory | null, open: Set<string>, rollbacks: RollbackLike[] = []): Row[] {
+  const rows: Row[] = [];
+  for (const fl of h?.completed ?? []) {
+    const marks = h?.marks[fl.id];
+    const fm = worstMark(marks);
+    rows.push({ key: "c:" + fl.id, marker: fm === "none" ? "done" : markMarker(fm, "done"), text: fl.goal || fl.id, right: mmdd(fl.updatedAt), indent: 0 });
+    if (!open.has("c:" + fl.id)) continue;
+    const items = fl.plan.flatMap((p, i) => [{ p, i, c: null as PlanItem | null, j: -1 }, ...p.children.map((c, j) => ({ p, i, c, j }))]);
+    const rb = rollbackRows(fl.plan, fl.id, rollbacks);
+    items.forEach((x, k) => {
+      const it = x.c ?? x.p;
+      const lastTop = !x.c && x.i === fl.plan.length - 1 && !x.p.children.length && !rb.length;
+      const lastAll = k === items.length - 1 && !rb.length;
+      const prefix = x.c ? (x.j === x.p.children.length - 1 ? "│ └ " : "│ ├ ") : lastTop || lastAll ? "└ " : "├ ";
+      const label = x.c ? "[" + (x.j + 1) + "/" + x.p.children.length + "] " + it.text : "[" + (x.i + 1) + "/" + fl.plan.length + "] " + it.text;
+      rows.push({ key: "t:" + fl.id + ":" + it.id, marker: markMarker(marks?.[it.id]?.mark, it.status), text: label, indent: 0, prefix });
+    });
+    rb.forEach((r, k) => rows.push({ ...r, prefix: k === rb.length - 1 ? "└ " : "├ " }));
+  }
+  return rows;
+}
+
+/** 되돌리기 확인 팝업 (§3.1): 버튼 [ 취소 ] [ 되돌리기 ], 처음 포커스 취소 */
+export function flowPopup(c: FlowConfirm): Popup {
+  if (c.op === "undo") {
+    return { title: "되돌리기 취소", lines: ["마지막 되돌리기(\"" + c.label + "\" 까지)를 취소합니다.", "파일 " + c.files + "개가 바뀌거나 삭제됩니다.", "계속할까요?"],
+      buttons: ["닫기", "되돌리기 취소"], focus: c.focus === "yes" ? 1 : 0, danger: 1 };
+  }
+  return { title: "되돌리기", lines: ["\"" + c.label + "\" 이 끝난 상태로", "되돌립니다.", "파일 " + c.files + "개가 바뀌거나 삭제됩니다.", ...(c.partial ? [PARTIAL_LINE] : []), "계속할까요?"],
+    buttons: ["취소", "되돌리기"], focus: c.focus === "yes" ? 1 : 0, danger: 1 };
+}
 
 export const FLOW_TITLE = "Flow Monitor";
 /** 화면 프로그램이 제목 앞에 붙이는 `◆ ` 의 칸 수 (docs/ui-unify-spec.md §2.3). 제목을 줄일지 정할 때 함께 센다 */
@@ -116,8 +206,10 @@ export const currentKey = (plan: PlanItem[]): string | null => { const d = doing
  * Overall Task 의 줄 (flow-view-spec §2): 항목 → 할 일("├" · "└") 트리, 이름 앞 [i/n], 오른쪽에 걸린 시간 · 지금 할 일 "◀ Current Task".
  * 끝난 항목의 할 일은 접힘(open 이면 반대). 펼친 커밋의 결정 · 파일 → 계획 밖 커밋 → 커밋 전 작업
  */
-export function planRows(flow: FlowLike, open: Set<string>, width: number): Row[] {
+export function planRows(flow: FlowLike, open: Set<string>, width: number, marks?: Record<string, TaskMark>): Row[] {
   const rows: Row[] = [];
+  // 끝난 Task 앞 기호는 되돌리기 기호 (D8: 지금 Flow 도 같은 규칙. 지금 Flow 에는 충돌이 없다)
+  const mk = (x: PlanItem): Marker => (x.status === "done" && marks?.[x.id] ? markMarker(marks[x.id].mark, x.status) : planMarker(x.status));
   const plan = flow.plan ?? [];
   const narrow = width < NARROW;
   const cur = doingItem(plan);
@@ -138,14 +230,14 @@ export function planRows(flow: FlowLike, open: Set<string>, width: number): Row[
     }
   };
   plan.forEach((p, i) => {
-    rows.push({ key: "p:" + p.id, marker: planMarker(p.status), text: "[" + (i + 1) + "/" + plan.length + "] " + p.text, right: right(p), indent: 0,
+    rows.push({ key: "p:" + p.id, marker: mk(p), text: "[" + (i + 1) + "/" + plan.length + "] " + p.text, right: right(p), indent: 0,
       emphasis: p.status === "doing" });
     const folded = (p.status === "done") !== open.has("p:" + p.id);
     if (folded) return;
     if (open.has("p:" + p.id)) commitRows(p.nodes, p.children.length ? "│ " : undefined, p.children.length ? 0 : 2);
     p.children.forEach((c, j) => {
       const last = j === p.children.length - 1;
-      rows.push({ key: "p:" + c.id, marker: planMarker(c.status), text: "[" + (j + 1) + "/" + p.children.length + "] " + c.text, right: right(c), indent: 0,
+      rows.push({ key: "p:" + c.id, marker: mk(c), text: "[" + (j + 1) + "/" + p.children.length + "] " + c.text, right: right(c), indent: 0,
         prefix: last ? "└ " : "├ ", emphasis: c.status === "doing" });
       if (open.has("p:" + c.id)) commitRows(c.nodes, last ? "  " : "│ ", 2);
     });
@@ -157,27 +249,9 @@ export function planRows(flow: FlowLike, open: Set<string>, width: number): Row[
     rows.push({ marker: "none", text: plan.length ? "계획 밖 커밋" : "커밋", indent: 0, emphasis: true });
     commitRows(outside.slice(-20), undefined, 2);
   }
+  rows.push(...rollbackRows(plan, flow.id, flow.rollbacks ?? []));
   if (!rows.length) rows.push({ marker: "none", text: "작업 기록이 없습니다.", indent: 0 });
   return rows;
-}
-
-/** Before Commit Task 영역이 차지할 수 있는 줄 수 */
-export const BEFORE_COMMIT_MAX = 6;
-
-/**
- * Before Commit Task 영역 (사용자, 2026-11-13: "커밋 전 작업을 Before Commit Task 로 … 구분선으로 영역을 나눠줘, 커밋되면 사라지도록").
- * 마지막 커밋 뒤의 결정 · 변경 파일 수 · 실패한 명령. 커밋하면 oxy-flow 가 버퍼를 비우므로(실패 포함) 영역이 사라진다.
- * 넘치면 실패 · 결정의 오래된 것부터 뺀다 (최근 실패 3 · 결정 2 우선)
- */
-export function beforeCommitRows(flow: FlowLike | null): Row[] {
-  const b = flow?.buffer;
-  if (!b || !(b.decisions.length || b.files.length || b.failures.length)) return [];
-  const rows: Row[] = [];
-  for (const d of b.decisions.slice(-2)) rows.push({ marker: "none", text: d.text, indent: 0 });
-  if (b.files.length) rows.push({ marker: "none", text: "변경 파일 " + b.files.length + "개", indent: 0 });
-  // 앞의 `cd <긴 경로> &&` 는 마지막 폴더만 (pi 도구 줄과 같은 규칙, 실제 명령이 잘려 보이지 않게)
-  for (const x of b.failures.slice(-3)) rows.push({ marker: "failed", text: commandHead(x.command), indent: 0, error: true });
-  return rows.slice(-BEFORE_COMMIT_MAX);
 }
 
 /** 고른 줄: 사용자가 움직인 뒤 MANUAL_HOLD_MS 동안은 사용자 위치, 그 밖에는 늘 지금 할 일 (없으면 사용자 위치 · 첫 줄) */
@@ -227,29 +301,33 @@ export function windowAround(total: number, room: number, target: number): numbe
 
 /** flow 화면 (flow-view-spec §2): 맨 윗줄 "Flow Monitor" · "Total d/t", Current Task 구역, Overall Task 구역 */
 export function flowModel(flow: FlowLike | null, live: LiveState | null, ui: FlowUiState, width: number, height: number, now: number,
-  w: (s: string) => number): MonitorModel {
+  w: (s: string) => number, history: FlowHistory | null = null): MonitorModel {
   const plan = flow?.plan ?? [];
   const leaves = leavesOf(plan).filter((x) => x.status !== "dropped");
   const right = leaves.length ? "Total " + leaves.filter((x) => x.status === "done").length + "/" + leaves.length : "";
   const title = !right || TITLE_MARK_WIDTH + w(FLOW_TITLE) + 1 + w(right) <= width ? FLOW_TITLE : "Flow";
-  const keys = keyLines(["▲▼ 이동", "Enter 펼치기", "q 닫기"], width, w);
+  const noticeLines = ui.notice ? [ui.notice] : [];
+  const keys = [...noticeLines, ...keyLines(ui.confirm ? ["←→ 이동", "Enter 선택", "Esc 취소"] : ["▲▼ 이동", "Enter 펼치기", "r 되돌리기", "u 되돌리기 취소", "q 닫기"], width, w)];
   const top = currentRows(live, plan, height, now, { next: flow?.next, blocked: flow?.blocked });
-  const rows = flow ? planRows(flow, ui.open, width) : [{ marker: "none" as Marker, text: "작업 기록이 없습니다.", indent: 0 }];
-  // 높이: 맨 윗줄 1 + Current Task 가로줄 1 + 그 줄들 + Overall Task 가로줄 1 + 트리 + (Before Commit Task 가로줄 1 + 그 줄들) + 키 안내.
-  // Before Commit Task 는 트리에 최소 3줄(낮으면 남는 만큼)을 남기고 남는 자리만 쓴다 (오래된 줄부터 빼고, 1줄도 안 되면 영역을 뺀다)
+  const rows = flow ? planRows(flow, ui.open, width, history?.marks[flow.id ?? ""]) : [{ marker: "none" as Marker, text: "작업 기록이 없습니다.", indent: 0 }];
+  const done = completedRows(history, ui.open, flow?.rollbacks ?? []);
+  // 높이: 맨 윗줄 1 + Current Task 가로줄 1 + 그 줄들 + Overall Task 가로줄 1 + 트리 + (Completed Flow 가로줄 1 + 그 줄들) + 키 안내.
+  // Completed Flow 는 남는 자리의 40% 까지 (최소 2줄, 트리는 최소 1줄). 고른 줄이 그 안에 있으면 그 줄이 보이게 자른다
   const free = Math.max(0, height - 3 - top.length - keys.length);
-  const treeMin = Math.min(3, Math.max(1, free));
-  const bcRoom = free - treeMin - 1;
-  const before = bcRoom >= 1 ? beforeCommitRows(flow).slice(-bcRoom) : [];
-  const room = Math.max(1, free - (before.length ? 1 + before.length : 0));
-  const selected = flowSelection(rows, plan, ui, now);
+  const compRoom = done.length ? Math.min(done.length, Math.max(2, Math.floor((free - 1) * 0.4)), Math.max(0, free - 2)) : 0;
+  const room = Math.max(1, free - (compRoom ? 1 + compRoom : 0));
+  const all = [...rows, ...done];
+  const selected = flowSelection(all, plan, ui, now);
   const selIdx = selected ? rows.findIndex((r) => r.key === selected) : -1;
   const startAt = windowAround(rows.length, room, selIdx >= 0 ? selIdx : 0);
+  const compIdx = selected ? done.findIndex((r) => r.key === selected) : -1;
+  const compAt = windowAround(done.length, compRoom, compIdx);
+  const popup = ui.confirm ? { popup: flowPopup(ui.confirm) } : {};
   return {
     op: "monitor", kind: "flow", title, right, now: [], nowAt: "top",
     sections: [{ title: "Current Task", rows: top }, { title: "Overall Task", rows: rows.slice(startAt, startAt + room) },
-      ...(before.length ? [{ title: "Before Commit Task", rows: before }] : [])],
-    selected, keys,
+      ...(compRoom ? [{ title: COMPLETED_TITLE, rows: done.slice(compAt, compAt + compRoom) }] : [])],
+    selected, keys, ...popup,
   };
 }
 

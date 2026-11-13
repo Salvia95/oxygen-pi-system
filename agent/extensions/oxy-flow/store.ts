@@ -7,8 +7,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { writeAtomic } from "../_lib/common.ts";
-import { type PlanInput, type PlanItem, addItem, currentItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
+import { type PlanInput, type PlanItem, addItem, currentItem, findItem, nextStep, renderPlanLines, renderPlanMarkdown, setPlan, updateItem } from "./plan.ts";
+import { type Mark, type RollbackRecord, type ShadowState, allItems, applyRollback, findTask, planRollback, targets, taskMarks, undoRollback } from "./rollback.ts";
+import { ShadowRepo, pruneShadows } from "./shadow.ts";
 
 export type NoteKind = "decision" | "goal" | "next" | "blocked" | "done";
 export interface Decision { at: number; text: string; why?: string }
@@ -49,6 +52,12 @@ export interface Flow {
   continueBy?: string;       // 그 표시를 이어받은 세션 (bindSession). 한 세션만 이어받는다
   sessions?: string[];       // 이 작업을 한 pi 세션 id (세션 넘기기로 이어진 세션 포함). 예전 파일에는 없다
   plan: PlanItem[];          // 앞으로 할 일: 항목 → 할 일 (plan.ts). 예전 파일에는 없다 (load 가 빈 배열로 채움)
+  /** 그림자 저장소로 따라가는 작업 폴더 (docs/flow-rollback-spec.md §4, D11): 폴더 → 기준 · 마지막 · 끝 스냅숏 */
+  shadow?: Record<string, ShadowState>;
+  /** 마지막 Task 스냅숏 뒤 스냅숏에 들어가지 않은 변경 (다음 Task 스냅숏 때 그 Task 의 incomplete 로 옮긴다) */
+  unsnapped?: string[];
+  /** 이 Flow 에서 한 되돌리기 (대상은 이 Flow 또는 끝난 Flow) */
+  rollbacks?: RollbackRecord[];
   nodes: FlowNode[];
   buffer: Buffer;
 }
@@ -70,8 +79,45 @@ export interface FlowEngine {
   release(): void;
 }
 
-/** 보관 기록(archive/)을 이만큼만 남긴다 (docs/flow-spec.md F1). 되살릴 기록을 찾을 때 모든 파일을 읽으므로 끝없이 쌓이지 않게 한다 */
-export const ARCHIVE_KEEP = 50;
+/**
+ * 보관하는 Flow 수 (docs/flow-rollback-spec.md D10: 기본 10, Tweak 에서 조절 → OXY_FLOW_KEEP). 넘으면 오래된 Flow 의 기록 · 스냅숏부터 정리한다.
+ * (예전: archive/ 50개, docs/flow-spec.md F1)
+ */
+export const FLOW_KEEP_DEFAULT = 10;
+export function flowKeep(): number {
+  const n = Number(process.env.OXY_FLOW_KEEP);
+  return Number.isInteger(n) && n >= 1 && n <= 100 ? n : FLOW_KEEP_DEFAULT;
+}
+/** 그림자 저장소를 쓰는가 (OXY_FLOW_SHADOW=off 로 끈다) */
+export const shadowEnabled = () => (process.env.OXY_FLOW_SHADOW ?? "on").toLowerCase() !== "off";
+/** 프로젝트 표시 파일: git 이 아닌 폴더에서 작업 폴더의 최상위를 정할 때 */
+const PROJECT_MARKERS = ["pom.xml", "package.json", "build.gradle", "build.gradle.kts", "settings.gradle", "pyproject.toml", "setup.py", "Cargo.toml", "go.mod", "composer.json", "Gemfile", "Makefile", ".gitignore"];
+
+/**
+ * 경로가 속한 작업 폴더: git 저장소면 최상위, 아니면 위로 올라가며 처음 만나는 프로젝트 폴더(pom.xml · package.json 등). 없으면 null.
+ * (설치본 cozy-example 의 실제 작업 폴더 library-rental 은 git 이 아니어서 작업 저장소를 따라가지 못했다, 2026-11-14)
+ */
+export function workFolderOf(path: string): string | null {
+  // 홈 폴더 · 드라이브 루트처럼 너무 넓은 곳은 따라가지 않는다 (홈 전체를 스냅숏하지 않게)
+  const tooBroad = (d: string) => {
+    const n = (p: string) => p.replace(/[\\/]+/g, "/").replace(/\/+$/, "").toLowerCase();
+    const h = n(homedir()), x = n(d);
+    return !x || x === h || h.startsWith(x + "/") || /^[a-z]:$/.test(x) || x === "";
+  };
+  const top = repoOf(path);
+  if (top) return tooBroad(top) ? null : top;
+  let dir = path;
+  for (let i = 0; i < 40 && dir && !existsSync(dir); i++) dir = dirname(dir);
+  try { if (existsSync(dir) && !statSync(dir).isDirectory()) dir = dirname(dir); } catch { return null; }
+  for (let i = 0; i < 12 && dir; i++) {
+    if (tooBroad(dir)) return null;
+    if (PROJECT_MARKERS.some((m) => existsSync(join(dir, m)))) return dir;
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+}
 const MAX_COMMANDS = 15, MAX_FAILURES = 5, MAX_FILES = 200, MAX_JOBS = 10;
 const empty = (): Buffer => ({ decisions: [], files: [], commands: [], failures: [], jobs: [] });
 
@@ -233,6 +279,12 @@ export class FileFlowEngine implements FlowEngine {
     const f = this.load();
     const item = updateItem(f.plan, id, change);
     if (change.status === "doing") { f.blocked = ""; if (f.status === "done") f.status = "active"; }   // 다시 시작하면 막힘이 풀린다
+    // Task 가 끝나면 스냅숏 (되돌리기 지점, docs/flow-rollback-spec.md §4). 할 일이 끝나 위 항목도 끝났으면 위 항목도 같은 지점
+    if (change.status === "done" || change.status === "dropped") {
+      this.snapTask(item);
+      const parent = findItem(f.plan, item.id)?.parent;
+      if (parent && (parent.status === "done" || parent.status === "dropped") && item.snaps) { parent.snaps = { ...item.snaps }; parent.snapAt = item.snapAt; }
+    }
     this.save();
     return item;
   }
@@ -298,12 +350,14 @@ export class FileFlowEngine implements FlowEngine {
   /** 지금 기록을 archive/ 에 보관 → 보관 파일 경로. 같은 이름(예전 초 단위 id)이 있으면 덮어쓰지 않고 번호를 붙인다 */
   private archiveCurrent(): string {
     const f = this.load();
+    this.snapAll("end", f.goal || "end");
     const arch = join(this.dir, "archive");
     mkdirSync(arch, { recursive: true });
     let file = join(arch, `${f.id}.json`);
     for (let i = 2; existsSync(file); i++) file = join(arch, `${f.id}-${i}.json`);
     writeAtomic(file, JSON.stringify(f, null, 1));
-    pruneArchive(arch, ARCHIVE_KEEP, file);
+    pruneArchive(arch, flowKeep(), file);
+    this.pruneShadow();
     return file;
   }
 
@@ -421,6 +475,167 @@ export class FileFlowEngine implements FlowEngine {
     return this.flow;
   }
 
+  // ---------------------------------------------------------------- 그림자 저장소 · 되돌리기 (docs/flow-rollback-spec.md)
+
+  private repo(root: string): ShadowRepo { return new ShadowRepo(this.dir, root); }
+
+  /** 이 작업 폴더를 따라가는가 */
+  private tracked(root: string): string | null {
+    return Object.keys(this.load().shadow ?? {}).find((r) => samePath(r, root)) ?? null;
+  }
+
+  /** 작업 폴더를 그림자 저장소로 따라가기 시작한다 (처음이면 기준 스냅숏). 고치기 전에 불러야 원래 상태가 남는다 */
+  trackFolder(root: string): boolean {
+    if (!this.writable || !shadowEnabled() || !root || this.tracked(root)) return false;
+    const f = this.load();
+    try {
+      const snap = this.repo(root).snapshot(f.id, "base", f.goal || "start");
+      f.shadow = { ...f.shadow, [root]: { base: snap.sha, last: snap.sha } };
+      this.save();
+      return true;
+    } catch { return false; }
+  }
+
+  /** 경로가 따라가는 작업 폴더 안인가 */
+  insideTracked(absPath: string): boolean {
+    return Object.keys(this.load().shadow ?? {}).some((r) => {
+      const rel = relativeTo(r, absPath);
+      return rel !== null;
+    });
+  }
+
+  /** 스냅숏에 들어가지 않는 변경을 적는다 (다음 Task 스냅숏 때 그 Task 의 ! 이유가 된다) */
+  noteIncomplete(reason: string): void {
+    if (!this.writable) return;
+    const f = this.load();
+    const r = reason.length > 160 ? `${reason.slice(0, 160)} …` : reason;
+    if ((f.unsnapped ?? []).includes(r)) return;
+    f.unsnapped = [...(f.unsnapped ?? []), r].slice(-10);
+    this.save();
+  }
+
+  /** 따라가는 모든 작업 폴더의 스냅숏 → 폴더별 커밋 · 넣지 못한 큰 파일 */
+  private snapAll(kind: "task" | "end", title: string): { snaps: Record<string, string>; skipped: string[]; failed: boolean } {
+    const f = this.load();
+    const snaps: Record<string, string> = {}, skipped: string[] = [];
+    let failed = false;
+    if (!shadowEnabled()) return { snaps, skipped, failed };
+    for (const root of Object.keys(f.shadow ?? {})) {
+      try {
+        const s = this.repo(root).snapshot(f.id, kind, title);
+        snaps[root] = s.sha;
+        f.shadow![root] = { ...f.shadow![root], last: s.sha, ...(kind === "end" ? { end: s.sha } : {}) };
+        skipped.push(...s.skipped.map((x) => `큰 파일 ${x}`));
+      } catch { failed = true; }
+    }
+    return { snaps, skipped, failed };
+  }
+
+  private snapTask(item: PlanItem): void {
+    const f = this.load();
+    if (!f.shadow || !Object.keys(f.shadow).length) return;
+    const r = this.snapAll("task", `${item.id} ${item.text}`);
+    if (!Object.keys(r.snaps).length) return;
+    item.snaps = r.snaps;
+    item.snapAt = Date.now();
+    const inc = [...(f.unsnapped ?? []), ...r.skipped, ...(r.failed ? ["스냅숏 실패"] : [])];
+    if (inc.length) item.incomplete = [...new Set([...(item.incomplete ?? []), ...inc])];
+    f.unsnapped = [];
+  }
+
+  /** 정리: 보관하는 Flow (지금 + archive/) 밖의 스냅숏을 지운다 (D10) */
+  private pruneShadow(): void {
+    const keep = new Set([this.load().id, ...this.completedFlows().map((x) => x.id)]);
+    try { pruneShadows(this.dir, keep); } catch { /* 정리 실패는 다음에 */ }
+  }
+
+  /** 끝난 Flow (archive/, 최근 것부터, 보관 개수까지) */
+  completedFlows(): Flow[] {
+    return readCompleted(this.dir, flowKeep());
+  }
+
+  private flowById(id: string): { flow: Flow; current: boolean; file?: string } | null {
+    const cur = this.load();
+    if (!id || id === cur.id) return { flow: cur, current: true };
+    const hit = readCompleted(this.dir, flowKeep(), true).find((x) => x.id === id);
+    return hit ? { flow: hit, current: false, file: (hit as any).__file } : null;
+  }
+
+  /**
+   * Flow 의 Task 까지 되돌리기 (§5). 확인은 부른 쪽(모니터 팝업 · /flow 확인 창)이 한다.
+   * 충돌이 예상되면 아무것도 바꾸지 않는다. 스냅숏 밖 변경은 incomplete 로 돌려준다 (에이전트에게 맡김)
+   */
+  rollbackTo(flowId: string, taskId: string, dryRun = false): { ok: boolean; reason?: string; record?: RollbackRecord; files: string[]; conflicts: string[]; incomplete: string[]; flow?: Flow; task?: PlanItem } {
+    if (!this.writable) return { ok: false, reason: "작업 기록이 읽기 전용입니다", files: [], conflicts: [], incomplete: [] };
+    const hit = this.flowById(flowId);
+    if (!hit) return { ok: false, reason: `Flow 를 찾지 못했습니다: ${flowId}`, files: [], conflicts: [], incomplete: [] };
+    const t = findTask(hit.flow, taskId);
+    if (!t) return { ok: false, reason: `Task 를 찾지 못했습니다: ${taskId}`, files: [], conflicts: [], incomplete: [] };
+    const cur = this.load();
+    const p = planRollback(this.dir, hit.flow, t, hit.current, cur.id);
+    const base = { files: p.files, conflicts: p.conflicts, incomplete: p.incomplete, flow: hit.flow, task: t };
+    if (!p.ok || dryRun) return { ok: p.ok, reason: p.reason, ...base };
+    const rec = applyRollback(p, hit.flow, t, cur.id);
+    cur.rollbacks = [...(cur.rollbacks ?? []), rec];
+    for (const [root, x] of Object.entries(rec.roots)) {
+      const r = this.tracked(root);
+      if (r) cur.shadow![r] = { ...cur.shadow![r], last: x.result };
+    }
+    cur.buffer.decisions.push({ at: Date.now(), text: `Rolled back to ${hit.current ? "" : `${hit.flow.id} `}${t.id} "${t.text}" (${rec.files.length} files)`, why: "user request (flow rollback)" });
+    this.save();
+    return { ok: true, record: rec, ...base };
+  }
+
+  /** 마지막 되돌리기를 취소 (D3) */
+  undoLast(dryRun = false): { ok: boolean; reason?: string; record?: RollbackRecord; files: string[]; conflicts: string[] } {
+    if (!this.writable) return { ok: false, reason: "작업 기록이 읽기 전용입니다", files: [], conflicts: [] };
+    const cur = this.load();
+    const rec = [...(cur.rollbacks ?? [])].reverse().find((r) => !r.undone);
+    if (!rec) return { ok: false, reason: "취소할 되돌리기가 없습니다", files: [], conflicts: [] };
+    if (dryRun) return { ok: true, record: rec, files: rec.files, conflicts: [] };
+    const r = undoRollback(this.dir, rec, cur.id);
+    if (!r.ok) return { ok: false, reason: r.reason, record: rec, files: r.files, conflicts: r.conflicts };
+    rec.undone = Date.now();
+    for (const [root, sha] of Object.entries(r.results)) { const t = this.tracked(root); if (t) cur.shadow![t] = { ...cur.shadow![t], last: sha }; }
+    cur.buffer.decisions.push({ at: Date.now(), text: `Undid rollback to ${rec.task} "${rec.text}"`, why: "user request (flow undo)" });
+    this.save();
+    return { ok: true, record: rec, files: r.files, conflicts: [] };
+  }
+
+  /** 기호 (지금 Flow + 끝난 Flow) → .oxy/flow/marks.json 에 쓴다. 모니터가 읽는다 */
+  writeMarks(): Record<string, Record<string, Mark>> {
+    const cur = this.load();
+    const latest: Record<string, string> = {};
+    for (const [root, st] of Object.entries(cur.shadow ?? {})) latest[root] = st.last;
+    const out: Record<string, Record<string, Mark>> = {};
+    const file: Record<string, Record<string, { mark: Mark; files: number }>> = {};
+    // 확인 팝업의 "파일 N개": 그 Task 의 스냅숏 ↔ 지금(지금 Flow) · 끝(끝난 Flow) 사이에 바뀐 파일 수
+    const count = (fl: Flow, t: PlanItem, current: boolean): number => {
+      let n = 0;
+      for (const [root, theirs] of Object.entries(targets(fl, t))) {
+        const st = fl.shadow?.[root];
+        const to = current ? st?.last : st?.end ?? st?.last;
+        if (to && to !== theirs) { try { n += this.repo(root).changed(theirs, to).length; } catch { /* 모름 */ } }
+      }
+      return n;
+    };
+    const put = (fl: Flow, current: boolean, marks: Record<string, Mark>) => {
+      out[fl.id] = marks;
+      file[fl.id] = {};
+      for (const t of allItems(fl.plan)) file[fl.id][t.id] = { mark: marks[t.id] ?? "none", files: marks[t.id] && marks[t.id] !== "none" ? count(fl, t, current) : 0 };
+    };
+    try {
+      put(cur, true, taskMarks(this.dir, cur, true, latest));
+      for (const fl of this.completedFlows()) {
+        const lat: Record<string, string> = {};
+        for (const root of Object.keys(fl.shadow ?? {})) { const r = Object.keys(latest).find((x) => samePath(x, root)); if (r) lat[root] = latest[r]; }
+        put(fl, false, taskMarks(this.dir, fl, false, lat));
+      }
+      writeAtomic(join(this.dir, "marks.json"), JSON.stringify({ at: Date.now(), flows: file }));
+    } catch { /* 기호 계산 실패는 화면에 기호를 보이지 않을 뿐 */ }
+    return out;
+  }
+
   findNode(id: string): FlowNode | undefined {
     const f = this.load();
     const k = id.trim().toLowerCase();
@@ -522,6 +737,30 @@ export function traceDecisions(f: Flow, keyword: string): string[] {
   for (const n of f.nodes) for (const d of n.decisions) if (dec(d).toLowerCase().includes(k)) hits.push(`${n.id} ${short(n.commit)} ${n.title}: ${dec(d)}`);
   for (const d of f.buffer.decisions) if (dec(d).toLowerCase().includes(k)) hits.push(`(uncommitted): ${dec(d)}`);
   return hits;
+}
+
+/** dir 이 path 를 담는 폴더면 상대 경로 (아니면 null) */
+function relativeTo(dir: string, path: string): string | null {
+  const n = (p: string) => { const s = p.replace(/\\/g, "/").replace(/\/+$/, ""); return process.platform === "win32" ? s.toLowerCase() : s; };
+  const d = n(dir), p = n(path);
+  return p === d ? "" : p.startsWith(`${d}/`) ? p.slice(d.length + 1) : null;
+}
+
+/** 끝난 Flow (archive/*.json, 최근 것부터 keep 개). withFile: 파일 경로를 __file 로 붙인다 */
+export function readCompleted(flowDir: string, keep: number, withFile = false): Flow[] {
+  const arch = join(flowDir, "archive");
+  let names: string[] = [];
+  try { names = readdirSync(arch).filter((n) => n.endsWith(".json")); } catch { return []; }
+  const out: Flow[] = [];
+  for (const n of names) {
+    try {
+      const fl = JSON.parse(readFileSync(join(arch, n), "utf8")) as Flow;
+      if (!Array.isArray(fl.plan)) fl.plan = [];
+      if (withFile) (fl as any).__file = join(arch, n);
+      out.push(fl);
+    } catch { /* 깨진 파일은 건너뛴다 */ }
+  }
+  return out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, keep);
 }
 
 /** archive/ 의 보관 기록을 최근 keep 개만 남긴다 (수정 시각 기준, 방금 쓴 파일은 지우지 않는다) */

@@ -15,11 +15,14 @@
  * 명령: /flow (보기 · show nN · trace 키워드 · new 목표 · rollback nN) · /oxy-rollover [메시지]
  * 끄기: OXY_FLOW=off · subagent(자식 pi) 안에서는 동작하지 않는다 (기록은 본 세션만)
  */
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { enabled, envInt, textOf } from "../_lib/common.ts";
-import { FileFlowEngine, type FlowNode, commandDirs, git, renderContext, renderMarkdown, renderNode, traceDecisions } from "./store.ts";
+import { enabled, envInt, textOf, writeAtomic } from "../_lib/common.ts";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { FileFlowEngine, type FlowNode, commandDirs, git, renderContext, renderMarkdown, renderNode, traceDecisions, workFolderOf } from "./store.ts";
+import { tasksAfter } from "./rollback.ts";
+import { partialRollbackPrompt, rollbackConfirmLines, rollbackNotice, taskLabel, undoConfirmLines } from "./rollback-ui.ts";
 import { PLAN_STATUSES, type PlanItem, nextStep, progress, renderPlanLines } from "./plan.ts";
 import { brandEnv, brandFg } from "../oxygen-pi-tui/brand.ts";
 import { ROLLOVER_KEY, ROLLOVER_WAIT_SEC, type RolloverCarry, rolloverLines } from "./rollover.ts";
@@ -34,6 +37,10 @@ const findLinked = (plan: PlanItem[], nodeId: string): PlanItem | null => {
 };
 
 const CUSTOM = "oxy-flow";
+/** 스냅숏(작업 폴더)에 들어가지 않는 바깥 상태를 바꾸는 명령: 패키지 설치 · 외부 DB (docs/flow-rollback-spec.md §3 의 !) */
+const OUTSIDE_RE = /\b(?:npm|pnpm|yarn)\s+(?:i|install|add|ci|remove|uninstall|rm)\b|\bpip3?\s+(?:install|uninstall)\b|\bmvn\b[^|;&\n]*\binstall\b|\b(?:psql|mysql|sqlplus|usql|sql)\s/;
+/** 모니터 → pi 되돌리기 요청 폴더 (모니터 팝업에서 이미 확인함, §3.1) */
+const REQUEST_DIR = "requests";
 /** 계획이 모두 끝났거나 빠진 상태에서 새 요청 · 메모가 오면 덧붙이는 안내 (2026-11-14, Flow Monitor 가 새 일을 못 보던 문제) */
 export const PLAN_DONE_HINT = "All plan items are finished or dropped. If this is new work, add it with flow_plan(action=\"add\", text=...) and mark it doing before you start, so the task log and Flow Monitor follow the work.";
 /** 계획에 항목이 있고, 할 일 · 진행 중인 것이 하나도 없는가 */
@@ -99,6 +106,12 @@ export default function (pi: ExtensionAPI) {
     try { sid = String(ctx.sessionManager?.getSessionId?.() ?? ""); } catch { /* 세션 정보 없음 */ }
     engine.bindSession(sid);
     status(ctx);
+    if (ctx.hasUI && engine.writable) {
+      reqCtx = ctx;
+      try { mkdirSync(join(engine.dir, REQUEST_DIR), { recursive: true }); } catch { /* */ }
+      if (!reqTimer) { reqTimer = setInterval(() => void pollRequests(), 1000); reqTimer.unref?.(); }
+    }
+    refreshMarks();
     // 세션 넘기기로 시작한 세션이면 넘기기 전의 모델 · thinking 으로 맞춘다 (1분 넘게 지난 값은 버린다)
     const carry = (globalThis as any)[ROLLOVER_KEY] as RolloverCarry | undefined;
     if (carry && _e?.reason === "new") {
@@ -112,7 +125,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
   });
-  pi.on("session_shutdown", async () => { engine?.release(); engine = null; });
+  pi.on("session_shutdown", async () => { if (reqTimer) { clearInterval(reqTimer); reqTimer = null; } reqCtx = null; engine?.release(); engine = null; });
 
   // ---------------------------------------------------------------- 요청 시작: pi 밖 커밋 반영 · 목표 · 상태 주입
   pi.on("before_agent_start", async (event: any, ctx: any) => {
@@ -133,6 +146,110 @@ export default function (pi: ExtensionAPI) {
     const context = renderContext(e.load(), ctxMax, continuing ? "continue" : "reference");
     return { message: { customType: CUSTOM, content: finished ? `${context}\n\n${PLAN_DONE_HINT}` : context, display: false } };
   });
+
+  // ---------------------------------------------------------------- 그림자 저장소: 고치기 전에 작업 폴더를 따라간다 (docs/flow-rollback-spec.md §4)
+  const folderCache = new Map<string, string | null>();
+  const folderOf = (abs: string): string | null => {
+    const key = abs.replace(/\\/g, "/").replace(/\/[^/]*\.[^/]*$/, "");
+    if (!folderCache.has(key)) folderCache.set(key, workFolderOf(abs));
+    return folderCache.get(key)!;
+  };
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    const e = engine;
+    if (!e?.writable) return undefined;
+    try {
+      const name = event.toolName;
+      if (name === "edit" || name === "write") {
+        const p = String(event.input?.path ?? "");
+        if (!p) return undefined;
+        const abs = toAbs(p, ctx.cwd);
+        const folder = folderOf(abs);
+        if (folder) e.trackFolder(folder);
+        else if (!e.insideTracked(abs)) e.noteIncomplete(`작업 폴더 밖 파일 ${abs.replace(/\\/g, "/")}`);
+      } else if (name === "bash") {
+        const command = String(event.input?.command ?? "");
+        let dir = ctx.cwd as string;
+        const dirs = [dir];
+        for (const d of commandDirs(command)) { dir = toAbs(d, dir); dirs.push(dir); }
+        for (const d of dirs) { const folder = folderOf(d); if (folder) e.trackFolder(folder); }
+        if (OUTSIDE_RE.test(command)) e.noteIncomplete(`명령: ${command.replace(/\s+/g, " ").slice(0, 120)}`);
+      }
+    } catch { /* 따라가기 실패는 작업을 막지 않는다 */ }
+    return undefined;
+  });
+
+  // 기호(✓ ! X) 다시 계산: 스냅숏이 생긴 뒤 (작업을 막지 않게 다음 틱에)
+  let marksTimer: ReturnType<typeof setTimeout> | null = null;
+  const refreshMarks = () => {
+    if (marksTimer) return;
+    marksTimer = setTimeout(() => { marksTimer = null; try { engine?.writable && engine.writeMarks(); } catch { /* 표시만 빠진다 */ } for (const fn of listeners) { try { fn(); } catch { /* */ } } }, 50);
+    marksTimer.unref?.();
+  };
+
+  // ---------------------------------------------------------------- 되돌리기 실행 (/flow rollback · 모니터 요청)
+  const lastResult = (e: FileFlowEngine, ok: boolean, text: string) => {
+    try { writeAtomic(join(e.dir, "rollback-result.json"), JSON.stringify({ at: Date.now(), ok, text })); } catch { /* 모니터 알림만 빠진다 */ }
+  };
+  const runRollback = async (ctx: any, flowId: string, taskId: string): Promise<boolean> => {
+    const e = eng(ctx);
+    const r = e.rollbackTo(flowId, taskId);
+    const label = r.flow && r.task ? taskLabel(r.flow.plan, r.task.id) : taskId;
+    if (!r.ok) {
+      const why = r.conflicts.length ? `${r.reason}: ${r.conflicts.slice(0, 3).join(", ")}` : r.reason ?? "실패";
+      lastResult(e, false, `되돌리지 못했습니다: ${why}`);
+      if (ctx.hasUI) ctx.ui.notify(`[oxy-flow] 되돌리지 못했습니다: ${why}`, "error");
+      return false;
+    }
+    lastResult(e, true, `"${label}" 까지 되돌렸습니다 (파일 ${r.files.length}개)`);
+    if (ctx.hasUI) ctx.ui.notify(`[oxy-flow] "${label}" 까지 되돌렸습니다 (파일 ${r.files.length}개)`, "info");
+    status(ctx);
+    refreshMarks();
+    const fl = r.flow!, t = r.task!;
+    if (r.incomplete.length) {
+      const decisions = [...fl.buffer.decisions, ...fl.nodes.flatMap((n) => n.decisions)];
+      const content = partialRollbackPrompt(fl.goal, t, tasksAfter(fl, t), decisions, r.incomplete, r.files.length);
+      pi.sendMessage({ customType: `${CUSTOM}-rollback`, content, display: true }, { triggerTurn: true, deliverAs: "followUp" });
+    } else {
+      pi.sendMessage({ customType: `${CUSTOM}-rollback`, content: rollbackNotice(fl.goal, t, r.files.length), display: false }, { deliverAs: "nextTurn" });
+    }
+    return true;
+  };
+  const runUndo = async (ctx: any): Promise<boolean> => {
+    const e = eng(ctx);
+    const r = e.undoLast();
+    if (!r.ok) {
+      const why = r.conflicts.length ? `${r.reason}: ${r.conflicts.slice(0, 3).join(", ")}` : r.reason ?? "실패";
+      lastResult(e, false, `되돌리기를 취소하지 못했습니다: ${why}`);
+      if (ctx.hasUI) ctx.ui.notify(`[oxy-flow] 되돌리기를 취소하지 못했습니다: ${why}`, "error");
+      return false;
+    }
+    const rec = r.record!;
+    lastResult(e, true, `되돌리기를 취소했습니다 (파일 ${r.files.length}개)`);
+    if (ctx.hasUI) ctx.ui.notify(`[oxy-flow] 되돌리기를 취소했습니다 (파일 ${r.files.length}개)`, "info");
+    status(ctx);
+    refreshMarks();
+    pi.sendMessage({ customType: `${CUSTOM}-rollback`, content: rollbackNotice(rec.goal, { id: rec.task, text: rec.text } as any, r.files.length, true), display: false }, { deliverAs: "nextTurn" });
+    return true;
+  };
+
+  // 모니터 pane 의 r · u (팝업에서 확인한 뒤 .oxy/flow/requests/*.json 을 쓴다) → 여기서 실행
+  let reqTimer: ReturnType<typeof setInterval> | null = null;
+  let reqCtx: any = null;
+  const pollRequests = async () => {
+    const e = engine;
+    if (!e?.writable || !reqCtx) return;
+    const dir = join(e.dir, REQUEST_DIR);
+    let names: string[] = [];
+    try { names = readdirSync(dir).filter((n) => n.endsWith(".json")).sort(); } catch { return; }
+    for (const n of names) {
+      let req: any = null;
+      try { req = JSON.parse(readFileSync(join(dir, n), "utf8")); } catch { /* 쓰는 중이면 다음에 */ continue; }
+      rmSync(join(dir, n), { force: true });
+      if (Date.now() - Number(req?.at ?? 0) > 60000) continue;    // 오래된 요청은 버린다
+      if (req?.op === "rollback") await runRollback(reqCtx, String(req.flow ?? ""), String(req.task ?? ""));
+      else if (req?.op === "undo") await runUndo(reqCtx);
+    }
+  };
 
   // ---------------------------------------------------------------- 사실 자동 기록 · 커밋 → 노드
   pi.on("tool_result", async (event: any, ctx: any) => {
@@ -289,6 +406,7 @@ export default function (pi: ExtensionAPI) {
       else {
         if (!params.id) throw new Error("id is required for action=update");
         const it = e.updatePlan(String(params.id), { status: params.status, text: params.text });
+        if (params.status === "done" || params.status === "dropped") refreshMarks();
         head = `Updated ${it.id} [${it.status}].`;
       }
       status(ctx);
@@ -325,7 +443,7 @@ export default function (pi: ExtensionAPI) {
 
   // ---------------------------------------------------------------- 사용자 명령
   pi.registerCommand("flow", {
-    description: "작업 기록: (없음) 보기 · show nN · trace 키워드 · new 목표 · rollback nN",
+    description: "작업 기록: (없음) 보기 · show nN · trace 키워드 · new 목표 · rollback p2 | <Flow id>:p2 (Task 까지 되돌리기) · undo (되돌리기 취소) · rollback nN (커밋 revert)",
     handler: async (args: string, ctx: any) => {
       const e = eng(ctx);
       const [sub, ...rest] = args.trim().split(/\s+/);
@@ -345,7 +463,32 @@ export default function (pi: ExtensionAPI) {
         if (e.hasContent() && !(await ctx.ui.confirm("새 작업 시작", "현재 작업 기록을 보관(archive)하고 새로 시작할까요?"))) return;
         e.startNew(arg);
         status(ctx);
+        refreshMarks();
         return void ctx.ui.notify("새 작업을 시작했습니다", "info");
+      }
+      if (sub === "rollback" && !/^n\d+$/i.test(arg) && !/^[0-9a-f]{7,40}$/i.test(arg)) {
+        // Task 까지 되돌리기 (docs/flow-rollback-spec.md): /flow rollback p2 · /flow rollback <flow id>:p2
+        const m = arg.match(/^(?:(.+):)?(p\d+(?:\.\d+)?)$/i);
+        if (!m) return void ctx.ui.notify("사용법: /flow rollback p2 (지금 Flow) · /flow rollback <Flow id>:p2 (끝난 Flow)", "warning");
+        const flowId = m[1] ?? e.load().id, taskId = m[2].toLowerCase();
+        const dry = e.rollbackTo(flowId, taskId, true);
+        if (!dry.ok) {
+          const why = dry.conflicts.length ? `${dry.reason}: ${dry.conflicts.slice(0, 3).join(", ")}` : dry.reason;
+          return void ctx.ui.notify(`되돌릴 수 없습니다: ${why}`, "warning");
+        }
+        const label = taskLabel(dry.flow!.plan, dry.task!.id);
+        // 처음 포커스는 취소 (§3.1): pi 의 confirm 은 Yes 가 먼저라 선택 창으로 묻는다
+        if (ctx.hasUI && (await ctx.ui.select(["되돌리기", ...rollbackConfirmLines(label, dry.files.length, dry.incomplete.length > 0)].join("\n"), ["취소", "되돌리기"])) !== "되돌리기") return;
+        await runRollback(ctx, flowId, taskId);
+        return;
+      }
+      if (sub === "undo") {
+        const dry = e.undoLast(true);
+        if (!dry.ok) return void ctx.ui.notify(dry.reason ?? "취소할 되돌리기가 없습니다", "warning");
+        const label = dry.record!.flow === e.load().id ? taskLabel(e.load().plan, dry.record!.task) : `${dry.record!.task} ${dry.record!.text}`;
+        if (ctx.hasUI && (await ctx.ui.select(["되돌리기 취소", ...undoConfirmLines(label, dry.files.length)].join("\n"), ["닫기", "되돌리기 취소"])) !== "되돌리기 취소") return;
+        await runUndo(ctx);
+        return;
       }
       if (sub === "rollback") {
         const n = e.findNode(arg);
@@ -364,7 +507,7 @@ export default function (pi: ExtensionAPI) {
         status(ctx);
         return void ctx.ui.notify(`${n.id} 로 되돌렸습니다 (revert 커밋 ${after.length}개)`, "info");
       }
-      ctx.ui.notify("사용법: /flow · /flow show nN · /flow trace 키워드 · /flow new 목표 · /flow rollback nN", "info");
+      ctx.ui.notify("사용법: /flow · /flow show nN · /flow trace 키워드 · /flow new 목표 · /flow rollback p2 | <Flow id>:p2 · /flow undo · /flow rollback nN", "info");
     },
   });
 }

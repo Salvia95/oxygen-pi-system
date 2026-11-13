@@ -13,6 +13,11 @@ export interface PlanItem {
   endedAt?: number;      // done 이 된 시각. done 이 아니게 되면 지운다
   nodes: string[];       // 이 항목이 doing 일 때 생긴 커밋 노드 (n3 …)
   children: PlanItem[];  // 할 일 (2단째는 children 이 늘 빈 배열)
+  /** 끝났을 때(done · dropped) 남긴 스냅숏: 작업 폴더 → 그림자 저장소 커밋 (docs/flow-rollback-spec.md §4) */
+  snaps?: Record<string, string>;
+  snapAt?: number;
+  /** 이 Task 동안 스냅숏에 들어가지 않은 변경 (작업 폴더 밖 파일 · 큰 파일 · 설치 · DB 명령) → 되돌리기 기호 ! */
+  incomplete?: string[];
 }
 
 export interface PlanInput { text: string; children?: { text: string }[] }
@@ -90,6 +95,9 @@ export function setPlan(old: PlanItem[], items: PlanInput[], now = Date.now()): 
     const item: PlanItem = { id, text, status: o?.status ?? "todo", at: o?.at ?? now, nodes: o ? [...o.nodes] : [], children };
     if (o?.startedAt !== undefined) item.startedAt = o.startedAt;
     if (o?.endedAt !== undefined) item.endedAt = o.endedAt;
+    // 되돌리기 지점도 이어받는다 (docs/flow-rollback-spec.md §4)
+    if (o?.snaps) { item.snaps = { ...o.snaps }; item.snapAt = o.snapAt; }
+    if (o?.incomplete?.length) item.incomplete = [...o.incomplete];
     return item;
   };
   const plan = items.map((it, i) => {
