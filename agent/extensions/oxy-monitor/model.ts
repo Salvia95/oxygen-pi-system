@@ -344,7 +344,9 @@ export function currentWorkRows(live: LiveState | null, jobs: JobSnapshot[], wid
   const first = (xs: JobSnapshot[]) => Math.min(...xs.map((j) => j.startedAt ?? j.createdAt));
   if (bg.length) out.push({ marker: "spinner", text: "백그라운드 " + bg.length + "개 실행 중", since: first(bg), indent: 0 });
   if (ag.length) out.push({ marker: "spinner", text: "subagent " + ag.length + "개 작업 중", since: first(ag), indent: 0 });
-  if (!groups.size && fresh && (fresh.agent.state === "thinking" || fresh.agent.state === "compacting")) {
+  // 한도 대기 중에는 아직 요청을 보내지 않았으므로 "응답 생성 중" 을 보이지 않는다
+  const waiting = Boolean(fresh?.pending && fresh.pending.until > now);
+  if (!groups.size && fresh && !waiting && (fresh.agent.state === "thinking" || fresh.agent.state === "compacting")) {
     out.unshift({ marker: "spinner", text: STATE_TEXT[fresh.agent.state], since: fresh.agent.since, indent: 0, emphasis: true });
   }
   // 요청 한도 대기 (oxy-rate): 맨 위에 남은 시간과 함께 (사용자 2026-11-14: "Pending for n sec: RPM Limit")

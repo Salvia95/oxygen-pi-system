@@ -2069,6 +2069,8 @@ test("oxy-rate 한도 대기: RPM · TPM 슬라이딩 윈도우 대기 시간 ·
   const MM = await import("../agent/extensions/oxy-monitor/model.ts");
   let lv = LV.reduceLive(LV.emptyLive(1, t0), { type: "pending", reason: "rpm", until: t0 + 12_000 }, t0);
   assert.equal(MM.currentWorkRows(lv, [], 35, t0 + 2000)[0].text, "Pending for 10 sec: RPM Limit");
+  const thinkingWait = LV.reduceLive(LV.reduceLive(LV.emptyLive(1, t0), { type: "agent_start" }, t0), { type: "pending", reason: "rpm", until: t0 + 12_000 }, t0);
+  assert.deepEqual(MM.currentWorkRows(thinkingWait, [], 35, t0 + 2000).map((r: any) => r.text).filter(Boolean), ["Pending for 10 sec: RPM Limit"], "대기 중에는 응답 생성 중을 보이지 않는다");
   lv = LV.reduceLive(lv, { type: "pending", reason: null, until: 0 }, t0 + 3000);
   assert.equal(MM.currentWorkRows(lv, [], 35, t0 + 3000)[1].text, "-", "대기가 끝나면 사라진다");
   // 공유: 프로세스 둘(본 대화 · subagent)의 기록을 더하고, 429 멈춤도 함께 본다
