@@ -5,6 +5,7 @@
  * 높이 안에서 어느 줄을 보일지(스크롤)와 좁은 폭에서 뺄 열은 여기서 정해, 화면 프로그램은 받은 줄을 그대로 그린다.
  */
 import type { JobSnapshot, JobsState } from "../oxy-jobs/state.ts";
+import { type WaitReason, pendingText } from "../oxy-rate/limiter.ts";
 import { commandHead } from "../oxygen-pi-tui/tools/basic.ts";
 import { type PlanItem, clock, itemDuration } from "../oxy-flow/plan.ts";
 import type { LiveState } from "./live.ts";
@@ -345,6 +346,10 @@ export function currentWorkRows(live: LiveState | null, jobs: JobSnapshot[], wid
   if (ag.length) out.push({ marker: "spinner", text: "subagent " + ag.length + "개 작업 중", since: first(ag), indent: 0 });
   if (!groups.size && fresh && (fresh.agent.state === "thinking" || fresh.agent.state === "compacting")) {
     out.unshift({ marker: "spinner", text: STATE_TEXT[fresh.agent.state], since: fresh.agent.since, indent: 0, emphasis: true });
+  }
+  // 요청 한도 대기 (oxy-rate): 맨 위에 남은 시간과 함께 (사용자 2026-11-14: "Pending for n sec: RPM Limit")
+  if (fresh?.pending && fresh.pending.until > now) {
+    out.unshift({ marker: "spinner", text: pendingText(fresh.pending.reason as WaitReason, fresh.pending.until - now), indent: 0, emphasis: true });
   }
   const h = Math.max(1, rowsMax);
   if (!out.length) return Array.from({ length: h }, (_, i) => (i === Math.floor((h - 1) / 2) ? { marker: "none" as Marker, text: "-", indent: Math.floor((width - 1) / 2) } : { marker: "none" as Marker, text: "", indent: 0 }));

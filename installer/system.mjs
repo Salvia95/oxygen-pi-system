@@ -393,6 +393,36 @@ export function createSystem({ root, sandbox = null }) {
       if (kill.length) powershell(`Stop-Process -Id ${kill.join(",")} -Force -ErrorAction SilentlyContinue`);
     },
 
+    /**
+     * 설치 폴더의 브라우저 대기 프로세스 (bin/agent-browser.exe 와 그것이 띄운 vendor/browsers 의 chrome.exe).
+     * pi 세션이 끝나도 남아 bin/agent-browser.exe 를 잠가, 업데이트 파일 복사가 EPERM 으로 멈췄다 (2026-11-13 ~ 14 매번).
+     */
+    browserPids(installDir) {
+      const root = resolve(installDir) + sep;
+      try {
+        const out = powershell(`Get-CimInstance Win32_Process -Filter "Name='agent-browser.exe' OR Name='chrome.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith(${psq(root.toLowerCase())}) } | ForEach-Object { $_.ProcessId }`);
+        return out.split(/\s+/).filter(Boolean).map(Number);
+      } catch { return []; }
+    },
+    /**
+     * 브라우저 대기 프로세스를 닫는다: agent-browser close 로 정상 종료하고, 남으면 이 폴더의 것만 강제 종료.
+     * 이 폴더의 pi(node.exe, 지금 설치 프로그램 제외)가 아직 돌고 있으면 그 pi 가 쓰는 중일 수 있어 건드리지 않는다 (-1). 닫은 수를 돌려준다
+     */
+    stopBrowser(installDir) {
+      const pids = sys.browserPids(installDir);
+      if (!pids.length) return 0;
+      try {
+        const root = resolve(installDir) + sep;
+        const out = powershell(`Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith(${psq(root.toLowerCase())}) -and $_.ProcessId -ne ${process.pid} } | ForEach-Object { $_.ProcessId }`);
+        if (out.trim()) return -1;
+      } catch { /* 모르면 아래로 */ }
+      const ab = join(installDir, "bin", "agent-browser.exe");
+      if (existsSync(ab)) spawnSync(ab, ["close"], { timeout: 15000, windowsHide: true });
+      const left = sys.browserPids(installDir);
+      if (left.length) powershell(`Stop-Process -Id ${left.join(",")} -Force -ErrorAction SilentlyContinue`);
+      return pids.length;
+    },
+
     // ---------------------------------------------------------- 설치 기록
     loadRegistry() {
       try { return JSON.parse(readFileSync(registryFile, "utf8")); } catch { return null; }

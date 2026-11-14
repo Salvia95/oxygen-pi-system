@@ -3,6 +3,12 @@
 
 export const WINDOW_MS = 60_000;
 
+const LIMIT_NAME: Record<WaitReason, string> = { rpm: "RPM Limit", tpm: "TPM Limit", blocked: "Server Limit" };
+/** 기다리는 동안의 글 (사용자 2026-11-14: "Pending for n sec: RPM Limit으로 하고 남은시간도 보여주자"): n 은 남은 초 */
+export function pendingText(reason: WaitReason, waitMs: number): string {
+  return `Pending for ${Math.max(1, Math.ceil(waitMs / 1000))} sec: ${LIMIT_NAME[reason] ?? reason}`;
+}
+
 export interface RateEvent { at: number; tokens: number }
 export interface Limits { rpm?: number; tpm?: number }
 export type WaitReason = "rpm" | "tpm" | "blocked";

@@ -1373,7 +1373,9 @@ async function uninstall(reg) {
  */
 async function stopPsmuxFirst(dir, what) {
   const run = sys.psmuxRunning(dir);
-  if (!run) return true;
+  // 세션이 끝난 뒤 남은 브라우저 대기 프로세스(agent-browser · chrome)도 닫는다. 남아 있으면 파일 복사가 EPERM 으로 멈췄다.
+  // 이 폴더의 pi 가 아직 돌고 있으면 쓰는 중일 수 있어 건드리지 않는다 (system.mjs stopBrowser). 확인 창 없이: 주인 없는 보조 프로세스다
+  if (!run) { sys.stopBrowser?.(dir); return true; }
   const n = run.sessions.length;
   const go = await ui.confirm("실행 중인 psmux 세션을 종료할까요?", {
     title: "psmux 세션 종료", level: "medium", yes: "세션 종료", no: `${what} 취소`,
@@ -1382,7 +1384,7 @@ async function stopPsmuxFirst(dir, what) {
     warning: "종료하면 세션 안에서 실행 중인 pi와 명령도 함께 종료됩니다.",
   });
   if (go !== true) return false;
-  await ui.task("psmux 세션 종료", async () => { sys.stopPsmux(dir, run.pids); });
+  await ui.task("psmux 세션 종료", async () => { sys.stopPsmux(dir, run.pids); sys.stopBrowser?.(dir); });
   return true;
 }
 

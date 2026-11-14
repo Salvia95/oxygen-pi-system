@@ -2061,6 +2061,16 @@ test("oxy-rate 한도 대기: RPM · TPM 슬라이딩 윈도우 대기 시간 ·
   assert.equal(L.retryAt({ "x-ratelimit-reset-requests": "1.5s", "x-ratelimit-reset-tokens": "6m0s" }, t0), t0 + 360_000);
   assert.equal(L.retryAt({}, t0), t0 + 10_000);
   assert.deepEqual([L.parseDuration("250ms"), L.parseDuration("2m30s"), L.parseDuration("x")], [250, 150_000, null]);
+  // 기다리는 동안의 글: 남은 초 (사용자 2026-11-14)
+  assert.deepEqual([L.pendingText("rpm", 16_200), L.pendingText("tpm", 400), L.pendingText("blocked", 9000)],
+    ["Pending for 17 sec: RPM Limit", "Pending for 1 sec: TPM Limit", "Pending for 9 sec: Server Limit"]);
+  // Flow Monitor 의 Current Task 맨 위 (live.json 의 pending)
+  const LV = await import("../agent/extensions/oxy-monitor/live.ts");
+  const MM = await import("../agent/extensions/oxy-monitor/model.ts");
+  let lv = LV.reduceLive(LV.emptyLive(1, t0), { type: "pending", reason: "rpm", until: t0 + 12_000 }, t0);
+  assert.equal(MM.currentWorkRows(lv, [], 35, t0 + 2000)[0].text, "Pending for 10 sec: RPM Limit");
+  lv = LV.reduceLive(lv, { type: "pending", reason: null, until: 0 }, t0 + 3000);
+  assert.equal(MM.currentWorkRows(lv, [], 35, t0 + 3000)[1].text, "-", "대기가 끝나면 사라진다");
   // 공유: 프로세스 둘(본 대화 · subagent)의 기록을 더하고, 429 멈춤도 함께 본다
   const dir = mkdtempSync(join(tmpdir(), "oxyrate-"));
   try {

@@ -12,16 +12,17 @@
  */
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { enabled } from "../_lib/common.ts";
-import { type Limits, type RateEvent, type WaitReason, planWait, retryAt, usage } from "./limiter.ts";
+import { type Limits, type RateEvent, type WaitReason, pendingText, planWait, retryAt, usage } from "./limiter.ts";
 import { RateStore } from "./store.ts";
 
 /** 한 요청이 기다릴 수 있는 최대 시간 (넘으면 보내고 서버 · pi 재시도에 맡긴다) */
 export const MAX_WAIT_MS = 5 * 60_000;
-const REASON: Record<WaitReason, string> = { rpm: "rpm 한도", tpm: "tpm 한도", blocked: "서버 요청 제한" };
+export const waitStatus = pendingText;
 
-export function waitStatus(reason: WaitReason, waitMs: number): string {
-  return `요청 대기 중 · ${REASON[reason]} · ${Math.max(1, Math.ceil(waitMs / 1000))}초`;
-}
+/** 기다리는 상태를 듣는 쪽 (oxy-monitor 가 live.json 에 넣어 Flow Monitor 의 Current Task 에 보인다) */
+type PendingListener = (p: { reason: WaitReason; until: number } | null) => void;
+const listeners = (): Set<PendingListener> => ((globalThis as any)[Symbol.for("oxy.rate.listeners")] ??= new Set<PendingListener>());
+const notify = (p: { reason: WaitReason; until: number } | null) => { for (const fn of listeners()) { try { fn(p); } catch { /* 화면 오류는 무시 */ } } };
 
 /** 응답 usage → 입력 + 출력 토큰 (캐시 포함) */
 const usageTokens = (u: any): number => {
@@ -78,10 +79,12 @@ export default function (pi: ExtensionAPI) {
         const all = st.readAll(now);
         const plan = planWait(all.events, now, limits, est, all.blockedUntil);
         if (!plan.waitMs || ctx.signal?.aborted || now - t0 >= MAX_WAIT_MS) break;
-        if (ctx.hasUI) { ctx.ui.setStatus("oxy-rate", waitStatus(plan.reason!, plan.waitMs)); shown = true; }
+        if (ctx.hasUI) ctx.ui.setStatus("oxy-rate", waitStatus(plan.reason!, plan.waitMs));
+        notify({ reason: plan.reason!, until: now + plan.waitMs });
+        shown = true;
         await sleep(Math.min(plan.waitMs, 1000), ctx.signal);
       }
-      if (shown && ctx.hasUI) ctx.ui.setStatus("oxy-rate", undefined);
+      if (shown) { if (ctx.hasUI) ctx.ui.setStatus("oxy-rate", undefined); notify(null); }
     }
     pending.push({ connId: conn.id, ev: st.add(Date.now(), est) });
     return undefined;

@@ -209,6 +209,10 @@ export default function (pi: ExtensionAPI) {
     }
     cleanup.push(() => { liveWriter?.close(); liveWriter = null; live = null; });
   };
+  // 요청 한도 대기 (oxy-rate) → live.json → Flow Monitor 의 Current Task
+  const onPending = (p: { reason: string; until: number } | null) => feed({ type: "pending", reason: p?.reason ?? null, until: p?.until ?? 0 });
+  const rateListeners: Set<any> = ((globalThis as any)[Symbol.for("oxy.rate.listeners")] ??= new Set());
+  rateListeners.add(onPending);
   pi.on("agent_start", async () => { feed({ type: "agent_start" }); });
   pi.on("turn_start", async (e: any) => { feed({ type: "turn_start", turnIndex: Number(e?.turnIndex ?? 0) }); });
   pi.on("tool_execution_start", async (e: any) => { feed({ type: "tool_start", id: String(e?.toolCallId ?? ""), name: String(e?.toolName ?? ""), input: e?.args }); });

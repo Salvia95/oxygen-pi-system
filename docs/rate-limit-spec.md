@@ -6,6 +6,7 @@ LLM 연결마다 분당 요청 수(RPM) · 분당 토큰 수(TPM) 한도를 두�
 ## 0. 요청과 결정
 
 - 요청 (사용자, 2026-11-14): "vllm 연결에 대해서는 rpm(request per minite, tpm(token per minute) 표시 기능(1분 슬라이딩 윈도우를 사용할거야)을 추가해줘 … 일단 표시부터 구현하고 요청을 이를 고려해서 대기하거나, 재시도할 수 있는지도 분석해서 말해줘"
+- 결정 (사용자, 2026-11-14, §6 에 대한 답): "1. 넣지마 대화 입력창에 표시되는걸로 충분해 2. Pending for n sec: RPM Limit으로 하고 남은시간도 보여주자 3. 고쳐줘" — Tweak 입력 화면은 만들지 않는다(설정은 llm.json), 대기 글은 영어 `Pending for 17 sec: RPM Limit` (n = 남은 초), Flow Monitor 의 Current Task 에도 보인다.
 - 결정 (사용자, 2026-11-14): "설치본 반영하고 한도 대기기능 만들자" — 분석에서 제안한 방식(연결별 rpm · tpm 설정, 프로세스 사이 공유, 대기 표시)으로 만든다.
 
 ## 1. 확인된 사실
@@ -19,7 +20,7 @@ LLM 연결마다 분당 요청 수(RPM) · 분당 토큰 수(TPM) 한도를 두�
 
 - `agent/llm.json` 연결의 `request.rpm` · `request.tpm` (0 이상의 정수, 없거나 0 이면 제한 없음). 모든 연결 종류에 쓸 수 있다 (`LLM_KINDS[*].request` 에 `rpm` · `tpm`).
 - 끄기: `OXY_RATE=off`.
-- Tweak 입력 화면은 §6 O1 (확인 전).
+- Tweak 입력 화면은 두지 않는다 (사용자 결정, 입력창 표시로 충분). 한도는 `llm.json` 을 고쳐 정한다.
 
 ## 3. 대기 규칙 (`agent/extensions/oxy-rate/limiter.ts`)
 
@@ -36,16 +37,15 @@ LLM 연결마다 분당 요청 수(RPM) · 분당 토큰 수(TPM) 한도를 두�
 ## 5. 표시
 
 - 푸터 (`docs/pi-tui-spec.md` §6.1): vLLM 연결이면 모든 프로세스를 더한 값. 한도가 있으면 `3/20 rpm · 12.4K/100K tpm`, 한도에 닿으면 노랑.
-- 기다리는 동안 푸터 상태 글: `요청 대기 중 · rpm 한도 · 17초` (`tpm 한도` · `서버 요청 제한`). 입력창 윗줄의 `작업 중 n초` 는 그대로 센다.
+- 기다리는 동안 푸터 상태 글과 Flow Monitor 의 Current Task 맨 위: `Pending for 17 sec: RPM Limit` (`TPM Limit` · 429 면 `Server Limit`), 숫자는 남은 초로 줄어든다. 모니터에는 oxy-rate → oxy-monitor live.json 의 `pending` 으로 전해진다. 입력창 윗줄의 `작업 중 n초` 는 그대로 센다.
 
 ## 6. 정할 것
 
-- O1. Tweak 의 연결 편집에서 한도를 입력하는 화면 (위치 · 문구). 제안: 연결 편집 목록에 `분당 요청 한도  제한 없음` · `분당 토큰 한도  제한 없음` 두 줄, 숫자 입력(0 = 제한 없음), 설명 "이 연결로 보내는 요청이 1분 동안 이 값을 넘지 않게 기다립니다. 본 대화와 subagent 를 함께 셉니다."
-- O2. 한도 대기를 Flow Monitor 의 Current Task 에도 보일지 (`◐ 요청 대기 중 · rpm 한도`).
+- O1 (Tweak 입력 화면): 만들지 않는다. O2 (Flow Monitor 표시): 보인다, 문구 `Pending for n sec: RPM Limit` (사용자 2026-11-14).
 
 ## 7. 구현 기록 (2026-11-14, 부모)
 
 - `oxy-rate/limiter.ts` (planWait · usage · retryAt · parseDuration), `store.ts` (RateStore), `index.ts` (before_provider_request 대기 · message_end 실제 토큰 · after_provider_response 429). 푸터는 `oxygen-pi-tui/rate.ts` `sharedStats` (1초 캐시).
 - `scripts/llm-connections.mjs`: `request.rpm` · `tpm` 검사.
 - 단위: 대기 시간(RPM · TPM · 둘 다 · 너무 큰 요청 · 429), 대기 시각 헤더, 두 프로세스 합산 · 429 공유, 설정 검사.
-- 실측 (mock pi, mintty 90×30 D2Coding, vLLM 연결 rpm 3): 요청 6번 시나리오에서 3번 뒤 `3/3 rpm`(노랑) · `요청 대기 중 · rpm 한도 · 48초 → 28초 → 17초`, 첫 요청이 윈도우를 벗어난 뒤 이어서 끝남(`tools checked`), 1분 뒤 `0/3 rpm`. 증거: scratchpad `caps/rate-wait.png`.
+- 실측 (mock pi, mintty 90×30 D2Coding, vLLM 연결 rpm 3): 요청 6번 시나리오에서 3번 뒤 `3/3 rpm`(노랑) · `요청 대기 중 · rpm 한도 · 48초 → 28초 → 17초` (이후 `Pending for 46 sec: RPM Limit` 으로 바꿈, live.json `pending` 확인), 첫 요청이 윈도우를 벗어난 뒤 이어서 끝남(`tools checked`), 1분 뒤 `0/3 rpm`. 증거: scratchpad `caps/rate-wait.png`.

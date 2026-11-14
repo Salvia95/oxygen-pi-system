@@ -23,6 +23,8 @@ export interface LiveState {
   model: string | null;
   context: { percent: number | null };
   events: LiveEvent[];
+  /** 요청 한도 대기 (oxy-rate): 이유 · 끝나는 시각. 없으면 null (docs/rate-limit-spec.md §5) */
+  pending?: { reason: string; until: number } | null;
 }
 
 export type LiveInput =
@@ -36,6 +38,7 @@ export type LiveInput =
   | { type: "user"; text: string }
   | { type: "event"; kind: LiveEventKind; ok: boolean; text: string }
   | { type: "model"; model: string | null }
+  | { type: "pending"; reason: string | null; until: number }
   | { type: "context"; percent: number | null };
 
 export function emptyLive(pid: number, now: number): LiveState {
@@ -115,6 +118,9 @@ export function reduceLive(prev: LiveState, ev: LiveInput, now: number): LiveSta
       break;
     case "model":
       s.model = ev.model;
+      break;
+    case "pending":
+      s.pending = ev.reason ? { reason: ev.reason, until: ev.until } : null;
       break;
     case "context":
       s.context = { percent: ev.percent == null || !Number.isFinite(ev.percent) ? null : Math.round(ev.percent) };

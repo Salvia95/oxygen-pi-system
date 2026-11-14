@@ -24,7 +24,7 @@
 | `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 검증 | 사용자: 웰컴 카드 · 화면 캡처 확인. 9단계(실제 LLM)는 사용자가 보류 | 사용자 확인 뒤 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (저장소 폴더로 업데이트, oxy-tui 0.4.0) |
 | `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 릴리스 반영 뒤 화면 확인 | 확인되면 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (oxy-tui 0.4.0) |
 | `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 검증 | 사용자: 모니터 pane 에서 r · u 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | – | – |
-| `rate-limit` | `docs/rate-limit-spec.md` 연결별 RPM · TPM 한도 대기 (프로세스 공유, 푸터 표시) | 구현 | 사용자: §6 O1 Tweak 입력 화면 · O2 | 정해지면 Tweak 행 (tui-implementer) | 2026-11-14 | – | – |
+| `rate-limit` | `docs/rate-limit-spec.md` 연결별 RPM · TPM 한도 대기 (프로세스 공유, 푸터 · Flow Monitor 표시) | 검증 | 사용자: 실제 vLLM 에서 한도를 걸어 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | – | – |
 
 ## 단계
 
