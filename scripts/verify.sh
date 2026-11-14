@@ -51,6 +51,9 @@ if command -v java >/dev/null; then
   # env.sh 가 java 에게 java.home 을 물어 정한다 (Maven · Gradle · SQLcl 이 JAVA_HOME 을 믿는다)
   if [[ -n "${JAVA_HOME:-}" && -x "$(cygpath -u "$JAVA_HOME")/bin/java.exe" ]]; then pass "JAVA_HOME: $JAVA_HOME"
   else wrn "JAVA_HOME 이 비었거나 java 가 없는 폴더 (${JAVA_HOME:-없음}) → Maven 등이 실패할 수 있음. agent/oxy.env 에 JAVA_HOME 을 적거나 .cache/java-home 을 지우고 다시 여세요"; fi
+  # Maven: env.sh 가 PATH 에 없으면 MAVEN_HOME · ~/.m2/wrapper 의 것을 더한다. 없어도 프로젝트의 ./mvnw 로 빌드할 수 있어 정보만
+  if command -v mvn >/dev/null 2>&1; then pass "mvn: $(command -v mvn)"
+  else echo "  INFO mvn 없음 (프로젝트에 ./mvnw 가 있으면 그것으로 빌드). MAVEN_HOME 을 agent/oxy.env 에 적으면 PATH 에 더한다"; fi
 else need "java 없음 (SQLcl 실행 불가)"; fi
 
 section "2. 번들 도구"

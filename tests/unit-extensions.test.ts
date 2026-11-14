@@ -2034,6 +2034,23 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   assert.deepEqual(M.planRows(cur, new Set(["p:p2"]), 35).map((r: any) => r.text).slice(2, 4), ["[2/3] 구현", "↶ 여기까지 되돌림 (취소함)"]);
 });
 
+test("oxy-tool-hints: bash 의 파일 grep · cat · curl 을 맞는 도구 · 스킬로 안내 (설치본 Haiku 실측, 2026-11-14)", async () => {
+  const H = await import("../agent/extensions/oxy-tool-hints.ts");
+  const d = (c: string) => H.detectHints(c).sort();
+  assert.deepEqual(d('grep -n "Mapping" src/main/java/TodoController.java'), ["grep"]);
+  assert.deepEqual(d('cd app && grep -rn --include=*.java "Clock" src'), ["grep"]);
+  assert.deepEqual(d('curl -s http://127.0.0.1:59743/loan | grep -o "name=_csrf"'), ["curl"], "파이프 안 grep 은 파일을 읽지 않는다");
+  assert.deepEqual(d("tail -30 /tmp/app.log | grep -ci error"), []);
+  assert.deepEqual(d("grep -e foo -e bar"), [], "파일 없이 stdin");
+  assert.deepEqual(d("cat pom.xml"), ["cat"]);
+  assert.deepEqual(d("cat src/main/resources/cozy/fragments.yml | head -40"), ["cat"]);
+  assert.deepEqual(d("cat > notes.md <<'EOF'\nx\nEOF"), [], "파일 쓰기 · heredoc 은 아니다");
+  assert.deepEqual(d("cat /tmp/app.log"), [], "로그는 소스 · 설정이 아니다");
+  assert.deepEqual(d('B=http://127.0.0.1:1; curl -s "$B/book"'), ["curl"]);
+  assert.deepEqual(d("echo hi && ls"), []);
+  assert.match(H.HINTS.curl, /http-api-testing skill/);
+});
+
 test("작업 수준: 기본 모델과 같은 수준은 지금 대화의 모델을 따른다 · compaction 은 최근 대화를 8K 만 남긴다 (2026-11-14)", async () => {
   const C = await import("../scripts/llm-connections.mjs");
   const conn = (id: string, kind: string, models: string[]) => ({ id, kind, baseUrl: "http://x", models: models.map((m) => ({ id: m, contextWindow: 1, maxOutput: 1 })) });

@@ -83,6 +83,23 @@ if ! _oxy_java_ok "${JAVA_HOME:-}" && command -v java >/dev/null 2>&1; then
 fi
 unset -f _oxy_java_ok
 
+# --- Maven: PATH 에 mvn 이 없으면 MAVEN_HOME · ~/.m2/wrapper 가 받아 둔 Maven 을 PATH 에 (2026-11-14 설치본 Haiku 세션에서
+#   `mvn: command not found` 3번, 모델이 ~/.m2/wrapper 경로를 직접 찾아 우회). 찾은 bin 은 .cache/maven-bin 에 둔다.
+#   oxy.env 에서 MAVEN_HOME 을 정했으면 그것을 쓴다. 프로젝트의 ./mvnw 가 있으면 그것이 먼저다 (PATH 와 상관없음)
+if ! command -v mvn >/dev/null 2>&1; then
+  _oxy_mc="$OXY_HOME/.cache/maven-bin"
+  _oxy_mb=""
+  [[ -n "${MAVEN_HOME:-}" && -x "$(cygpath -u "$MAVEN_HOME" 2>/dev/null)/bin/mvn" ]] && _oxy_mb="$(cygpath -u "$MAVEN_HOME")/bin"
+  [[ -z "$_oxy_mb" && -f "$_oxy_mc" ]] && read -r _oxy_mb < "$_oxy_mc"
+  if [[ -z "$_oxy_mb" || ! -x "$_oxy_mb/mvn" ]]; then
+    # 가장 최근 버전 (이름순 마지막)
+    _oxy_mb="$(ls -d "$HOME"/.m2/wrapper/dists/apache-maven-*/*/apache-maven-*/bin 2>/dev/null | sort -V | tail -n1)"
+    [[ -n "$_oxy_mb" && -x "$_oxy_mb/mvn" ]] && mkdir -p "$OXY_HOME/.cache" 2>/dev/null && printf '%s\n' "$_oxy_mb" > "$_oxy_mc" 2>/dev/null
+  fi
+  [[ -n "$_oxy_mb" && -x "$_oxy_mb/mvn" ]] && export PATH="$PATH:$_oxy_mb"
+  unset _oxy_mc _oxy_mb
+fi
+
 # --- agent-browser 가 쓸 브라우저: 설치 TUI 가 oxy.env 에 OXY_BROWSER(/OXY_BROWSER_PATH) 로 기록 ---
 #   chrome-for-testing | chromium (번들 위치, 하네스를 옮겨도 동작) | obscura (wrappers/agent-browser 가 CDP 서버를 띄움)
 #   | edge | chrome-system | custom (OXY_BROWSER_PATH) | none
