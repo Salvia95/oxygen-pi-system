@@ -1,13 +1,15 @@
 # skill 선택 시험 (실제 LLM)
 
 skill description 을 바꾸기 전(`before`)과 후보(`after`, `candidates.json`)를 비교한다.
-pi 가 만든 첫 요청 본문을 그대로 쓰고 사용자 메시지만 28개 시험 문장으로 바꿔 실제 모델에 보낸 뒤,
+pi 가 만든 첫 요청 본문을 그대로 쓰고 사용자 메시지만 시험 문장(36개, #29~#36 은 2026-11-14 추가)으로 바꿔 실제 모델에 보낸 뒤,
 첫 응답이 어떤 `skills/<name>/SKILL.md` 를 read 하는지로 판정한다.
 
 - `run.sh` — before/after 첫 요청을 mock 으로 잡고(`*-request.json`), `eval.mjs` 를 실제 엔드포인트(agent/oxy.env)로 실행
 - `eval.mjs` — 시험 문장(CASES) · 판정 · 표 출력. `results.json` 에 이미 있는 `variant#id` 는 건너뛰므로 **언제든 이어서 실행**된다
 - `apply-desc.mjs` — `candidates.json` 의 description 을 skill 폴더의 SKILL.md 에 적용
 - 문장 종류: P = 그 skill 을 읽어야 함 · N = 그 skill 을 읽으면 안 됨(alt 가 있으면 그쪽을 읽어야 함) · G = 아무 skill 도 필요 없음
+- `avoid`: 첫 응답의 bash 명령에 그 습관(oxy-tool-hints 와 같은 판정: `bash-grep` 파일 검색 · `bash-cat` 소스 읽기 · `curl`)이 있으면 실패 (#32~#34)
+- `run-claude.sh` · `capture-claude.mjs` — Anthropic(Claude) 연결용. pi 를 `tests/mock-anthropic.mjs` 에 붙여 첫 `/v1/messages` 본문과 `anthropic-beta` 헤더를 잡고(`*-claude-request.json`), 실제 모델로 판정한다. 결과는 `results-claude.json` (각 기록에 `model`)
 
 ## 진행 상황 (2026-11-12 중단)
 
@@ -42,7 +44,31 @@ before 결과:
 ※ #6 은 skill 을 읽지 않았으므로 N 기준으로는 통과지만, 모델이 깨진 tool call 을 만들어 선택을 본 것이 아니다.
 다시 판정하려면 `results.json` 에서 `before` #6 항목을 지우고 실행한다 (지운 사실을 보고한다).
 
-## 이어서 실행
+## Claude Haiku 5.5 측정 (2026-11-14, `results-claude.json`)
+
+판정 모델: `anthropic-claude/claude-haiku-5-5:low` (설치본 agent 폴더의 llm.json · secrets.json 연결, thinking = adaptive · effort low). Groq qwen 의 `results.json` 과 섞어 비교하지 않는다.
+시스템 프롬프트: before 11,738자 → after 12,544자 (skill 12개: 저장소 bin 기준이라 설치본(11개)보다 oracle-db-querying 하나 많다).
+
+after 후보 = http-api-testing description 교체 + AGENTS.md 의 "Which tool for common actions" 절 (둘 다 반영함, 근거: 아래 표 · `tests/scenario-eval/results-habit.jsonl`).
+
+| variant | 완료 | 전체 | P | N | G | 실패 |
+|---|---|---|---|---|---|---|
+| before | 36 / 36 | 33 | 12/15 | 15/15 | 6/6 | #1 #7 #19 |
+| before-r2 | 36 / 36 | 33 | 12/15 | 15/15 | 6/6 | #1 #7 #9 |
+| after | 36 / 36 | 34 | 13/15 | 15/15 | 6/6 | #1 #7 |
+| after-r2 | 36 / 36 | 36 | 15/15 | 15/15 | 6/6 | – |
+
+- 처음 실행 36건은 `anthropic-beta` 헤더를 빼고 보내 모두 400 (`messages.1.output_config: Extra inputs are not permitted`) 이었다. 측정 도구 오류라 그 36건을 지우고 다시 쟀다 (모델 응답 없음).
+- 실패 원인: #1 은 `fd --changed-within` + `grep -c` 를 바로 실행(find-code 를 안 읽음, 결과는 맞는 방법), #7 은 justfile 을 바로 읽거나 `cat` (skill 을 안 읽음), #19 · #9 는 skill 없이 bash 로 시작. 모두 (a) description 쪽, 도구 오류(c) 없음.
+
+### 이어서 실행
+
+```bash
+# 후보를 바꿔 잴 때: SKILL_EVAL_CANDIDATES=<description json> SKILL_EVAL_AGENTS=<AGENTS.md> 로 after 구성을 준다. 이미 있는 variant#id 는 건너뛴다
+bash tests/skill-eval/run-claude.sh "$LOCALAPPDATA/Programs/oxygen-pi/agent" anthropic-claude/claude-haiku-5-5:low -r3
+```
+
+## 이어서 실행 (Groq qwen, `results.json`)
 
 ```bash
 # 메모리 부족 정리를 끄려면 Claude Code 를 CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1 로 시작

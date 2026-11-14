@@ -48,6 +48,9 @@ http.createServer((req, res) => {
     n++;
     const firstUser = textOf((body.messages ?? []).find((m) => m.role === "user")?.content);
     const effort = [...(body.messages ?? [])].reverse().find((m) => m.role === "system" && m.output_config)?.output_config?.effort ?? body.output_config?.effort ?? null;
+    // MOCK_ANTHROPIC_BODY=<파일>: 요청 본문 전체도 한 줄씩 남긴다 (skill 선택 시험이 pi 의 첫 요청을 잡을 때). 헤더는 anthropic-beta · anthropic-version 만 (x-api-key 는 남기지 않는다)
+    if (process.env.MOCK_ANTHROPIC_BODY) fs.appendFileSync(process.env.MOCK_ANTHROPIC_BODY, JSON.stringify({ n, body,
+      headers: { "anthropic-beta": req.headers["anthropic-beta"] ?? null, "anthropic-version": req.headers["anthropic-version"] ?? null } }) + "\n");
     fs.appendFileSync(logFile, JSON.stringify({ n, keyMatches: Boolean(want) && req.headers["x-api-key"] === want, model: body.model, max_tokens: body.max_tokens,
       thinking: body.thinking?.type ?? null, effort, workspace: req.headers["anthropic-workspace-id"] ?? null, firstUser: firstUser.slice(0, 80) }) + "\n");
     const text = `MOCK-ANTHROPIC ${firstUser.slice(0, 60)}`;

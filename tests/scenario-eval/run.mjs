@@ -2,6 +2,8 @@
 //   node run.mjs <label> [--only a,b] [--model [연결/]모델] [--level id] [--thinking 수준] [--rev git-rev] [--tools a,b,c] [--set K=V]...
 //                [--max-calls N] [--minutes N] [--rebuild] [--base-url URL] [--suite base|combo] [--llm-from <agent 폴더>]
 // --suite combo: 여러 skill 을 함께 쓰는 상황 시나리오(combo.mjs). 결과는 results-combo.jsonl, 읽은 SKILL.md · 실행한 명령 · 비용을 함께 남긴다.
+// --suite habit: 실제 세션에서 본 습관(bash grep · cat · curl) 시나리오(habit.mjs). 결과는 results-habit.jsonl.
+//   모든 suite 의 기록에 trace(도구 호출마다 꼬리표, tagCall)와 hints(결과에 붙은 [oxy-hint] 수)를 남긴다.
 // --llm-from: LLM 연결(llm.json)과 키(secrets.json, DPAPI)를 이 agent 폴더에서 읽는다 (기본: 저장소 agent/). 예: 설치본의 agent 폴더
 // --key-env <변수>: 키를 DPAPI 대신 이 환경변수에서 (CI). 값은 대상 연결의 키로만 쓰고 기록하지 않는다
 // --hide a,b: pi 의 PATH 맨 앞에 이 명령들을 "command not found" 로 끝내는 대역을 둔다. combo 는 기본 python,python3,py (사이트 PC 처럼 번들 도구만, docs/skill-combo-spec.md C0-1). --hide none 이면 두지 않는다
@@ -21,6 +23,8 @@ import { fileURLToPath } from "node:url";
 import { makeFixture } from "./fixture.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 import { COMBO } from "./combo.mjs";
+import { HABIT } from "./habit.mjs";
+import { tagCall } from "./trace.mjs";
 import { scrub } from "./scrub.mjs";
 import * as L from "../../scripts/llm-connections.mjs";
 import { getSecrets } from "../../installer/secrets.mjs";
@@ -53,12 +57,12 @@ for (let i = 0; i < argv.length; i++) {
   else { console.error(`unknown option ${a}`); process.exit(2); }
 }
 
-if (!["base", "combo"].includes(opt.suite)) { console.error(`unknown suite ${opt.suite} (base | combo)`); process.exit(2); }
-const COMBO_SUITE = opt.suite === "combo";
+if (!["base", "combo", "habit"].includes(opt.suite)) { console.error(`unknown suite ${opt.suite} (base | combo | habit)`); process.exit(2); }
+const COMBO_SUITE = opt.suite === "combo" || opt.suite === "habit";   // 여러 단계 작업 · skill 사용 기록 · python 숨김은 둘이 같다
 // 여러 단계 작업이라 도구 호출 · 시간 한도를 넉넉히 (기본 suite 는 예전 값 그대로)
 opt.maxCalls ??= COMBO_SUITE ? 25 : 8;
 opt.minutes ??= COMBO_SUITE ? 40 : 8;
-const RESULTS = path.join(HERE, COMBO_SUITE ? "results-combo.jsonl" : "results.jsonl");
+const RESULTS = path.join(HERE, { base: "results.jsonl", combo: "results-combo.jsonl", habit: "results-habit.jsonl" }[opt.suite]);
 const HIDE = (opt.hide ?? (COMBO_SUITE ? "python,python3,py" : "none")) === "none" ? [] : (opt.hide ?? "python,python3,py").split(",").filter(Boolean);
 const LLM_SRC = path.resolve(opt.llmFrom ?? path.join(ROOT, "agent"));
 const fwd = (p) => p.replace(/\\/g, "/");
@@ -164,7 +168,7 @@ function runPi(prompt, cwd, eventsFile) {
       PI_PACKAGE_DIR: fwd(PI_PKG_COPY), ...(keysB64 ? { OXY_LLM_INHERIT_KEYS: keysB64 } : {}), ...meta.set, ...opt.set };
     const child = spawn(process.env.OXY_NODE, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out = fs.createWriteStream(eventsFile);
-    const m = { requests: 0, inTok: 0, outTok: 0, firstIn: 0, cost: 0, calls: [], reads: [], cmds: [], retries: [], errors: [], text: "", timedOut: false, capped: false };
+    const m = { requests: 0, inTok: 0, outTok: 0, firstIn: 0, cost: 0, calls: [], reads: [], cmds: [], trace: [], hints: 0, retries: [], errors: [], text: "", timedOut: false, capped: false };
     const pending = new Map();
     let buf = "", stderr = "";
     const onEvent = (e) => {
@@ -183,12 +187,14 @@ function runPi(prompt, cwd, eventsFile) {
         pending.set(e.toolCallId, { name: e.toolName, args: short(e.args, 240) });
         if (e.toolName === "read") m.reads.push(String(e.args?.path ?? e.args?.file_path ?? ""));
         if (e.toolName === "bash") m.cmds.push(String(e.args?.command ?? ""));
+        m.trace.push(tagCall(e.toolName, e.args));
         // 헤매는 실행이 하루 토큰 한도를 다 쓰지 않게 도구 호출 수에 상한을 둔다 (상한에 걸리면 실패로 기록)
         if (m.calls.length >= opt.maxCalls) { m.capped = true; child.kill(); }
       } else if (e.type === "tool_execution_end") {
         const c = pending.get(e.toolCallId) ?? { name: e.toolName, args: "" };
         const t = textOf(e.result?.content);
         const om = t.match(/\[oxy: (\d+) characters omitted/);
+        if (t.includes("[oxy-hint]")) m.hints++;
         m.calls.push({ ...c, out: t.length, raw: t.length + (om ? Number(om[1]) : 0), err: !!e.isError, head: short(t.replace(/\s+/g, " "), 120) });
       } else if (e.type === "auto_retry_start") {
         m.retries.push(short(e.errorMessage ?? "", 160));
@@ -223,7 +229,7 @@ const target = resolveTarget(meta);
 const keysB64 = inheritKeys();
 console.log(`[${label}] tools=${meta.tools.join(",")} model=${target.key}${HIDE.length ? ` hide=${HIDE.join(",")}` : ""}`);
 const started = Date.now();
-const SUITE = COMBO_SUITE ? COMBO : SCENARIOS;
+const SUITE = { base: SCENARIOS, combo: COMBO, habit: HABIT }[opt.suite];
 const todo = SUITE.filter((s) => (!opt.only || opt.only.includes(s.id)) && !done.has(`${label}|${target.key}|${s.id}`));
 for (const [i, s] of todo.entries()) {
   if ((Date.now() - started) / 60000 > opt.minutes) { console.log(`시간 한도(${opt.minutes}분) → 남은 ${todo.length - i}건은 다음 실행에서`); break; }
@@ -247,7 +253,7 @@ for (const [i, s] of todo.entries()) {
     pass: verdict.pass && !m.capped, note: m.capped ? `도구 호출 ${opt.maxCalls}회 상한에서 중단` : verdict.note, requests: m.requests, firstIn: m.firstIn, inTok: m.inTok, outTok: m.outTok,
     toolOut: m.calls.reduce((a, c) => a + c.out, 0), toolRaw: m.calls.reduce((a, c) => a + c.raw, 0),
     calls: m.calls, retries: m.retries.length, errors: m.errors, timedOut: m.timedOut, capped: m.capped, seconds: Math.round((Date.now() - t0) / 1000),
-    cost: Number(m.cost.toFixed(5)), ...(HIDE.length ? { hidden: HIDE } : {}), ...(usage ? { skills: usage, skillsUsed: usage.filter((u) => u.ran).length, skillsExpected: usage.length } : {}),
+    cost: Number(m.cost.toFixed(5)), trace: m.trace, hints: m.hints, ...(HIDE.length ? { hidden: HIDE } : {}), ...(usage ? { skills: usage, skillsUsed: usage.filter((u) => u.ran).length, skillsExpected: usage.length } : {}),
     text: short(m.text, 600),
   };
   if (usage) console.log(`         skills ${usage.map((u) => `${u.skill}:${u.read ? "읽음" : "-"}/${u.ran ? "실행" : "-"}`).join(" ")} cost=${rec.cost}`);
@@ -275,6 +281,7 @@ function skillUsage(skills, m) {
   return skills.map((skill) => ({ skill, read: m.reads.some((r) => new RegExp(`skills[\\\\/]${skill}[\\\\/]SKILL\\.md$`, "i").test(r)),
     ran: (BIN[skill] ?? []).some((b) => heads.has(b)) }));
 }
+
 
 /**
  * 숨길 명령(HIDE)의 대역을 PATH 맨 앞에 둔 환경 (Windows 는 Path 키일 수 있다). 숨길 것이 없으면 빈 객체.

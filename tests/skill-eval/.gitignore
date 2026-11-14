@@ -2,3 +2,7 @@ before/
 after/
 mock.jsonl
 *-request.json
+before-claude/
+after-claude/
+mock-claude.jsonl
+mock-claude-body.jsonl

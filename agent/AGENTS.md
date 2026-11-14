@@ -9,7 +9,14 @@
   A skill is listed only for tools that are installed. Read the matching skill before using a tool: usage here differs from the defaults you may know.
   Before writing a script or using curl, sed or python for a task, check the skill list: if a description matches the situation, read that skill and use its tool.
   If a command is not found, tell the user it was not brought in. Never try to install it.
-- Explore code with the `grep` and `read` tools. Find files by name with `fd` in `bash` (`fd -e sql`, `fd Controller src`); it skips ignored folders such as `node_modules`.
+
+# Which tool for common actions (not the shell habit)
+
+- Search file contents: the `grep` tool (or `rg` in `bash` for counts, file types or pipelines), not `grep -r`. Read a file: the `read` tool, not `cat`, `head` or `sed -n` (edit needs a read first).
+- Find files by name: `fd` in `bash` (`fd -e sql`, `fd Controller src`); it skips ignored folders such as `node_modules`.
+- An HTTP request to any server, your own dev server too (status, redirect, JSON or HTML, a form with cookies and a CSRF token): if the http-api-testing skill is listed, read it and use `hurl`, not `curl`.
+- A database or a `.db` file: if the sql-querying skill is listed, read it and use `usql`, not `sqlite3`, `node` or a script.
+- This holds for quick checks and follow-up requests too. Read the skill in its own step, before the first such command (not in the same step as the curl or cat it replaces).
 
 # Background work and helpers (your context is small)
 

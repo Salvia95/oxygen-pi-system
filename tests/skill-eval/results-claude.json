@@ -1,0 +1,4055 @@
+[
+ {
+  "variant": "before",
+  "id": 1,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src 아래에서 지난 일주일 사이에 바뀐 .java 파일 목록과, 그중 TODO가 몇 개씩 있는지 세어줘",
+  "expect": {
+   "want": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [
+   "bash-grep"
+  ],
+  "bash": [
+   "cd src 2>/dev/null || { echo \"no src dir\"; exit 1; }; fd -e java --changed-within 7d . 2>/dev/null | while read f; do c=$(grep -c 'TODO' \"$f\"); echo \"$c $f\"; do"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 133,
+   "cacheRead": 2635,
+   "cacheWrite": 4523,
+   "out": 229
+  }
+ },
+ {
+  "variant": "before",
+  "id": 2,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "UserService 클래스가 어디에 정의돼 있는지 찾아줘",
+  "expect": {
+   "not": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"class\\s+UserService\\b\" . 2>/dev/null | head -50"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 96
+  }
+ },
+ {
+  "variant": "before",
+  "id": 3,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "주석이나 문자열은 빼고, 코드에서 userRepo.findById(...)를 호출하는 곳만 전부 찾아줘",
+  "expect": {
+   "want": "structural-code-search"
+  },
+  "read": [
+   "structural-code-search"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 125,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 220
+  }
+ },
+ {
+  "variant": "before",
+  "id": 4,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "OrderService.java 안의 calculateTotal 메서드 이름을 computeTotal로 바꿔줘 (그 파일 안에서만)",
+  "expect": {
+   "not": "structural-code-search"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd OrderService.java; rg -n \"calculateTotal\" $(fd OrderService.java)"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 126,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 100
+  }
+ },
+ {
+  "variant": "before",
+  "id": 5,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "node REPL을 띄워서 .help를 입력한 결과 화면을 보여줘",
+  "expect": {
+   "want": "terminal-session-control"
+  },
+  "read": [
+   "terminal-session-control"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "Node REPL은 키보드 입력을 기다리므로 `bash`에서 직접 실행하면 멈춥니다. 먼저 `terminal-session-control` 스킬을 읽겠습니다.",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 296
+  }
+ },
+ {
+  "variant": "before",
+  "id": 6,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "npm test를 실행해서 결과를 알려줘",
+  "expect": {
+   "not": "terminal-session-control"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "cd C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/before-claude/work && ls && npm test 2>&1 | tail -n 80"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 94,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 140
+  }
+ },
+ {
+  "variant": "before",
+  "id": 7,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 프로젝트 justfile에 있는 작업 중 테스트를 돌리는 걸 찾아서 실행해줘",
+  "expect": {
+   "want": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd -a '^justfile$|^Justfile$' . ; cat justfile 2>/dev/null || cat Justfile 2>/dev/null"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 120,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 117
+  }
+ },
+ {
+  "variant": "before",
+  "id": 8,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Gradle 프로젝트야. ./gradlew build로 빌드해줘",
+  "expect": {
+   "not": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la; test -f ./gradlew && echo \"gradlew found\" || echo \"gradlew missing\""
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 144
+  }
+ },
+ {
+  "variant": "before",
+  "id": 9,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
+  "expect": {
+   "want": "json-querying"
+  },
+  "read": [
+   "json-querying"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "head -c 1500 api-response.json; echo; ls -la api-response.json"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 116,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 326
+  }
+ },
+ {
+  "variant": "before",
+  "id": 10,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "package.json 내용 좀 보여줘",
+  "expect": {
+   "not": "json-querying"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 90,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 91
+  }
+ },
+ {
+  "variant": "before",
+  "id": 11,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "내 MR 중에 파이프라인이 실패한 게 있는지 확인하고, 실패한 잡 로그를 요약해줘",
+  "expect": {
+   "want": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 194
+  }
+ },
+ {
+  "variant": "before",
+  "id": 12,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "지금 변경사항을 커밋하고 feature/login 브랜치를 만들어줘",
+  "expect": {
+   "not": [
+    "gitlab-workflow",
+    "github-workflow"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "git status --short && echo \"---\" && git branch --show-current && echo \"---\" && git diff --stat"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 99
+  }
+ },
+ {
+  "variant": "before",
+  "id": 13,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "GitHub의 PR #42에 달린 리뷰 코멘트를 정리해줘",
+  "expect": {
+   "want": "github-workflow"
+  },
+  "read": [
+   "github-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 187
+  }
+ },
+ {
+  "variant": "before",
+  "id": 14,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab의 MR !17에 달린 코멘트를 보여줘",
+  "expect": {
+   "not": "github-workflow",
+   "alt": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 199
+  }
+ },
+ {
+  "variant": "before",
+  "id": 15,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "PostgreSQL 연결 pgmain에서 orders 테이블의 최근 10건을 조회해줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 207
+  }
+ },
+ {
+  "variant": "before",
+  "id": 16,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 PKG_BILLING 패키지 PL/SQL 소스를 보여줘",
+  "expect": {
+   "not": "sql-querying",
+   "alt": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 110,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 158
+  }
+ },
+ {
+  "variant": "before",
+  "id": 17,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 EMP 테이블 DDL을 뽑아줘",
+  "expect": {
+   "want": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 101,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 158
+  }
+ },
+ {
+  "variant": "before",
+  "id": 18,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "SQLite 파일 app.db의 users 테이블 행 수를 알려줘",
+  "expect": {
+   "not": "oracle-db-querying",
+   "alt": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 207
+  }
+ },
+ {
+  "variant": "before",
+  "id": 19,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal:8080/health가 200을 돌려주는지 확인하는 테스트를 만들어서 실행해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "command -v hurl && hurl --version; cat ~/.claude 2>/dev/null; ls"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 119,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 162
+  }
+ },
+ {
+  "variant": "before",
+  "id": 20,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 위키 http://wiki.internal/onboarding에 뭐라고 써 있는지 요약해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 195
+  }
+ },
+ {
+  "variant": "before",
+  "id": 21,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://wiki.internal/release-notes 페이지의 링크 목록을 뽑아줘",
+  "expect": {
+   "want": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 108,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 196
+  }
+ },
+ {
+  "variant": "before",
+  "id": 22,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://admin.internal에 로그인해서 설정 화면 스크린샷을 찍어줘",
+  "expect": {
+   "not": "web-page-reading",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 109,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 230
+  }
+ },
+ {
+  "variant": "before",
+  "id": 23,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://app.internal/signup에서 회원가입 폼을 채워 제출하고 결과 화면을 확인해줘",
+  "expect": {
+   "want": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 117,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 208
+  }
+ },
+ {
+  "variant": "before",
+  "id": 24,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal/v1/users가 돌려주는 JSON을 확인해줘",
+  "expect": {
+   "not": "web-page-automation",
+   "alt": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 271
+  }
+ },
+ {
+  "variant": "before",
+  "id": 25,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 함수가 하는 일을 설명해줘: function add(a,b){return a+b}",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "`add(a, b)`는 두 인자를 받아 더한 값을 반환하는 함수입니다.\n\n- `a`와 `b`를 `+` 연산자로 더합니다.\n- 결과를 `return`으로 호출한 쪽에 돌려줍니다.\n\n예시:\n```js\nadd(2, 3);   // 5\nadd(1, -4);  // -3\n```\n\n주의할 점: `",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 278
+  }
+ },
+ {
+  "variant": "before",
+  "id": 26,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "sum.js를 읽고 버그가 있으면 고쳐줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "before",
+  "id": 27,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "git의 rebase와 merge 차이를 짧게 설명해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "**merge**와 **rebase**는 두 브랜치의 변경을 합치는 방식이 다릅니다.\n\n- **merge**: 두 브랜치의 끝(tip)을 잇는 새 **merge commit**을 만듭니다. 기존 커밋 이력은 그대로 보존되지만, 브랜치가 여러 갈래로 나뉘어 이력이 복잡해질 수 있습니다.\n",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 356
+  }
+ },
+ {
+  "variant": "before",
+  "id": 28,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "README.md에 설치 방법 절을 추가해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la; cat package.json 2>/dev/null | head -50; ls *.toml *.txt *.cfg setup.py 2>/dev/null"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 95,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 206
+  }
+ },
+ {
+  "variant": "before",
+  "id": 29,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버(http://127.0.0.1:8080)에서 /loan/new 폼으로 대여를 신청하면 서버가 어떤 상태 코드와 이동 위치를 돌려주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [
+   "curl"
+  ],
+  "bash": [
+   "hurl --version; curl -s -i http://127.0.0.1:8080/loan/new | head -c 4000"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 152,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 375
+  }
+ },
+ {
+  "variant": "before",
+  "id": 30,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버를 띄워 뒀어. http://localhost:8080/api/books 가 200과 책 목록 JSON을 주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 129,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 225
+  }
+ },
+ {
+  "variant": "before",
+  "id": 31,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "작업 폴더의 data/library.db에서 아직 반납 안 된 대여 행들을 보여줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la data/ && fd -e db . | head"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 287
+  }
+ },
+ {
+  "variant": "before",
+  "id": 32,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "LoanService의 isOverdue가 어디서 호출되는지 찾아줘",
+  "expect": {
+   "not": "structural-code-search",
+   "avoid": "bash-grep"
+  },
+  "read": [],
+  "first": [
+   "grep"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 74
+  }
+ },
+ {
+  "variant": "before",
+  "id": 33,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src/main/resources/application.yml의 server.port를 9090으로 바꿔줘",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 99
+  }
+ },
+ {
+  "variant": "before",
+  "id": 34,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "pom.xml에 적힌 sqlite-jdbc 버전이 뭐야?",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "grep"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 102
+  }
+ },
+ {
+  "variant": "before",
+  "id": 35,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://127.0.0.1:8080/loan/overdue 화면이 어떻게 보이는지 스크린샷으로 확인해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 195
+  }
+ },
+ {
+  "variant": "before",
+  "id": 36,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "mvn spring-boot:run으로 개발 서버를 띄워 두고, 뜨면 알려줘",
+  "expect": {
+   "not": [
+    "http-api-testing",
+    "terminal-session-control"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls pom.xml 2>/dev/null || fd pom.xml -d 3 . | head -5"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 254
+  }
+ },
+ {
+  "variant": "after",
+  "id": 1,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src 아래에서 지난 일주일 사이에 바뀐 .java 파일 목록과, 그중 TODO가 몇 개씩 있는지 세어줘",
+  "expect": {
+   "want": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "cd C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/after-claude/work && ls -d src 2>&1; fd -e java --changed-within 7d . src 2>&1 |"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 133,
+   "cacheRead": 2635,
+   "cacheWrite": 4827,
+   "out": 254
+  }
+ },
+ {
+  "variant": "after",
+  "id": 2,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "UserService 클래스가 어디에 정의돼 있는지 찾아줘",
+  "expect": {
+   "not": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"class UserService\\b\" . 2>/dev/null | head -50"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 93
+  }
+ },
+ {
+  "variant": "after",
+  "id": 3,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "주석이나 문자열은 빼고, 코드에서 userRepo.findById(...)를 호출하는 곳만 전부 찾아줘",
+  "expect": {
+   "want": "structural-code-search"
+  },
+  "read": [
+   "structural-code-search"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 125,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 231
+  }
+ },
+ {
+  "variant": "after",
+  "id": 4,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "OrderService.java 안의 calculateTotal 메서드 이름을 computeTotal로 바꿔줘 (그 파일 안에서만)",
+  "expect": {
+   "not": "structural-code-search"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd OrderService.java; rg -n \"calculateTotal\" $(fd OrderService.java)"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 126,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 100
+  }
+ },
+ {
+  "variant": "after",
+  "id": 5,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "node REPL을 띄워서 .help를 입력한 결과 화면을 보여줘",
+  "expect": {
+   "want": "terminal-session-control"
+  },
+  "read": [
+   "terminal-session-control"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "Node REPL은 키보드 입력을 기다리는 프로그램이라 bash에서 직접 실행하면 멈춥니다. 터미널 세션 제어 스킬을 먼저 읽겠습니다.",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 311
+  }
+ },
+ {
+  "variant": "after",
+  "id": 6,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "npm test를 실행해서 결과를 알려줘",
+  "expect": {
+   "not": "terminal-session-control"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "cd C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/after-claude/work && ls && cat package.json 2>/dev/null | head -50"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 94,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 141
+  }
+ },
+ {
+  "variant": "after",
+  "id": 7,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 프로젝트 justfile에 있는 작업 중 테스트를 돌리는 걸 찾아서 실행해줘",
+  "expect": {
+   "want": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 120,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 142
+  }
+ },
+ {
+  "variant": "after",
+  "id": 8,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Gradle 프로젝트야. ./gradlew build로 빌드해줘",
+  "expect": {
+   "not": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "background"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 186
+  }
+ },
+ {
+  "variant": "after",
+  "id": 9,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
+  "expect": {
+   "want": "json-querying"
+  },
+  "read": [
+   "json-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 116,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 213
+  }
+ },
+ {
+  "variant": "after",
+  "id": 10,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "package.json 내용 좀 보여줘",
+  "expect": {
+   "not": "json-querying"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 90,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 91
+  }
+ },
+ {
+  "variant": "after",
+  "id": 11,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "내 MR 중에 파이프라인이 실패한 게 있는지 확인하고, 실패한 잡 로그를 요약해줘",
+  "expect": {
+   "want": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 202
+  }
+ },
+ {
+  "variant": "after",
+  "id": 12,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "지금 변경사항을 커밋하고 feature/login 브랜치를 만들어줘",
+  "expect": {
+   "not": [
+    "gitlab-workflow",
+    "github-workflow"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "git status --short && echo \"---\" && git branch --show-current && echo \"---\" && git log --oneline -3 && echo \"---\" && git diff --stat"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 115
+  }
+ },
+ {
+  "variant": "after",
+  "id": 13,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "GitHub의 PR #42에 달린 리뷰 코멘트를 정리해줘",
+  "expect": {
+   "want": "github-workflow"
+  },
+  "read": [
+   "github-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 199
+  }
+ },
+ {
+  "variant": "after",
+  "id": 14,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab의 MR !17에 달린 코멘트를 보여줘",
+  "expect": {
+   "not": "github-workflow",
+   "alt": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 201
+  }
+ },
+ {
+  "variant": "after",
+  "id": 15,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "PostgreSQL 연결 pgmain에서 orders 테이블의 최근 10건을 조회해줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 214
+  }
+ },
+ {
+  "variant": "after",
+  "id": 16,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 PKG_BILLING 패키지 PL/SQL 소스를 보여줘",
+  "expect": {
+   "not": "sql-querying",
+   "alt": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 110,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 215
+  }
+ },
+ {
+  "variant": "after",
+  "id": 17,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 EMP 테이블 DDL을 뽑아줘",
+  "expect": {
+   "want": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 101,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 208
+  }
+ },
+ {
+  "variant": "after",
+  "id": 18,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "SQLite 파일 app.db의 users 테이블 행 수를 알려줘",
+  "expect": {
+   "not": "oracle-db-querying",
+   "alt": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 211
+  }
+ },
+ {
+  "variant": "after",
+  "id": 19,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal:8080/health가 200을 돌려주는지 확인하는 테스트를 만들어서 실행해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "먼저 HTTP 확인에 쓸 skill을 읽겠습니다.",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 119,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 258
+  }
+ },
+ {
+  "variant": "after",
+  "id": 20,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 위키 http://wiki.internal/onboarding에 뭐라고 써 있는지 요약해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 200
+  }
+ },
+ {
+  "variant": "after",
+  "id": 21,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://wiki.internal/release-notes 페이지의 링크 목록을 뽑아줘",
+  "expect": {
+   "want": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 108,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 199
+  }
+ },
+ {
+  "variant": "after",
+  "id": 22,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://admin.internal에 로그인해서 설정 화면 스크린샷을 찍어줘",
+  "expect": {
+   "not": "web-page-reading",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 109,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 204
+  }
+ },
+ {
+  "variant": "after",
+  "id": 23,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://app.internal/signup에서 회원가입 폼을 채워 제출하고 결과 화면을 확인해줘",
+  "expect": {
+   "want": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 117,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 215
+  }
+ },
+ {
+  "variant": "after",
+  "id": 24,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal/v1/users가 돌려주는 JSON을 확인해줘",
+  "expect": {
+   "not": "web-page-automation",
+   "alt": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 219
+  }
+ },
+ {
+  "variant": "after",
+  "id": 25,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 함수가 하는 일을 설명해줘: function add(a,b){return a+b}",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "이 함수는 두 인자 `a`와 `b`를 받아 그 합을 반환합니다.\n\n```js\nfunction add(a, b) {\n  return a + b;\n}\n```\n\n- `add(2, 3)`은 `5`를 반환합니다.\n- JavaScript의 `+` 연산자를 쓰므로, 인자가 문자열이면 이어 붙이기가 ",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 164
+  }
+ },
+ {
+  "variant": "after",
+  "id": 26,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "sum.js를 읽고 버그가 있으면 고쳐줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "after",
+  "id": 27,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "git의 rebase와 merge 차이를 짧게 설명해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "**merge**와 **rebase**는 두 브랜치의 변경을 합친다는 목적은 같지만, 히스토리를 만드는 방식이 다릅니다.\n\n- **merge**: 두 브랜치의 끝 커밋을 잇는 **새 merge 커밋**을 만듭니다. 기존 커밋은 그대로 남아 실제 개발 흐름이 보존되지만, 히스토리가 가지처",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 389
+  }
+ },
+ {
+  "variant": "after",
+  "id": 28,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "README.md에 설치 방법 절을 추가해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la; cat package.json 2>/dev/null | head -50; fd -d 2 -e toml -e json -e txt . | head -30"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 95,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 202
+  }
+ },
+ {
+  "variant": "after",
+  "id": 29,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버(http://127.0.0.1:8080)에서 /loan/new 폼으로 대여를 신청하면 서버가 어떤 상태 코드와 이동 위치를 돌려주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 152,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 227
+  }
+ },
+ {
+  "variant": "after",
+  "id": 30,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버를 띄워 뒀어. http://localhost:8080/api/books 가 200과 책 목록 JSON을 주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 129,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 205
+  }
+ },
+ {
+  "variant": "after",
+  "id": 31,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "작업 폴더의 data/library.db에서 아직 반납 안 된 대여 행들을 보여줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 197
+  }
+ },
+ {
+  "variant": "after",
+  "id": 32,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "LoanService의 isOverdue가 어디서 호출되는지 찾아줘",
+  "expect": {
+   "not": "structural-code-search",
+   "avoid": "bash-grep"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"isOverdue\" . 2>/dev/null | head -100"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "after",
+  "id": 33,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src/main/resources/application.yml의 server.port를 9090으로 바꿔줘",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 99
+  }
+ },
+ {
+  "variant": "after",
+  "id": 34,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "pom.xml에 적힌 sqlite-jdbc 버전이 뭐야?",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "grep"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 97
+  }
+ },
+ {
+  "variant": "after",
+  "id": 35,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://127.0.0.1:8080/loan/overdue 화면이 어떻게 보이는지 스크린샷으로 확인해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 199
+  }
+ },
+ {
+  "variant": "after",
+  "id": 36,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "mvn spring-boot:run으로 개발 서버를 띄워 두고, 뜨면 알려줘",
+  "expect": {
+   "not": [
+    "http-api-testing",
+    "terminal-session-control"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls; fd pom.xml . -d 3 | head"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 155
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 1,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src 아래에서 지난 일주일 사이에 바뀐 .java 파일 목록과, 그중 TODO가 몇 개씩 있는지 세어줘",
+  "expect": {
+   "want": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "cd C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/before-claude/work && ls src 2>&1 | head; echo \"---\"; fd -e java . src --changed"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 133,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 244
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 2,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "UserService 클래스가 어디에 정의돼 있는지 찾아줘",
+  "expect": {
+   "not": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"class\\s+UserService\\b\" . 2>/dev/null | head -50"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 96
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 3,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "주석이나 문자열은 빼고, 코드에서 userRepo.findById(...)를 호출하는 곳만 전부 찾아줘",
+  "expect": {
+   "want": "structural-code-search"
+  },
+  "read": [
+   "structural-code-search"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 125,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 228
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 4,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "OrderService.java 안의 calculateTotal 메서드 이름을 computeTotal로 바꿔줘 (그 파일 안에서만)",
+  "expect": {
+   "not": "structural-code-search"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd OrderService.java; rg -n \"calculateTotal\" $(fd OrderService.java)"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 126,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 100
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 5,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "node REPL을 띄워서 .help를 입력한 결과 화면을 보여줘",
+  "expect": {
+   "want": "terminal-session-control"
+  },
+  "read": [
+   "terminal-session-control"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "command -v psmux node"
+  ],
+  "text": "인터랙티브 프로그램이라 `bash`에서 직접 실행하면 멈추므로, 터미널 세션 제어 스킬을 먼저 확인하겠습니다.",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 379
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 6,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "npm test를 실행해서 결과를 알려줘",
+  "expect": {
+   "not": "terminal-session-control"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "cd C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/before-claude/work && ls && cat package.json 2>/dev/null | head -40"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 94,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 141
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 7,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 프로젝트 justfile에 있는 작업 중 테스트를 돌리는 걸 찾아서 실행해줘",
+  "expect": {
+   "want": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd -a -g justfile . 2>/dev/null | head; cat justfile 2>/dev/null || true"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 120,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 104
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 8,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Gradle 프로젝트야. ./gradlew build로 빌드해줘",
+  "expect": {
+   "not": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la && test -f ./gradlew && echo \"gradlew found\" || echo \"gradlew missing\""
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 150
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 9,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
+  "expect": {
+   "want": "json-querying"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la api-response.json && head -c 800 api-response.json; echo; jq 'type' api-response.json"
+  ],
+  "text": "",
+  "error": null,
+  "pass": false,
+  "altOk": null,
+  "usage": {
+   "in": 116,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 163
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 10,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "package.json 내용 좀 보여줘",
+  "expect": {
+   "not": "json-querying"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 90,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 91
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 11,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "내 MR 중에 파이프라인이 실패한 게 있는지 확인하고, 실패한 잡 로그를 요약해줘",
+  "expect": {
+   "want": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 197
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 12,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "지금 변경사항을 커밋하고 feature/login 브랜치를 만들어줘",
+  "expect": {
+   "not": [
+    "gitlab-workflow",
+    "github-workflow"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "git status --short && echo \"---\" && git branch --show-current && echo \"---\" && git diff --stat && echo \"---\" && git log --oneline -5"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 114
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 13,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "GitHub의 PR #42에 달린 리뷰 코멘트를 정리해줘",
+  "expect": {
+   "want": "github-workflow"
+  },
+  "read": [
+   "github-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 188
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 14,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab의 MR !17에 달린 코멘트를 보여줘",
+  "expect": {
+   "not": "github-workflow",
+   "alt": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 158
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 15,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "PostgreSQL 연결 pgmain에서 orders 테이블의 최근 10건을 조회해줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 211
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 16,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 PKG_BILLING 패키지 PL/SQL 소스를 보여줘",
+  "expect": {
+   "not": "sql-querying",
+   "alt": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 110,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 222
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 17,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 EMP 테이블 DDL을 뽑아줘",
+  "expect": {
+   "want": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 101,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 202
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 18,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "SQLite 파일 app.db의 users 테이블 행 수를 알려줘",
+  "expect": {
+   "not": "oracle-db-querying",
+   "alt": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd -a app.db . 2>/dev/null | head; command -v usql"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 284
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 19,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal:8080/health가 200을 돌려주는지 확인하는 테스트를 만들어서 실행해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 119,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 209
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 20,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 위키 http://wiki.internal/onboarding에 뭐라고 써 있는지 요약해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 205
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 21,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://wiki.internal/release-notes 페이지의 링크 목록을 뽑아줘",
+  "expect": {
+   "want": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 108,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 198
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 22,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://admin.internal에 로그인해서 설정 화면 스크린샷을 찍어줘",
+  "expect": {
+   "not": "web-page-reading",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 109,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 230
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 23,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://app.internal/signup에서 회원가입 폼을 채워 제출하고 결과 화면을 확인해줘",
+  "expect": {
+   "want": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 117,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 209
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 24,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal/v1/users가 돌려주는 JSON을 확인해줘",
+  "expect": {
+   "not": "web-page-automation",
+   "alt": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 242
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 25,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 함수가 하는 일을 설명해줘: function add(a,b){return a+b}",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "이 함수는 두 인자 `a`와 `b`를 받아 그 합을 반환합니다.\n\n- `add(2, 3)` → `5`\n- 인자가 문자열이면 연결(concatenation)이 일어납니다. 예: `add(\"2\", \"3\")` → `\"23\"`\n- 숫자와 문자열이 섞이면 문자열로 합쳐집니다. 예: `add(1,",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 201
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 26,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "sum.js를 읽고 버그가 있으면 고쳐줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 27,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "git의 rebase와 merge 차이를 짧게 설명해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "**merge**는 두 브랜치의 끝(tip)을 합치는 **merge commit**을 새로 만듭니다. 기존 커밋 이력은 그대로 보존되며, 브랜치가 갈라졌다가 합쳐진 모양이 그대로 남습니다.\n\n**rebase**는 내 브랜치의 커밋들을 떼어 내서 다른 브랜치의 최신 지점 위에 **다시 적",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 476
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 28,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "README.md에 설치 방법 절을 추가해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 95,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 91
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 29,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버(http://127.0.0.1:8080)에서 /loan/new 폼으로 대여를 신청하면 서버가 어떤 상태 코드와 이동 위치를 돌려주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read",
+   "grep"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 152,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 375
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 30,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버를 띄워 뒀어. http://localhost:8080/api/books 가 200과 책 목록 JSON을 주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "bash"
+  ],
+  "habits": [
+   "bash-cat"
+  ],
+  "bash": [
+   "cat C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/before-claude/agent/skills/http-api-testing/SKILL.md; which hurl"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 129,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 200
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 31,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "작업 폴더의 data/library.db에서 아직 반납 안 된 대여 행들을 보여줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la data; which usql"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 300
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 32,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "LoanService의 isOverdue가 어디서 호출되는지 찾아줘",
+  "expect": {
+   "not": "structural-code-search",
+   "avoid": "bash-grep"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"isOverdue\" . 2>/dev/null | head -100"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 33,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src/main/resources/application.yml의 server.port를 9090으로 바꿔줘",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 99
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 34,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "pom.xml에 적힌 sqlite-jdbc 버전이 뭐야?",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "grep"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 102
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 35,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://127.0.0.1:8080/loan/overdue 화면이 어떻게 보이는지 스크린샷으로 확인해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 193
+  }
+ },
+ {
+  "variant": "before-r2",
+  "id": 36,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "mvn spring-boot:run으로 개발 서버를 띄워 두고, 뜨면 알려줘",
+  "expect": {
+   "not": [
+    "http-api-testing",
+    "terminal-session-control"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la; fd pom.xml . 2>/dev/null | head"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7158,
+   "cacheWrite": 0,
+   "out": 179
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 1,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src 아래에서 지난 일주일 사이에 바뀐 .java 파일 목록과, 그중 TODO가 몇 개씩 있는지 세어줘",
+  "expect": {
+   "want": "find-code"
+  },
+  "read": [
+   "find-code"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 133,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 297
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 2,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "UserService 클래스가 어디에 정의돼 있는지 찾아줘",
+  "expect": {
+   "not": "find-code"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"class UserService\\b\" . 2>/dev/null | head -50"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 93
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 3,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "주석이나 문자열은 빼고, 코드에서 userRepo.findById(...)를 호출하는 곳만 전부 찾아줘",
+  "expect": {
+   "want": "structural-code-search"
+  },
+  "read": [
+   "structural-code-search"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 125,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 218
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 4,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "OrderService.java 안의 calculateTotal 메서드 이름을 computeTotal로 바꿔줘 (그 파일 안에서만)",
+  "expect": {
+   "not": "structural-code-search"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd OrderService.java; rg -n \"calculateTotal\" $(fd OrderService.java)"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 126,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 100
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 5,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "node REPL을 띄워서 .help를 입력한 결과 화면을 보여줘",
+  "expect": {
+   "want": "terminal-session-control"
+  },
+  "read": [
+   "terminal-session-control"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "Node REPL은 대화형 프로그램이라 일반 bash에서 실행하면 멈춥니다. psmux 스킬을 먼저 읽겠습니다.",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 293
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 6,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "npm test를 실행해서 결과를 알려줘",
+  "expect": {
+   "not": "terminal-session-control"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "cd C:/Users/user/OneDrive/Documents/workspace/oxygen-pi-system/tests/skill-eval/after-claude/work && ls && cat package.json 2>/dev/null | head -50"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 94,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 141
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 7,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 프로젝트 justfile에 있는 작업 중 테스트를 돌리는 걸 찾아서 실행해줘",
+  "expect": {
+   "want": "project-task-running"
+  },
+  "read": [
+   "project-task-running"
+  ],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "fd -i '^justfile$' . 2>/dev/null"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 120,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 365
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 8,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Gradle 프로젝트야. ./gradlew build로 빌드해줘",
+  "expect": {
+   "not": "project-task-running"
+  },
+  "read": [],
+  "first": [
+   "background"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 103,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 179
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 9,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "api-response.json에서 status가 FAILED인 항목의 id만 뽑아서 CSV로 만들어줘",
+  "expect": {
+   "want": "json-querying"
+  },
+  "read": [
+   "json-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 116,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 203
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 10,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "package.json 내용 좀 보여줘",
+  "expect": {
+   "not": "json-querying"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 90,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 91
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 11,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "내 MR 중에 파이프라인이 실패한 게 있는지 확인하고, 실패한 잡 로그를 요약해줘",
+  "expect": {
+   "want": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 204
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 12,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "지금 변경사항을 커밋하고 feature/login 브랜치를 만들어줘",
+  "expect": {
+   "not": [
+    "gitlab-workflow",
+    "github-workflow"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "git status --short && echo \"---\" && git branch --show-current && echo \"---\" && git diff --stat HEAD"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 103
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 13,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "GitHub의 PR #42에 달린 리뷰 코멘트를 정리해줘",
+  "expect": {
+   "want": "github-workflow"
+  },
+  "read": [
+   "github-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 201
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 14,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab의 MR !17에 달린 코멘트를 보여줘",
+  "expect": {
+   "not": "github-workflow",
+   "alt": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 201
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 15,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "PostgreSQL 연결 pgmain에서 orders 테이블의 최근 10건을 조회해줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 220
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 16,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 PKG_BILLING 패키지 PL/SQL 소스를 보여줘",
+  "expect": {
+   "not": "sql-querying",
+   "alt": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 110,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 216
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 17,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "Oracle의 EMP 테이블 DDL을 뽑아줘",
+  "expect": {
+   "want": "oracle-db-querying"
+  },
+  "read": [
+   "oracle-db-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 101,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 210
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 18,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "SQLite 파일 app.db의 users 테이블 행 수를 알려줘",
+  "expect": {
+   "not": "oracle-db-querying",
+   "alt": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 199
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 19,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal:8080/health가 200을 돌려주는지 확인하는 테스트를 만들어서 실행해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "HTTP 요청은 `hurl`을 쓰도록 되어 있어서, 먼저 해당 스킬을 읽겠습니다.",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 119,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 282
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 20,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 위키 http://wiki.internal/onboarding에 뭐라고 써 있는지 요약해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 114,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 198
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 21,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://wiki.internal/release-notes 페이지의 링크 목록을 뽑아줘",
+  "expect": {
+   "want": "web-page-reading"
+  },
+  "read": [
+   "web-page-reading"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 108,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 198
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 22,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://admin.internal에 로그인해서 설정 화면 스크린샷을 찍어줘",
+  "expect": {
+   "not": "web-page-reading",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 109,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 203
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 23,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://app.internal/signup에서 회원가입 폼을 채워 제출하고 결과 화면을 확인해줘",
+  "expect": {
+   "want": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 117,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 216
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 24,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://api.internal/v1/users가 돌려주는 JSON을 확인해줘",
+  "expect": {
+   "not": "web-page-automation",
+   "alt": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 211
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 25,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "이 함수가 하는 일을 설명해줘: function add(a,b){return a+b}",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "이 함수는 두 인자 `a`와 `b`를 받아 더한 값을 반환합니다.\n\n```js\nfunction add(a, b) {\n  return a + b;\n}\n```\n\n- `add(2, 3)`은 `5`를 반환합니다.\n- JavaScript의 `+` 연산자를 사용하므로, 인자가 문자열이면 연결(co",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 163
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 26,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "sum.js를 읽고 버그가 있으면 고쳐줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 27,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "git의 rebase와 merge 차이를 짧게 설명해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [],
+  "habits": [],
+  "bash": [],
+  "text": "**merge**와 **rebase**는 두 브랜치의 변경을 합치는 방식이 다릅니다.\n\n- **merge**: 두 브랜치의 끝점을 잇는 새 **merge commit**을 만듭니다. 기존 커밋 이력은 그대로 유지되므로 실제 흐름이 보존되지만, 이력이 가지처럼 복잡해질 수 있습니다.\n- ",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 100,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 346
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 28,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "README.md에 설치 방법 절을 추가해줘",
+  "expect": {
+   "none": true
+  },
+  "read": [],
+  "first": [
+   "read",
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "ls -la; cat package.json 2>/dev/null | head -50; ls *.md 2>/dev/null"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 95,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 192
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 29,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버(http://127.0.0.1:8080)에서 /loan/new 폼으로 대여를 신청하면 서버가 어떤 상태 코드와 이동 위치를 돌려주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 152,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 224
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 30,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "개발 서버를 띄워 뒀어. http://localhost:8080/api/books 가 200과 책 목록 JSON을 주는지 확인해줘",
+  "expect": {
+   "want": "http-api-testing"
+  },
+  "read": [
+   "http-api-testing"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 129,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 207
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 31,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "작업 폴더의 data/library.db에서 아직 반납 안 된 대여 행들을 보여줘",
+  "expect": {
+   "want": "sql-querying"
+  },
+  "read": [
+   "sql-querying"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 206
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 32,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "LoanService의 isOverdue가 어디서 호출되는지 찾아줘",
+  "expect": {
+   "not": "structural-code-search",
+   "avoid": "bash-grep"
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "rg -n \"isOverdue\" . 2>/dev/null | head -100"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 92
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 33,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "src/main/resources/application.yml의 server.port를 9090으로 바꿔줘",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 105,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 99
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 34,
+  "kind": "G",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "pom.xml에 적힌 sqlite-jdbc 버전이 뭐야?",
+  "expect": {
+   "none": true,
+   "avoid": "bash-cat"
+  },
+  "read": [],
+  "first": [
+   "grep"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 106,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 102
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 35,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "http://127.0.0.1:8080/loan/overdue 화면이 어떻게 보이는지 스크린샷으로 확인해줘",
+  "expect": {
+   "not": "http-api-testing",
+   "alt": "web-page-automation"
+  },
+  "read": [
+   "web-page-automation"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 123,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 200
+  }
+ },
+ {
+  "variant": "after-r2",
+  "id": 36,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "mvn spring-boot:run으로 개발 서버를 띄워 두고, 뜨면 알려줘",
+  "expect": {
+   "not": [
+    "http-api-testing",
+    "terminal-session-control"
+   ]
+  },
+  "read": [],
+  "first": [
+   "background"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 113,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 120
+  }
+ }
+]
