@@ -352,6 +352,23 @@ export function resolveLevel(llm, levelId) {
   return { level: lv.id, connection: conn.id, provider: providerId(conn.id), id: lv.model, thinking: lv.thinking || "off" };
 }
 
+/**
+ * 작업 수준 → subagent 의 대상. 수준이 기본 모델(llm.main)과 같으면 "기본 모델" 이라는 뜻으로 보고 지금 대화의 모델(current)을 따른다
+ * (docs/tui-spec.md §11, 2026-11-14: pi 에서 기본 모델을 Haiku 로 바꿔도 수준은 설치 때의 vllm/qwen 그대로라 subagent 가 옛 연결로 가서
+ * 413 · 429 로 실패했다). 따로 다른 모델을 지정한 수준은 그대로. current: { provider: "oxy-<연결>", id }
+ */
+export function resolveLevelFor(llm, levelId, current) {
+  const r = resolveLevel(llm, levelId);
+  if (!r) return null;
+  const m = llm?.main;
+  if (!m || r.connection !== m.connection || r.id !== m.model) return r;
+  if (!current?.provider || !current?.id || !String(current.provider).startsWith("oxy-")) return r;
+  if (current.provider === r.provider && current.id === r.id) return r;
+  const conn = findConnection(llm, String(current.provider).slice(4));
+  if (!conn || !findModel(conn, current.id)) return r;
+  return { ...r, connection: conn.id, provider: current.provider, id: current.id, followsMain: true };
+}
+
 /** llm.json 검사 → 문제 목록 (빈 배열이면 정상). root 가 있으면 thinking 지원 여부까지 본다 */
 export function validateLlm(llm, root) {
   const errs = [];

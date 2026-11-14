@@ -123,7 +123,8 @@ chk "subagent: 별도 컨텍스트 실행 후 결과 반환"     '[[ "$out" == *
 out=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$OXY_PI_CLI" --no-session -p --model qwen3.8-27b --thinking low "scenario:sub-sync" < /dev/null 2>&1) || true
 child() { jq -r 'select((.body.messages | map(select(.role=="user"))[0].content | tostring) | test("Task:")) | "\(.body.model) \(.body.chat_template_kwargs.enable_thinking)"' "$REQLOG" | sort -u | tr '\n' ' '; }
 cm=$(child)
-chk "subagent: 수준을 정하지 않으면 agent 의 기본 수준(scout=light) 모델 ($cm)" '[[ "$cm" == "qwen3.6-coder-30b null " ]]'
+# scout 의 기본 수준 light 는 기본 모델(coder-30b)과 같다 → "기본 모델" 로 보고 지금 대화의 모델(qwen3.8-27b)을 따른다. thinking 은 수준의 off (docs/tui-spec.md §11, 2026-11-14)
+chk "subagent: 수준을 정하지 않으면 agent 의 기본 수준(scout=light) → 기본 모델과 같은 수준은 지금 대화 모델 ($cm)" '[[ "$cm" == "qwen3.8-27b false " ]]'
 : > "$REQLOG"
 out=$(cd "$TMP/work" && timeout 120 "$OXY_NODE" "$OXY_PI_CLI" --no-session -p "scenario:sub-level" < /dev/null 2>&1) || true
 cl=$(child)
@@ -242,6 +243,12 @@ jq '.compaction.keepRecentTokens = 50' "$TMP/settings.bak" > "$TMP/agent/setting
 FSID=flowa frun "scenario:flow-big refactor the parser"
 chk "flow: 작업 도중 compaction → LLM 요약 요청 없음" '[[ "$out" == *after-compaction* && $(grep -c "context summarization" "$REQ") -eq 0 ]]'
 chk "flow: compaction 요약 = 작업 상태 + 최근 요청"  '[[ $(tail -1 "$REQ" | jq -r "$CONV") == *"[oxy-flow] Task state"*"Latest user request: scenario:flow-big"* ]]'
+# compaction 직후(사용률을 모를 때) 보낸 메시지 → 새 세션 (docs/flow-spec.md §1-6, keepRecentTokens 50 인 동안)
+: > "$REQLOG"
+FWC="$TMP/flowwork4"; mkdir -p "$FWC"; (cd "$FWC" && git init -q)
+rc=$(cd "$FWC" && OXY_FLOW=on timeout 150 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-compact.mjs")" "$OXY_PI_CLI" "$(winpath "$FWC")" "$(winpath "$REQLOG")" 2>/dev/null | tail -1) || true
+printf '\n\033[1m[rpc-compact]\033[0m %s\n' "$rc"
+chk "flow: compaction 직후 메시지 → 새 세션 + 작업 상태 + 마지막 답" '[[ "$rc" == *"\"compacted\":true"* && "$rc" == *"\"newSession\":true"* && "$rc" == *"\"stateInjected\":true"* && "$rc" == *"\"lastReplyCarried\":true"* ]]'
 cp "$TMP/settings.bak" "$TMP/agent/settings.json"
 : > "$REQLOG"
 rf=$(cd "$FW" && OXY_FLOW=on timeout 120 "$OXY_NODE" "$(winpath "$OXY_HOME/tests/rpc-flow.mjs")" "$OXY_PI_CLI" "$(winpath "$FW")" "$(winpath "$REQLOG")" 2>"$TMP/rpc-flow.err" | tail -1) || true; [[ -s "$TMP/rpc-flow.err" ]] && grep "injected tail" "$TMP/rpc-flow.err" || true

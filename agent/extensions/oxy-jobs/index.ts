@@ -285,14 +285,17 @@ export default async function (pi: ExtensionAPI) {
           if (items.length > 8) throw new Error("at most 8 tasks at once");
           const defs = items.map((t) => find(t.agent));
           // 대상: 도구의 level → agent 정의의 level → agent 정의의 provider/model/thinking → 부모의 지금 모델 · thinking
+          // 수준이 기본 모델과 같으면 지금 대화의 모델을 따른다 (resolveLevelFor)
+          const current = { provider: ctx.model?.provider, id: ctx.model?.id };
+          const level = (id: string) => (llmLib?.resolveLevelFor ? llmLib.resolveLevelFor(llm, id, current) : llmLib?.resolveLevel(llm, id)) as LevelTarget | null;
           const targets = items.map((t, i) => {
             const asked = t.level ?? (params.tasks?.length ? params.level : undefined);
             if (asked) {
-              const r = llmLib?.resolveLevel(llm, asked) as LevelTarget | null;
+              const r = level(asked);
               if (!r) throw new Error(`unknown level "${asked}". Levels: ${levels.map((l) => l.id).join(", ") || "none"}`);
               return r;
             }
-            return defs[i].level ? (llmLib?.resolveLevel(llm, defs[i].level) as LevelTarget | null) : null;
+            return defs[i].level ? level(defs[i].level) : null;
           });
           const wait = params.wait !== false;
           const parent = { provider: ctx.model?.provider, id: ctx.model?.id, thinking: safeThinking() };

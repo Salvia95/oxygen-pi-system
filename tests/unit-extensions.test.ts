@@ -2034,6 +2034,30 @@ test("flow 모니터 Completed Flow: 끝난 Flow · 펼친 Task 기호 · r 확�
   assert.deepEqual(M.planRows(cur, new Set(["p:p2"]), 35).map((r: any) => r.text).slice(2, 4), ["[2/3] 구현", "↶ 여기까지 되돌림 (취소함)"]);
 });
 
+test("작업 수준: 기본 모델과 같은 수준은 지금 대화의 모델을 따른다 · compaction 은 최근 대화를 8K 만 남긴다 (2026-11-14)", async () => {
+  const C = await import("../scripts/llm-connections.mjs");
+  const conn = (id: string, kind: string, models: string[]) => ({ id, kind, baseUrl: "http://x", models: models.map((m) => ({ id: m, contextWindow: 1, maxOutput: 1 })) });
+  const llm: any = { version: 1, connections: [conn("vllm", "vllm", ["qwen"]), conn("anthropic-claude", "anthropic", ["claude-haiku-5-5", "claude-sonnet"])],
+    main: { connection: "vllm", model: "qwen" },
+    levels: [{ id: "light", connection: "vllm", model: "qwen", thinking: "off" }, { id: "deep", connection: "anthropic-claude", model: "claude-sonnet", thinking: "high" }] };
+  const haiku = { provider: "oxy-anthropic-claude", id: "claude-haiku-5-5" };
+  // 설치본의 경우: 본 대화는 Haiku, 수준은 설치 때의 기본 모델(vllm/qwen) → Haiku 를 따른다 (thinking 은 수준의 것)
+  assert.deepEqual(C.resolveLevelFor(llm, "light", haiku), { level: "light", connection: "anthropic-claude", provider: "oxy-anthropic-claude", id: "claude-haiku-5-5", thinking: "off", followsMain: true });
+  assert.equal(C.resolveLevelFor(llm, "deep", haiku).id, "claude-sonnet", "따로 지정한 수준은 그대로");
+  assert.equal(C.resolveLevelFor(llm, "light", { provider: "oxy-vllm", id: "qwen" }).followsMain, undefined, "지금 모델이 기본 모델이면 그대로");
+  assert.equal(C.resolveLevelFor(llm, "light", { provider: "openai", id: "gpt" }).id, "qwen", "등록 안 된 모델이면 수준 그대로");
+  assert.equal(C.resolveLevelFor(llm, "nope", haiku), null);
+  // compaction 경계: 끝에서 8K 만, 도구 결과 앞에서는 자르지 않는다
+  const K = await import("../agent/extensions/oxy-flow/compact.ts");
+  const msg = (id: string, role: string, chars: number) => ({ id, type: "message", message: { role, content: "x".repeat(chars) } });
+  const entries = [msg("a", "user", 30000), msg("b", "assistant", 30000), msg("c", "toolResult", 30000), msg("d", "user", 9000), msg("e", "assistant", 9000), msg("f", "toolResult", 15000)];
+  assert.equal(K.tighterCut(entries, "a", 8000), "e", "끝(f 5K + e 3K)에서 8K 가 되는 경계");
+  assert.equal(K.tighterCut(entries, "a", 9000), "d", "e 까지는 모자라고 f 는 도구 결과라 d");
+  assert.equal(K.tighterCut(entries, "e", 8000), "e", "pi 경계보다 앞으로 가지 않는다");
+  assert.equal(K.tighterCut(entries, "zz", 8000), "zz");
+  assert.equal(K.isCutPoint({ type: "message", message: { role: "toolResult" } }), false);
+});
+
 test("oxy-rate 한도 대기: RPM · TPM 슬라이딩 윈도우 대기 시간 · 429 대기 시각 · 프로세스 사이 공유 (rate-limit-spec)", async () => {
   const L = await import("../agent/extensions/oxy-rate/limiter.ts");
   const { RateStore } = await import("../agent/extensions/oxy-rate/store.ts");

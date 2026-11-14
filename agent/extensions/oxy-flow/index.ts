@@ -22,6 +22,7 @@ import { enabled, envInt, textOf, writeAtomic } from "../_lib/common.ts";
 import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { FileFlowEngine, type FlowNode, commandDirs, git, renderContext, renderMarkdown, renderNode, traceDecisions, workFolderOf } from "./store.ts";
 import { tasksAfter } from "./rollback.ts";
+import { KEEP_TOKENS_DEFAULT, tighterCut } from "./compact.ts";
 import { partialRollbackPrompt, rollbackConfirmLines, rollbackNotice, taskLabel, undoConfirmLines } from "./rollback-ui.ts";
 import { PLAN_STATUSES, type PlanItem, nextStep, progress, renderPlanLines } from "./plan.ts";
 import { brandEnv, brandFg } from "../oxygen-pi-tui/brand.ts";
@@ -64,6 +65,7 @@ export default function (pi: ExtensionAPI) {
   const ctxMax = envInt("OXY_FLOW_CONTEXT_MAX_CHARS", 6000);
   const compactMax = envInt("OXY_FLOW_COMPACT_MAX_CHARS", 12000);
   const fileCompaction = (process.env.OXY_FLOW_COMPACT ?? "file").toLowerCase() !== "llm";
+  const keepTokens = envInt("OXY_FLOW_COMPACT_KEEP_TOKENS", KEEP_TOKENS_DEFAULT);
 
   let engine: FileFlowEngine | null = null;
   let lastPrompt = "";
@@ -341,10 +343,22 @@ export default function (pi: ExtensionAPI) {
       ...(lastPrompt ? ["", `Latest user request: ${lastPrompt.length > 1500 ? `${lastPrompt.slice(0, 1500)} …` : lastPrompt}`] : []),
       "", "(Earlier conversation was replaced by the task state above. The most recent messages follow. Re-read files before editing them.)",
     ].join("\n");
-    return { compaction: { summary, firstKeptEntryId: p.firstKeptEntryId, tokensBefore: p.tokensBefore, details: { engine: "oxy-flow" } } };
+    // 최근 대화는 keepTokens 만큼만 남긴다 (compact.ts): 요약에 작업 기록이 있으므로. pi 기본(20K, 대화 단위)으로는 compaction 뒤에도
+    // 한도 근처에 머물러 compaction 이 연달아 일어났다 (2026-11-14 설치본, 42초에 4번)
+    let firstKept = p.firstKeptEntryId;
+    try { firstKept = tighterCut(ctx.sessionManager.getBranch(), p.firstKeptEntryId, keepTokens); } catch { /* pi 의 경계 그대로 */ }
+    return { compaction: { summary, firstKeptEntryId: firstKept, tokensBefore: p.tokensBefore, details: { engine: "oxy-flow", keptFrom: firstKept !== p.firstKeptEntryId ? "oxy-flow" : "pi" } } };
   });
 
   // ---------------------------------------------------------------- 세션 넘기기: 컨텍스트가 찬 상태에서 새 메시지를 보내면 새 세션에서 처리
+  /** 마지막 compaction 뒤에 응답이 아직 없는가 (pi 가 사용률을 null 로 돌려주는 경우) */
+  const compactedSinceReply = (ctx: any): boolean => {
+    try {
+      const b: any[] = ctx.sessionManager.getBranch();
+      const c = b.map((x) => x?.type).lastIndexOf("compaction");
+      return c >= 0 && !b.slice(c + 1).some((x) => x?.type === "message" && x.message?.role === "assistant" && x.message?.stopReason !== "error" && x.message?.stopReason !== "aborted");
+    } catch { return false; }
+  };
   pi.on("input", async (event: any, ctx: any) => {
     if (!rollover || event.source === "extension" || event.images?.length) return { action: "continue" as const };
     // 1회 실행(-p · json)에서는 하지 않는다: 실행이 먼저 끝나 /oxy-rollover 가 끝난 세션을 건드리고 메시지가 사라졌다.
@@ -353,7 +367,10 @@ export default function (pi: ExtensionAPI) {
     const text = String(event.text ?? "");
     if (!text.trim() || text.startsWith("/") || text.startsWith("!") || event.streamingBehavior) return { action: "continue" as const };
     const u = ctx.getContextUsage?.();
-    if (u?.percent == null || u.percent < rolloverPct) return { action: "continue" as const };
+    // compaction 직후에는 다음 응답 전까지 사용률을 모른다(null). compaction 이 일어났다는 것은 한도 근처였다는 뜻이므로 넘긴다
+    // (2026-11-14 설치본: compaction 직후 보낸 메시지가 넘어가지 않고 compaction 이 이어졌다)
+    const afterCompaction = u?.percent == null && compactedSinceReply(ctx);
+    if (!afterCompaction && (u?.percent == null || u.percent < rolloverPct)) return { action: "continue" as const };
     if (!engine?.hasContent()) return { action: "continue" as const };
     setTimeout(() => void pi.sendUserMessage(`/oxy-rollover ${text}`, { expandPromptTemplates: true }), 0);
     return { action: "handled" as const };

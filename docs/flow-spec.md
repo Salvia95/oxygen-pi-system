@@ -86,6 +86,20 @@ pi 세션이 시작될 때(`session_start`) 위에서부터 처음 맞는 것을
 - 고침: `/oxy-rollover` 가 넘기기 직전 세션의 마지막 사용자 요청과 마지막 답(끝에서 3000자)을 `flow.handoff` 에 남기고, 새 세션의 첫 요청에 넣는 작업 상태(continue)에 "The last exchange in the previous session: User: … / You replied: … The user's next message may answer that reply" 를 더한다. 한 번 넣고 지운다.
 - 단위: setHandoff · renderContext(continue/reference) · clearHandoff. E2E: rpc-flow 의 `lastReplyCarried`.
 
+## 1-6. compaction 이 줄이지 못해 반복되던 것 · compaction 직후의 세션 넘기기 (2026-11-14)
+
+요청 (사용자, 2026-11-14): "현재 compaction 후 토큰이 전체의 50%를 넘어도 새 세션으로 열지 않고 계속 compaction을 진행하는데 이유가 뭐야?" → 제안 2(a)(b) 진행 ("진행해줘").
+
+확인한 사실 (설치본, 앞 세션 11:46 ~ 11:52, Claude Haiku 128K 창)
+- 세션 넘기기는 사용자가 새 메시지를 보낼 때만 한다. "순서대로 실행해줘" 한 번으로 에이전트가 오래 도는 동안에는 pi 의 compaction 만 일어난다.
+- pi 는 compaction 직후 다음 응답이 올 때까지 사용률을 모른다(null, `getContextUsage`). 넘기기는 null 이면 하지 않아, compaction(11:50:24) 직후 보낸 "커밋은 만들지 말고 나머지 진행해줘"(11:50:52)가 넘어가지 않았다.
+- compaction 시작은 128K − 예비 49K ≈ 79K. pi 는 최근 대화를 20K 이상, 대화 단위로 남겨 실제로 약 4만 토큰(글자/3)을 남겼고, 기본 프롬프트 · 도구(약 21K) · 요약(약 9천 자)과 합쳐 compaction 뒤에도 약 72K 였다. 여유가 9K 뿐이라 42초에 4번 compaction 했다 (11:48:56 ~ 11:49:38, 직전 크기 79 ~ 81K).
+
+고침
+- (a) oxy-flow compaction 은 최근 대화를 끝에서 8K 만 남긴다 (`OXY_FLOW_COMPACT_KEEP_TOKENS`, 기본 8000). 요약에 작업 기록 · 최근 요청이 있기 때문. 도구 결과 앞에서는 자르지 않고, pi 가 고른 경계보다 앞으로 가지 않는다 (`oxy-flow/compact.ts` `tighterCut`). 위 세션에 적용하면 남는 최근 대화가 약 4만 → 약 9천 ~ 1만 토큰.
+- (b) 사용률이 null 이고 마지막 compaction 뒤에 응답이 아직 없으면(= compaction 직후) 50% 이상으로 보고 새 세션으로 넘긴다.
+- 확인: E2E `tests/rpc-compact.mjs` — 대화 두 번 → compaction → 새 메시지가 새 세션으로 넘어가고 작업 상태 · 마지막 답이 들어간다. 같은 점검에서 (b) 를 끄면 `newSession: false` (고치기 전 증상 재현).
+
 ## 2. 구현 순서와 확인 방법
 
 1. 세션 단위 기록 (§1) — 자동 검증: 단위(`tests/unit-extensions.test.ts` 의 "oxy-flow: 작업 기록은 세션 단위") + E2E(`tests/e2e-mock.sh` 의 flow 검사: 새 세션은 빈 기록, 다시 연 세션은 기록과 계획 · 다음 할 일 주입) / 실측: 대화형 pi 로 새로 시작 · `/resume`
