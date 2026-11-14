@@ -18,13 +18,13 @@
 | `jobs-view` | `docs/jobs-view-spec.md` Job Monitor 구성 개편 (Main · Sub Context, subagent 의 셸) | 완료 | – | 없음. 후속: 업데이트가 WT 프로필을 다시 쓰지 않음 (아래 메모) | 2026-11-13 | f8b4b5c 4ce6514 | 2026-11-13 (`oxygen-pi-20261113.zip`, oxy-tui 0.3.0) |
 | `tui-fix` | `docs/tui-spec.md` §10 업데이트가 등록 항목을 다시 씀 · §6 값 열의 경로 | 검증 | 사용자: 커밋 · 다음 번들에 반영 | 커밋 후 다음 번들 · 설치본 업데이트 때 반영 (부모) | 2026-11-13 | – | 안 됨 |
 | `skill-combo` | `docs/skill-combo-spec.md` 여러 skill 상황 시험 · CI 계획 | 보류 | 사용자: CI 적용 시점 (지금은 로컬에서만) | CI 를 적용하기로 하면 `ci/github-workflows/` 를 `.github/workflows/` 로 (부모) | 2026-11-13 | af5bdfa 2b5bbe3 4708a58 | 해당 없음 |
-| `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 보류 | 사용자: 재개 요청 · 측정 모델 | 재개하면 `skill-eval/1` 을 #14 부터 (skill-evaluator) | 해당 없음 | eed08b1 751a808 b2b1033 | 해당 없음 |
+| `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 검증 | 부모: 다음 실제 Haiku 세션 기록으로 개선 확인 | 2026-11-14 Claude Haiku 5.5 측정 · 반영 (선택 P · N · G 66→70/72, habit suite: http skill 2/4→4/4 · hurl 2/4→4/4 · curl 17→5). 남은 것: hurl 재실행 시 폼 POST 중복 경고 · edit 전 read 강화 (사용자 결정). Groq `skill-eval/1` 은 13/28 에서 보류 (skill-evaluator) | 2026-11-14 | eed08b1 751a808 b2b1033 2b59f43 | 2026-11-15 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 검증 | 사용자: 웰컴 카드 · 화면 캡처 확인. 9단계(실제 LLM)는 사용자가 보류 | 사용자 확인 뒤 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (저장소 폴더로 업데이트, oxy-tui 0.4.0) |
 | `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 릴리스 반영 뒤 화면 확인 | 확인되면 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (oxy-tui 0.4.0) |
-| `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 검증 | 사용자: 모니터 pane 에서 r · u 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | – | – |
-| `rate-limit` | `docs/rate-limit-spec.md` 연결별 RPM · TPM 한도 대기 (프로세스 공유, 푸터 · Flow Monitor 표시) | 검증 | 사용자: 실제 vLLM 에서 한도를 걸어 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | – | – |
+| `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 검증 | 사용자: 모니터 pane 에서 r · u 화면 확인 | 확인되면 `완료` (부모). 실제 Haiku 로 4단계 확인함 | 2026-11-14 | cfec477 16ee6b8 6500822 09d1780 4593e19 | 2026-11-14 |
+| `rate-limit` | `docs/rate-limit-spec.md` 연결별 RPM · TPM 한도 대기 (프로세스 공유, 푸터 · Flow Monitor 표시) | 검증 | 사용자: 실제 vLLM 에서 한도를 걸어 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | 67e8b3c dc4d55d 3ebf058 0a79c01 | 2026-11-14 |
 
 ## 단계
 
