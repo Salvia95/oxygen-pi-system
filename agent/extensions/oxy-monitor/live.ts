@@ -3,6 +3,7 @@
  * 이 파일은 pi 에 의존하지 않는 순수 함수만 둔다 (이벤트 → 상태, 작업 · 계획 변화 → 이벤트). 파일 쓰기는 index.ts 가 StateWriter 로 한다.
  * 도구 출력 · 파일 내용 · 모델 응답은 담지 않는다.
  */
+import { describeTool } from "./describe.ts";
 
 export const LIVE_VERSION = 1;
 export const LIVE_EVENTS_MAX = 20;
@@ -11,7 +12,8 @@ const USER_MAX = 60;
 
 export type AgentState = "idle" | "thinking" | "tool" | "compacting";
 export type LiveEventKind = "tool" | "user" | "commit" | "plan" | "job";
-export interface LiveTool { id: string; name: string; summary: string; startedAt: number }
+/** work · target: Flow Monitor 의 Current Task 에 보일 "하는 일 · 대상" (describe.ts). 없는 예전 live.json 은 도구 종류만 보인다 */
+export interface LiveTool { id: string; name: string; summary: string; startedAt: number; work?: string; target?: string }
 export interface LiveEvent { at: number; kind: LiveEventKind; ok: boolean; text: string }
 export interface LiveState {
   version: number;
@@ -87,7 +89,7 @@ export function reduceLive(prev: LiveState, ev: LiveInput, now: number): LiveSta
       if (!s.tools.length && s.agent.state !== "compacting") setState(s, "thinking", now);
       break;
     case "tool_start":
-      if (!s.tools.some((t) => t.id === ev.id)) s.tools.push({ id: ev.id, name: ev.name, summary: toolSummary(ev.name, ev.input), startedAt: now });
+      if (!s.tools.some((t) => t.id === ev.id)) s.tools.push({ id: ev.id, name: ev.name, summary: toolSummary(ev.name, ev.input), startedAt: now, ...describeTool(ev.name, ev.input) });
       if (s.agent.state !== "compacting") setState(s, "tool", now);
       break;
     case "tool_end": {

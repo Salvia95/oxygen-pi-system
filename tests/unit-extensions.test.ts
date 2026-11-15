@@ -1192,6 +1192,51 @@ test("oxy-monitor 실시간 활동: 작업 · 할 일 · 커밋 변화 → 이�
   assert.deepEqual(f.events.map((e) => `${e.kind}:${e.text}`), ["plan:p1 완료 API", "commit:커밋 n2 feat: api"]);
 });
 
+test("oxy-monitor describe: 도구 호출 → 하는 일 · 대상 (명령 전체 · 비밀은 보이지 않는다, flow-view-spec 2026-11-15)", async () => {
+  const D = await import("../agent/extensions/oxy-monitor/describe.ts");
+  const one = (name: string, input: unknown) => { const x = D.describeTool(name, input); return x.target ? x.work + " · " + x.target : x.work; };
+  const sh = (command: string) => one("bash", { command });
+  const cases: [string, string][] = [
+    ["npm test", "테스트 실행 · npm"],
+    ["cd agent && npm run build 2>&1 | tail -20", "빌드 · npm build"],                     // cd · 파이프 뒤는 건너뛴다
+    ["npx vitest run tests/login.test.ts", "테스트 실행 · login.test.ts"],
+    ["./runtime/node/node.exe --experimental-strip-types --test tests/unit-extensions.test.ts", "테스트 실행 · unit-extensions.test.ts"],
+    ["timeout 60 python -m pytest tests/test_api.py -q", "테스트 실행 · test_api.py"],
+    ["cd C:/x/library-rental && mvn -q verify", "테스트 실행 · maven"],
+    ["./mvnw spring-boot:run", "프로그램 실행 · maven"],
+    ["bash -lc 'cd x && cargo build'", "빌드 · cargo"],
+    ["just tui-test", "테스트 실행 · tui-test"],
+    ["git -C repo diff src/a.ts", "변경 내용 확인 · a.ts"],
+    ["git status", "git 상태 확인"],
+    ["export FOO=1; sleep 2; npm ci", "패키지 설치 · npm"],
+    ["hurl --test tests/api/login.hurl", "HTTP 요청 · login.hurl"],
+    ["usql appdb -w -q --csv -c \"select 1\"", "DB 질의 · appdb"],
+    ["sql -S -L -name mydb <<'SQL'\nselect 1;\nSQL", "DB 질의 · mydb"],
+    ["cat > src/a.txt <<'EOF'\nhello\nEOF", "파일 쓰기 · a.txt"],
+    ["sed -n 1,40p docs/flow-view-spec.md", "파일 보기 · flow-view-spec.md"],
+    ["rg -n 'registerTool' agent", "검색 · registerTool"],
+    ["ls -la src", "폴더 살펴보기 · src"],
+    ["weirdtool --flag x", "셸 명령 · weirdtool"],
+  ];
+  for (const [c, want] of cases) assert.equal(sh(c), want, c);
+  // 비밀: 자격 증명 · 헤더 · 환경변수 값 · user/pass 는 대상에 나오지 않는다
+  for (const c of ["curl -s -H 'Authorization: Bearer abc123' https://user:pw@api.example.com/v1?token=xyz", "usql pg://u:secret@db.local/app -c 'select 1'",
+    "sqlplus scott/tiger", "sql -S scott/tiger@orcl @x.sql", "API_KEY=sk-123 node scripts/call.mjs"]) {
+    const t = sh(c);
+    assert.ok(!/abc123|pw|secret|tiger|scott|sk-123|token|xyz/.test(t), c + " → " + t);
+  }
+  assert.deepEqual([sh("curl https://user:pw@api.example.com/v1"), sh("usql pg://u:secret@db.local/app"), sh("sqlplus scott/tiger")],
+    ["HTTP 요청 · api.example.com", "DB 질의 · db.local", "DB 질의"]);
+  // 내장 도구는 파일 이름 · 찾는 말, 모르는 도구는 이름, 입력이 없으면 종류만
+  assert.deepEqual([one("read", { path: "agent/extensions/oxy-monitor/model.ts" }), one("edit", { path: "src\\a.ts" }), one("grep", { pattern: "currentWorkRows" }),
+    one("ls", { path: "." }), one("flow_plan", { action: "set" }), one("bash", null), one("my_tool", {})],
+    ["파일 읽기 · model.ts", "파일 고치기 · a.ts", "검색 · currentWorkRows", "폴더 살펴보기", "작업 기록", "셸 명령", "my_tool"]);
+  // live.json 에 하는 일 · 대상이 함께 실린다
+  const L = await import("../agent/extensions/oxy-monitor/live.ts");
+  const s = L.reduceLive(L.emptyLive(1, 0), { type: "tool_start", id: "a", name: "bash", input: { command: "npm test" } }, 1);
+  assert.deepEqual([s.tools[0].work, s.tools[0].target], ["테스트 실행", "npm"]);
+});
+
 test("oxy-monitor 보기 모델: flow (Current Task = 지금 돌고 있는 일 · Overall Flow, [i/n] 트리, 걸린 시간, 기본 포커스, 23 · 35칸 × 11 · 15 · 24줄, flow-view-spec §2)", async () => {
   const M = await import("../agent/extensions/oxy-monitor/model.ts");
   const L = await import("../agent/extensions/oxy-monitor/live.ts");
@@ -1221,8 +1266,9 @@ test("oxy-monitor 보기 모델: flow (Current Task = 지금 돌고 있는 일 �
     assert.deepEqual([m.title, m.right, m.now.length], [width < 30 ? "Flow" : "Flow Monitor", "Total 10/14", 0], tag);   // 23칸에서 "Total 10/14" 와 함께 넘치면 Flow
     assert.deepEqual(m.sections.map((x) => x.title), ["Current Task", "Overall Flow"]);                       // Overall Task → Overall Flow (2026-11-14)
     const top = m.sections[0].rows;
-    // Current Task: 계획 항목 · Next Task 대신 지금 돌고 있는 일 (명령어 없이). 높이 고정 (14줄 미만이면 2줄)
-    assert.deepEqual([top[0].text, top[0].since, top[0].marker], ["셸 명령 실행 중", now - 3000, "spinner"], tag);
+    // Current Task: 계획 항목 · Next Task 대신 지금 돌고 있는 일 "하는 일 · 대상" (명령 전체는 없이, 2026-11-15). 높이 고정 (14줄 미만이면 2줄)
+    // 23칸에서는 대상이 4칸도 남지 않아 뺀다 ("테스트 실행 · n…" 대신 "테스트 실행")
+    assert.deepEqual([top[0].text, top[0].since, top[0].marker], [width === 23 ? "테스트 실행" : "테스트 실행 · npm", now - 3000, "spinner"], tag);
     assert.ok(!top.some((r) => r.text.includes("npm test") || r.text.startsWith("Next Task")), tag);
     assert.equal(top.length, height >= M.STATE_ROW_MIN_HEIGHT ? M.CURRENT_ROWS : 2, tag);
     const tree = m.sections[1].rows;
@@ -1248,16 +1294,27 @@ test("oxy-monitor 보기 모델: flow (Current Task = 지금 돌고 있는 일 �
   // live.json 이 오래되면(pi 상태를 모르면) 돌고 있는 일이 없는 것으로: 가운데 "-"
   const stale = M.flowModel(flow as any, live, ui, 35, 24, now + M.LIVE_STALE_MS + 1, w).sections[0].rows;
   assert.deepEqual(stale.map((r) => [r.text, r.indent]), [["", 0], ["-", 17], ["", 0]]);
-  // 하는 일별로 센다 · 백그라운드 작업 · subagent
+  // 도구 하나에 한 줄 (먼저 시작한 것 위). subagent · background 는 Job Monitor 의 일이라 보이지 않는다 (2026-11-15)
   let many = live;
-  for (const id of ["b", "c"]) many = L.reduceLive(many, { type: "tool_start", id, name: "read", input: { path: id } }, now);
-  const jobs: any[] = [{ id: "job-1", kind: "bash", state: "running", startedAt: now - 9000, createdAt: 0 }, { id: "job-2", kind: "agent", state: "queued", startedAt: null, createdAt: now - 1000 },
-    { id: "job-3", kind: "bash", state: "done", startedAt: 0, createdAt: 0 }];
-  assert.deepEqual(M.currentWorkRows(many, jobs, 35, now, 5).map((r: any) => r.text),
-    ["셸 명령 실행 중", "파일 읽기 2개 실행 중", "백그라운드 1개 실행 중", "subagent 1개 작업 중", ""]);
+  many = L.reduceLive(many, { type: "tool_start", id: "b", name: "read", input: { path: "src/b.ts" } }, now - 2000);
+  many = L.reduceLive(many, { type: "tool_start", id: "s", name: "subagent", input: { agent: "scout", task: "찾기" } }, now - 1500);
+  many = L.reduceLive(many, { type: "tool_start", id: "g", name: "background", input: { action: "start", command: "npm run build" } }, now - 1200);
+  many = L.reduceLive(many, { type: "tool_start", id: "c", name: "edit", input: { path: "src/c.ts" } }, now - 1000);
+  assert.deepEqual(M.currentWorkRows(many, 35, now, 5).map((r: any) => [r.text, r.since]),
+    [["테스트 실행 · npm", now - 3000], ["파일 읽기 · b.ts", now - 2000], ["파일 고치기 · c.ts", now - 1000], ["", undefined], ["", undefined]]);
+  // 줄이 모자라면 마지막 줄을 "외 n개 실행 중"
+  assert.deepEqual(M.currentWorkRows(many, 35, now, 2).map((r: any) => [r.text, r.since]), [["테스트 실행 · npm", now - 3000], ["외 2개 실행 중", now - 2000]]);
+  // subagent 만 돌면 비어 있다 (가운데 -)
+  const onlySub = L.reduceLive(L.reduceLive(L.emptyLive(1, now), { type: "agent_start" }, now), { type: "tool_start", id: "s", name: "subagent", input: {} }, now);
+  assert.deepEqual(M.currentWorkRows(onlySub, 35, now).map((r: any) => r.text), ["", "-", ""]);
+  // 예전 live.json (work 없음) 은 도구 종류만
+  assert.equal(M.toolWorkText({ name: "bash" }), "셸 명령");
+  // 좁으면: 대상이 4칸 이상 남으면 그대로 (exe 가 … 로 줄인다), 아니면 뺀다
+  const lt = { name: "read", work: "파일 읽기", target: "LoanService.java" };
+  assert.deepEqual([M.toolWorkText(lt, 28, w), M.toolWorkText(lt, 20, w), M.toolWorkText(lt, 16, w)], ["파일 읽기 · LoanService.java", "파일 읽기 · LoanService.java", "파일 읽기"]);
   // 도구가 없고 응답을 만드는 중이면 그 상태
   const thinking = L.reduceLive(L.reduceLive(live, { type: "tool_end", id: "a", name: "bash", ok: true }, now), { type: "turn_start", turnIndex: 1 }, now);
-  assert.equal(M.currentWorkRows(thinking, [], 35, now)[0].text, "응답 생성 중");
+  assert.equal(M.currentWorkRows(thinking, 35, now)[0].text, "응답 생성 중");
   // 진행 중인 할 일이 없으면 · 다음이 없으면 · 기록이 없으면
   const idle: any = { ...flow, plan: [item("p1", "끝", "done", [], { startedAt: 0, endedAt: 5000 })] };
   const im = M.flowModel(idle, null, ui, 35, 24, now, w);
@@ -2109,11 +2166,11 @@ test("oxy-rate 한도 대기: RPM · TPM 슬라이딩 윈도우 대기 시간 ·
   const LV = await import("../agent/extensions/oxy-monitor/live.ts");
   const MM = await import("../agent/extensions/oxy-monitor/model.ts");
   let lv = LV.reduceLive(LV.emptyLive(1, t0), { type: "pending", reason: "rpm", until: t0 + 12_000 }, t0);
-  assert.equal(MM.currentWorkRows(lv, [], 35, t0 + 2000)[0].text, "Pending for 10 sec: RPM Limit");
+  assert.equal(MM.currentWorkRows(lv, 35, t0 + 2000)[0].text, "Pending for 10 sec: RPM Limit");
   const thinkingWait = LV.reduceLive(LV.reduceLive(LV.emptyLive(1, t0), { type: "agent_start" }, t0), { type: "pending", reason: "rpm", until: t0 + 12_000 }, t0);
-  assert.deepEqual(MM.currentWorkRows(thinkingWait, [], 35, t0 + 2000).map((r: any) => r.text).filter(Boolean), ["Pending for 10 sec: RPM Limit"], "대기 중에는 응답 생성 중을 보이지 않는다");
+  assert.deepEqual(MM.currentWorkRows(thinkingWait, 35, t0 + 2000).map((r: any) => r.text).filter(Boolean), ["Pending for 10 sec: RPM Limit"], "대기 중에는 응답 생성 중을 보이지 않는다");
   lv = LV.reduceLive(lv, { type: "pending", reason: null, until: 0 }, t0 + 3000);
-  assert.equal(MM.currentWorkRows(lv, [], 35, t0 + 3000)[1].text, "-", "대기가 끝나면 사라진다");
+  assert.equal(MM.currentWorkRows(lv, 35, t0 + 3000)[1].text, "-", "대기가 끝나면 사라진다");
   // 공유: 프로세스 둘(본 대화 · subagent)의 기록을 더하고, 429 멈춤도 함께 본다
   const dir = mkdtempSync(join(tmpdir(), "oxyrate-"));
   try {

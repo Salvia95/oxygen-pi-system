@@ -11,21 +11,19 @@
       "rows": [
         {
           "marker": "spinner",
-          "text": "셸 명령 실행 중",
+          "text": "테스트 실행 · npm",
           "since": 1794499910629,
           "indent": 0,
           "emphasis": true
         },
         {
-          "marker": "spinner",
-          "text": "백그라운드 1개 실행 중",
-          "since": 1794499881629,
+          "marker": "none",
+          "text": "",
           "indent": 0
         },
         {
-          "marker": "spinner",
-          "text": "subagent 1개 작업 중",
-          "since": 1794499910629,
+          "marker": "none",
+          "text": "",
           "indent": 0
         }
       ]

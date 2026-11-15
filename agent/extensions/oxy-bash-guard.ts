@@ -125,7 +125,7 @@ function normalizeSegment(seg: string): string {
 }
 
 /** 따옴표를 풀어 인자 목록으로 (작은따옴표는 그대로, 큰따옴표 안의 \" \\ 처리) */
-function tokenize(seg: string): string[] {
+export function tokenize(seg: string): string[] {
   const out: string[] = [];
   let cur = "";
   let quote: string | null = null;

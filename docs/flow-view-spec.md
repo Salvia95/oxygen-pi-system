@@ -114,6 +114,31 @@ q 닫기
 - 계획 항목 · `Next Task` 줄은 보이지 않는다 (Overall Flow 의 반복이었다). 바로 위 절의 "막힘 · 다음 단계" 표시도 Current Task 에서는 빠진다 (모델에게는 그대로 전달).
 - 높이는 3줄 고정 (모니터가 14줄 미만이면 2줄). 아무것도 돌고 있지 않으면 가운데에 `-` (Job Monitor 의 빈 영역과 같다).
 - 구현: `oxy-monitor/model.ts` `currentWorkRows` · `OVERALL_TITLE`, 모니터가 jobs 상태를 넘긴다. 실측: oxy-tui 0.5.0 `demo monitor` 35×28 · 35×14.
+- (2026-11-15) 하는 일별 묶음 · 백그라운드 · subagent 줄은 아래 절 "Current Task 하는 일 · 대상" 으로 바뀌었다.
+
+### Current Task 하는 일 · 대상 (2026-11-15)
+
+요청 (사용자, 2026-11-15): "현재 Flow Monitor에 Current Task는 추상적으로 어떤 task를 처리하고 있는지만(명령어 실행 중 등) 나오고 있어서 사실상 모니터링 기능을 못하는 것 같아, 실제 처리하는 작업을 한줄 정도로 요약해서 보여줬으면" → 규칙으로 명령을 해석하는 방법(A)으로 결정: "일단 A 정도로 해보자, subagent는 job monitor의 영역이니 관여하지 말고 flow monitor의 역할에만 집중해줘".
+
+```
+── Current Task ───────────────────     (35칸)
+◑ 테스트 실행 · maven          1:00     ← 도구 하나에 한 줄: 하는 일 · 대상, 그 도구의 경과
+◑ 파일 읽기 · LoanService.java 0:31     ← 먼저 시작한 것이 위
+◑ DB 질의 · appdb              0:22
+── Current Task ───────                 (23칸, 14줄 미만이라 2줄)
+◑ 테스트 실행      0:43                 ← 대상이 4칸도 남지 않으면 뺀다
+◑ 외 2개 실행 중   0:14                 ← 줄이 모자라면 마지막 줄에 나머지 수 (경과는 그중 먼저 시작한 것)
+```
+- 하는 일 · 대상은 pi 쪽 `oxy-monitor/describe.ts` 의 규칙 표가 도구를 시작할 때 정해 `live.json` 의 `tools[].work` · `target` 에 싣는다. LLM 을 쓰지 않는다.
+  - 셸 명령은 `cd` · `export` · `sleep` · `echo` 를 건너뛴 첫 명령으로 정한다 (`cd x && mvn -q verify 2>&1 | tail` → `테스트 실행 · maven`). `npx` · `timeout` · `python -m` · `bash -c '…'` 은 안쪽 명령을 본다.
+  - 하는 일: 테스트 실행 · 빌드 · 린트 검사 · 코드 포맷 · 타입 검사 · 스크립트 실행 · 프로그램 실행 · 패키지 설치 · HTTP 요청 · DB 질의 · git 일(상태 확인 · 변경 내용 확인 · 커밋 …) · 파일 읽기 · 파일 보기 · 파일 쓰기 · 파일 고치기 · 검색 · 파일 찾기 · 폴더 살펴보기 · 작업 기록 등. 규칙에 없는 명령은 `셸 명령 · <프로그램 이름>`.
+  - 대상은 짧은 이름 하나: 파일 이름(경로 없이), 도구 · 스크립트 이름, 호스트, DB 연결 이름. 명령 전체 · 인자 · 질의문은 보이지 않는다.
+  - 비밀은 대상에 넣지 않는다: 주소의 자격 증명 · 경로 · 질의, 헤더, `KEY=값`, `user/pass`, 긴 토큰 모양 글.
+- subagent · background 도구와 백그라운드 작업 · subagent 작업은 Job Monitor 의 일이므로 Current Task 에 보이지 않는다. 이것만 돌고 있으면 가운데 `-`.
+- 한도 대기(`Pending for n sec`) · `응답 생성 중` · `compaction 중` 은 그대로다. 높이(3줄, 14줄 미만이면 2줄)와 빈 영역의 `-` 도 그대로다.
+- 예전 `live.json`(work 가 없는 것)은 도구 종류만 보인다 (`셸 명령`).
+- 구현: `oxy-monitor/describe.ts`(새 파일) · `live.ts` `LiveTool.work/target` · `model.ts` `currentWorkRows` · `toolWorkText`, `oxy-bash-guard.ts` 의 `tokenize` 를 함께 쓴다.
+  실측 (2026-11-15): `bin/oxy-tui.exe` 0.5.0 `demo monitor`, mintty 23×12 · 35×14 캡처 (도구 넷: mvn verify · read · subagent · usql).
 
 ### 계획 밖의 일 · 막힘 (2026-11-14)
 
