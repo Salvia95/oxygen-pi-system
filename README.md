@@ -4,224 +4,251 @@
 
 작은 모델과 적은 예산으로 돌리는 Windows용 코딩 에이전트
 
-[기능](#기능) · [다루지 않는 것](#다루지-않는-것) · [설치](#설치) · [사용](#사용) · [스킬](#스킬) · [도구](#도구) · [문서](#문서) · [개발](#개발)
+[기능](#기능) · [다루지 않는 것](#다루지-않는-것) · [설치](#설치) · [사용](#사용) · [내장 스킬](#내장-스킬) · [도구](#도구) · [문서](#문서) · [기여하기](#기여하기)
 
 </div>
 
-Oxygen Pi System은 터미널에서 동작하는 오픈소스 코딩 에이전트 [pi](https://pi.dev)에 작은 모델을 위한 보정 기능과 Windows용 설치 도구를 더한 배포판입니다.
-도구 호출을 자주 틀리고 컨텍스트가 짧은 모델도 파일을 읽고, 고치고, 테스트를 돌리는 데까지 가도록 틀린 호출을 바로잡고 작업 상태를 대신 기억합니다.
-LLM은 OpenAI 호환 서버(vLLM 등)와 API, Anthropic API를 함께 등록해 쓸 수 있어서 특정 회사의 모델이나 서비스에 묶이지 않습니다.
+Oxygen Pi System은 오픈소스 코딩 에이전트 [pi](https://pi.dev)를 **작은 모델에 맞게 보정**하고 Windows용 설치 도구를 더한 배포판입니다.
+도구 호출이 서툴고 컨텍스트가 짧은 모델에게도 파일 수정부터 테스트 실행까지 맡길 수 있습니다. LLM은 OpenAI 호환 API(직접 띄운 서버 포함)와 Anthropic API를 모두 연결할 수 있습니다.
 
-이런 경우에 맞습니다.
+이런 경우에 쓰려고 만들었습니다.
 
-- 직접 띄운 LLM 서버로 코딩 에이전트를 쓰려 할 때
-- 무료나 저가 API의 분당 요청 한도 안에서 써야 할 때
-- 인터넷이 막힌 PC에서 써야 할 때
+- 직접 띄운 LLM 서버로 코딩 에이전트를 쓰고 싶을 때
+- 무료나 저가 API의 요청 한도 안에서 써야 할 때
+- 인터넷이 안 되는 PC에서 써야 할 때
 
 ## 기능
 
-pi 본체는 고치지 않고 확장 기능(pi extension), 스킬, 설정 파일만 더했으므로 pi를 새 버전으로 바꾸기 쉽습니다.
-
 ### 작은 모델 보정
 
-작은 모델은 도구 호출을 형식에 맞추지 못하고 글로 써 버리거나, 같은 호출을 되풀이하는 일이 잦습니다.
-Oxygen Pi System은 글로 쓴 도구 호출을 알아채면 올바르게 다시 부르도록 안내하고, 같은 도구를 같은 인자로 세 번째 부르면 그 호출을 막습니다.
-읽지 않았거나 읽은 뒤에 바뀐 파일은 고칠 수 없게 해서, 모델이 기억에 의존해 코드를 덮어쓰는 일을 막습니다.
-명령 출력이 너무 길면 앞뒤만 남기고 잘라서, 짧은 컨텍스트가 출력 한 번에 차지 않게 합니다.
+모델이 도구 호출을 본문에 글로 써 버리면 다시 호출하라고 알려 주고, 같은 호출을 되풀이하거나 읽지 않은 파일을 고치려 하면 **실행 전에 차단**합니다.
+긴 명령 출력은 앞뒤만 남기고 줄입니다.
 
-### 작업 기록으로 이어 가기
+### 요약 대신 작업 기록
 
-보통의 코딩 에이전트는 컨텍스트가 차면 지난 대화를 LLM으로 요약하는데, 작은 모델은 이 과정에서 하던 일의 맥락을 쉽게 잃습니다.
-Oxygen Pi System은 작업 목표, 계획, 그 과정에서 내린 결정, 커밋을 프로젝트의 `.oxy/flow/` 폴더에 계속 기록합니다.
-컨텍스트가 절반 넘게 찬 상태에서 새 메시지를 보내면 새 세션을 열어 이 기록만 가지고 이어서 처리합니다. 지난 대화는 넘기지 않으므로 컨텍스트가 비어 있는 상태에서 다시 시작합니다.
-커밋마다 기록 번호가 붙기 때문에, 작업이 잘못된 방향으로 갔다면 특정 기록 이후의 커밋만 `git revert`로 되돌릴 수 있습니다.
+컨텍스트가 가득 차면 대화를 요약하는 대신, 따로 기록해 둔 목표, 계획, 결정, 커밋을 **새 세션에 넘겨** 작업을 이어 갑니다.
+잘못된 작업이 있어도 계획, 커밋 단위로 되돌릴 수 있습니다.
 
 ### 모델 나눠 쓰기
 
-LLM 연결을 여러 개 등록하고, 하위 에이전트(subagent)의 작업 수준(light, normal, deep)마다 쓸 연결과 모델을 정할 수 있습니다.
-모델이 하위 에이전트를 부를 때 수준도 함께 정하므로, 파일 찾기는 저렴한 모델이 하고 코드 검토는 성능이 좋은 모델이 하게 됩니다.
-무료 API처럼 분당 요청 한도가 있는 연결은 한도에 걸리기 전에 요청을 잠시 미뤄 오류를 피합니다.
+LLM 연결을 여러 개 등록해 쉬운 일은 **저렴한 모델**에, 어려운 일은 성능 좋은 모델에 맡깁니다.
+LLM API의 분당 요청 한도, 토큰 한도에 걸리지 않도록 요청 속도도 조절합니다.
 
 ### 오프라인 설치와 실행
 
-Git for Windows를 뺀 필요한 프로그램이 모두 번들 하나에 들어 있어서, 설치하는 PC는 인터넷에 연결되어 있지 않아도 됩니다.
-실행 중에는 pi의 업데이트 확인과 사용 통계 전송을 끄고, 도구가 필요한 파일을 스스로 내려받지 않도록 미리 넣어 둡니다.
-그래서 내 PC나 내부망에 띄운 LLM에 연결하면 Oxygen Pi System이 스스로 외부에 접속하는 일은 없습니다. 다만 인터넷이 되는 PC에서는 모델이 실행한 `curl` 같은 명령이 외부에 접속할 수 있습니다.
+필요한 도구를 **번들 하나**로 묶어 인터넷이 없는 PC에도 설치하고 실행할 수 있습니다.
 
-### 위험한 명령 확인
+### 위험 명령 확인
 
-pi는 모델이 만든 명령을 묻지 않고 바로 실행합니다.
-Oxygen Pi System은 `&&`나 `|`로 이어진 명령을 하나씩 나눠 검사해서, 드라이브 전체 삭제, 디스크 포맷, 시스템 종료, 패키지 설치를 막습니다.
-재귀 삭제, `git push`, `git reset --hard`, DB를 바꾸는 SQL, GitLab과 GitHub 쓰기 작업은 실행하기 전에 사용자에게 확인을 받습니다.
-API 키와 DB 비밀번호는 Windows DPAPI로 암호화해 저장하고, 모델이 비밀 파일을 직접 읽는 명령은 막습니다.
+재귀 삭제, `git push`, DB 변경 같은 명령은 **실행 전에 사용자에게 묻고**, 시스템을 망가뜨릴 수 있는 명령은 차단합니다.
 
-### 백그라운드 작업과 하위 에이전트
+### 비밀 정보 보관
 
-모델은 빌드나 테스트처럼 오래 걸리는 명령을 백그라운드로 돌리고, 명령이 끝나면 결과만 대화로 받습니다. 기다리는 동안 출력을 읽느라 컨텍스트를 쓰지 않습니다.
-코드베이스를 넓게 찾거나 변경을 검토하는 일은 별도 프로세스로 도는 하위 에이전트에 맡기고, 본 대화에는 결과만 돌아옵니다.
-psmux(Windows용 tmux 호환 터미널 멀티플렉서) 세션에서 실행하면 터미널 오른쪽에 Flow Monitor와 Job Monitor를 띄워, 지금 하는 일과 전체 계획, 백그라운드 작업 목록을 계속 볼 수 있습니다.
+API 키와 비밀번호는 암호화해 보관하며, **정보를 입력한 Windows 계정에서만** 사용할 수 있습니다.
+
+### 백그라운드 작업과 모니터
+
+오래 걸리는 명령은 백그라운드에서, 여러 계층에 걸친 탐색이나 독립된 개발 작업은 **하위 에이전트**에서 돌려 메인 대화의 컨텍스트를 아낍니다.
+진행 상황은 터미널 옆에 띄운 `Flow Monitor`와 `Job Monitor`에서 볼 수 있습니다.
 
 ## 다루지 않는 것
 
-- Windows(x64)에서만 동작합니다. macOS와 Linux는 지원하지 않습니다.
-- LLM 서버를 띄우거나 모델을 제공하지 않습니다. 사용할 LLM은 따로 준비해야 합니다.
-- 외부 도구의 실행 파일을 배포하지 않습니다. 번들은 사용자가 각 공식 배포처에서 직접 받아 만듭니다.
-- 격리된 실행 환경(샌드박스)이 아닙니다. 위험한 명령을 걸러 내지만, 모델은 사용자 계정의 권한으로 명령을 실행합니다.
-- IDE 확장이나 웹 화면은 없습니다. 터미널에서만 사용합니다.
+- **Windows(x64) 전용**입니다. macOS와 Linux에서는 실행되지 않습니다.
+- LLM 서버나 모델을 포함하지 않으며, 사용에는 별도의 LLM API가 필요합니다.
+- 외부 도구의 실행 파일을 직접 포함하지 않으며, 사용자의 필요에 따른 번들링 기능만 제공합니다.
+- **독립된 실행 환경이 아닙니다.** 모든 명령은 사용자 계정의 권한으로 실행됩니다.
+- IDE 확장이나 웹페이지는 지원하지 않습니다.
 
 ## 설치
 
-설치는 번들 만들기와 설치 화면 실행, 두 단계입니다. 번들은 Oxygen Pi System과 도구 실행 파일을 함께 담은 폴더이고, 다른 PC로 옮길 때는 zip으로 묶습니다. 관리자 권한은 필요하지 않습니다.
+인터넷 접속이 가능한 PC에서 번들(Oxygen Pi System과 도구 실행 파일을 담은 폴더)을 만든 뒤, 사용할 PC에 옮겨 설치합니다.
+번들을 만든 PC에 바로 설치할 수도 있으며, **관리자 권한은 필요 없습니다.**
 
 ### 준비물
 
-| 항목 | 번들을 만드는 PC | 설치하는 PC |
-| --- | --- | --- |
-| 운영체제 | Windows x64 | Windows x64 |
-| 필요한 프로그램 | [Git for Windows](https://gitforwindows.org/) (Git Bash 포함) | Git for Windows. Oracle SQLcl을 쓰려면 Java 17 이상 |
-| 인터넷 연결 | 필요합니다 | 필요하지 않습니다 |
-| 디스크 | 모든 도구를 받을 때 4GB 정도 | 2GB 정도 |
-| LLM | 필요하지 않습니다 | 서버 주소와 API 키 (설치 중에 연결을 확인합니다) |
+번들을 만들 PC
 
-Git for Windows와 Java는 번들에 들어 있지 않습니다. 인터넷이 없는 PC에 설치한다면 이 둘의 설치 파일도 함께 옮겨야 합니다.
+| 항목 | 내용 |
+| --- | --- |
+| 운영체제 | Windows (Linux, Mac 지원 예정) |
+| 디스크 | ~4GB |
+| 필요한 도구 | [Git for Windows](https://gitforwindows.org/) (Git Bash 포함) |
 
-LLM은 OpenAI Chat Completions 형식으로 도구 호출을 지원하는 서버나 API, 또는 Anthropic API를 연결할 수 있습니다.
-직접 띄운 서버가 vLLM이라면 `--enable-auto-tool-choice`와 모델에 맞는 `--tool-call-parser` 옵션을 켜야 도구 호출이 동작합니다.
-개발할 때는 Qwen3.8 27B(OpenAI 호환 API, 컨텍스트 128K)와 Claude Haiku 5.5로 동작을 확인하고 있습니다.
+Oxygen Pi System을 사용할 PC
 
-### 1. 번들 만들기
+| 항목 | 내용 |
+| --- | --- |
+| 운영체제 | Windows x64 |
+| 디스크 | ~2GB |
+| 필요한 도구 | Git for Windows |
+| LLM | 도구 호출(tool calling)을 지원하는 LLM API |
+| 인터넷 | 불필요 |
 
-인터넷이 되는 Windows PC의 Git Bash에서 저장소를 받고 `fetch-bundle.sh`를 실행합니다. 이 스크립트는 Windows 전용 도구를 쓰므로 macOS나 Linux에서는 실행되지 않습니다.
+> Git for Windows는 번들에 들어 있지 않습니다. 인터넷이 없는 PC라면 설치 파일을 따로 옮겨야 합니다.
+>
+> Oracle SQLcl을 쓰려면 사용할 PC에 Java 17 이상이 필요합니다.
+>
+> 직접 띄운 vLLM 서버라면 `--enable-auto-tool-choice`와 `--tool-call-parser` 옵션을 켜야 도구 호출이 동작합니다.
+
+### 번들 만들기
+
+#### Windows (추천)
+
+Git Bash에서 실행합니다. 선택 화면에서 고른 도구를 공식 배포처에서 내려받아 sha256으로 검증합니다.
 
 ```bash
 git clone https://github.com/Salvia95/oxygen-pi-system.git
 cd oxygen-pi-system
-bash scripts/fetch-bundle.sh
+bash scripts/fetch-bundle.sh      # 도구 선택, 내려받기, 검증
+bash scripts/package-bundle.sh    # 다른 PC로 옮길 zip 생성 → dist/oxygen-pi-YYYYMMDD.zip, .sha256
 ```
 
-선택 화면에서 넣을 도구를 고르면, 각 도구를 공식 배포처에서 내려받아 저장소에 고정해 둔 sha256(npm 패키지는 lockfile)과 비교한 뒤 저장소 폴더 안에 둡니다. 이것으로 저장소 폴더가 번들이 됩니다.
-Node.js, pi, fd, ripgrep, jq는 필수라서 항상 받습니다. 오픈소스가 아닌 Chrome for Testing과 Oracle SQLcl은 고를 때 약관 동의를 받습니다.
+#### Linux
 
-### 2. 설치하기
+지원 예정입니다. 지금은 Windows PC에서 만든 번들을 사용합니다.
 
-번들을 만든 PC에 그대로 설치한다면 저장소 폴더의 `install.cmd`를 더블클릭합니다. Git Bash에서는 `./install.sh`를 실행해도 됩니다.
+#### Mac
 
-다른 PC에 설치한다면 먼저 zip으로 묶습니다.
+지원 예정입니다. 지금은 Windows PC에서 만든 번들을 사용합니다.
+
+### 설치하기
+
+#### 번들을 만든 PC에 설치
+
+저장소 폴더의 Git Bash에서 실행합니다. 탐색기에서 `install.cmd`를 더블클릭해도 됩니다.
 
 ```bash
-bash scripts/package-bundle.sh   # dist/oxygen-pi-YYYYMMDD.zip 과 .sha256 파일을 만듭니다
+cd oxygen-pi-system
+./install.sh
 ```
 
-만든 zip을 설치할 PC로 옮겨 압축을 풀고, 그 폴더의 `install.cmd`를 더블클릭합니다.
+#### 다른 PC에 설치
 
-### 설치 화면에서 정하는 것
+`oxygen-pi-YYYYMMDD.zip`과 `.sha256` 파일을 옮긴 뒤, 쓰는 셸에 맞춰 무결성 확인, 압축 해제, 설치 순서로 실행합니다.
 
-설치 화면은 방향키와 Enter로 고르고 Esc로 이전 단계로 돌아갑니다. 다음 항목을 차례로 정합니다.
+##### PowerShell
 
-1. 설치 폴더: 기본 위치는 `%LOCALAPPDATA%\Programs\oxygen-pi`이고, 번들 폴더를 그대로 쓸 수도 있습니다.
-2. 설치할 구성요소: 번들에 넣어 온 도구 가운데 고릅니다.
-3. LLM 연결: 서버 주소와 API 키를 입력하면 실제로 모델 목록을 받아 연결을 확인합니다. 설치할 때는 연결을 하나만 등록하고, 나머지는 설치 뒤 `tweak.cmd`에서 더합니다.
-4. 모델: 사용할 모델과 모델별 컨텍스트 길이를 정합니다.
-5. 터미널: PATH, Windows Terminal 프로필, 바탕화면 바로가기를 등록할지 정하고, 모니터 창을 쓰려면 psmux를 켭니다.
+```powershell
+cd $HOME\Downloads
+(Get-FileHash .\oxygen-pi-YYYYMMDD.zip).Hash -eq (Get-Content .\oxygen-pi-YYYYMMDD.zip.sha256).Split(" ")[0]   # True면 정상
+Expand-Archive .\oxygen-pi-YYYYMMDD.zip -DestinationPath $HOME\oxygen-pi-bundle
+cd $HOME\oxygen-pi-bundle\oxygen-pi-system
+.\install.cmd
+```
 
-마지막에 요약을 확인하고 설치한 뒤, 도구와 설정, LLM 연결을 점검할 수 있습니다.
+##### 명령 프롬프트 (cmd)
+
+```bat
+cd %USERPROFILE%\Downloads
+REM 출력된 해시가 .sha256 파일의 값과 같으면 정상
+certutil -hashfile oxygen-pi-YYYYMMDD.zip SHA256
+mkdir %USERPROFILE%\oxygen-pi-bundle
+%SystemRoot%\System32\tar.exe -xf oxygen-pi-YYYYMMDD.zip -C %USERPROFILE%\oxygen-pi-bundle
+cd %USERPROFILE%\oxygen-pi-bundle\oxygen-pi-system
+install.cmd
+```
+
+##### Git Bash
+
+```bash
+cd ~/Downloads
+sha256sum -c oxygen-pi-YYYYMMDD.zip.sha256    # OK가 나오면 정상
+unzip -q oxygen-pi-YYYYMMDD.zip -d ~/oxygen-pi-bundle
+cd ~/oxygen-pi-bundle/oxygen-pi-system
+./install.sh
+```
+
+설치 명령을 실행하면 설치 TUI가 열립니다. 설치 폴더, 사용할 도구, LLM 연결과 모델, 터미널 설정을 **필요에 맞게 골라** 설치할 수 있습니다.
+
+### 설치 확인하기
+
+새 터미널(Windows Terminal의 Oxygen Pi 프로필 또는 Git Bash)을 열고 차례로 실행합니다. 점검 결과가 **`FAIL 0`이면** 설치가 끝난 것입니다.
+
+```bash
+oxy --version                                              # pi 버전이 나오면 PATH 등록 완료
+bash ~/AppData/Local/Programs/oxygen-pi/scripts/verify.sh  # 기본 설치 폴더 기준. 결과: PASS n / WARN n / FAIL 0
+oxy -p "안녕"                                               # 답이 오면 LLM 연결 정상
+```
+
+> `WARN`은 설치하지 않은 선택 도구를 알리는 것으로, 동작과는 무관합니다.
 
 ## 사용
 
 ### 시작하기
 
-Windows Terminal의 Oxygen Pi 프로필이나 바탕화면 바로가기로 셸을 엽니다. 설치할 때 PATH에 등록했다면 새로 연 Git Bash에서 해도 됩니다.
-작업할 프로젝트 폴더로 옮겨 `oxy`를 실행합니다.
+Windows Terminal의 Oxygen Pi 프로필이나 바탕화면 바로가기로 셸을 열고, 프로젝트 폴더에서 `oxy`를 실행합니다.
 
 ```bash
 cd ~/work/my-service
-oxy
+oxy                                         # 대화형으로 시작 (할 일은 한국어로 입력)
+oxy -c                                      # 이 폴더의 마지막 세션 이어서 열기
+oxy -r                                      # 이어서 열 세션 고르기
+oxy -p "테스트를 돌리고 실패 원인을 알려줘"     # 화면 없이 한 번 실행하고 끝내기
+oxy mux                                     # 이번만 psmux 세션에서 실행 (모니터 사용 가능)
+oxy --no-mux                                # 이번만 psmux 없이 지금 창에서 실행
 ```
-
-pi 화면이 열리면 할 일을 한국어로 그대로 적으면 됩니다. 예를 들어 "로그인 API에 입력값 검증을 넣고 테스트까지 돌려 줘"처럼 요청합니다.
-화면 없이 한 번만 실행하려면 `oxy -p "요청 내용"`을 씁니다. 이때는 사용자에게 물어볼 수 없으므로 확인이 필요한 명령은 실행하지 않고 막습니다.
-
-설치할 때 psmux를 켰다면 `oxy`는 프로젝트 폴더마다 psmux 세션을 만들어 그 안에서 pi를 띄웁니다. 켜지 않았더라도 `oxy mux`로 실행하면 이번만 psmux 세션에서 띄웁니다.
 
 ### 자주 쓰는 명령
 
-pi 화면의 입력창에서 쓰는 명령입니다.
-
-| 명령 | 하는 일 |
+| 명령 | 설명 |
 | --- | --- |
-| `/flow` | 이번 작업의 목표, 계획, 결정, 커밋 기록을 봅니다. |
-| `/flow rollback n3` | `/flow`에 보이는 기록 번호(예: `n3`) 이후에 생긴 커밋을 `git revert`로 되돌립니다. 커밋 이력은 지우지 않으며, 커밋하지 않은 변경이 있으면 실행하지 않습니다. |
-| `/jobs` | 백그라운드 작업과 하위 에이전트의 진행 상황을 보고, 로그를 열거나 작업을 멈춥니다. |
-| `/monitor flow` | psmux 세션 안에서 실행 중일 때, 터미널 오른쪽에 지금 하는 일과 계획을 보여 주는 Flow Monitor를 열거나 닫습니다. |
-| `/monitor jobs` | psmux 세션 안에서 실행 중일 때, 터미널 오른쪽에 백그라운드 작업과 하위 에이전트를 보여 주는 Job Monitor를 열거나 닫습니다. 두 모니터를 모두 열면 위아래로 나눠 보입니다. |
+| `/flow` | 작업 목표, 계획, 결정, 커밋 기록 보기 |
+| `/flow rollback <기록 번호>` | 그 기록 이후의 작업 되돌리기 (커밋은 `git revert`) |
+| `/jobs` | 백그라운드 작업과 하위 에이전트의 진행 확인, 중지 |
+| `/monitor flow` | `Flow Monitor` 열기, 닫기 (psmux 세션에서) |
+| `/monitor jobs` | `Job Monitor` 열기, 닫기 (psmux 세션에서) |
 
-### 설정 바꾸기, 업데이트, 제거
+### 설정 변경, 업데이트, 제거
 
-| 하고 싶은 일 | 방법 |
+`tweak.cmd`는 설치된 항목을 하나씩 바꾸는 **설정 화면**이고, `install.cmd`는 설치 자체를 다시 하거나 지우는 **관리 화면**입니다. 둘 다 설치 폴더에 있습니다.
+
+| 실행 파일 | 지원하는 작업 |
 | --- | --- |
-| LLM 연결 추가, 작업 수준별 모델 지정, DB 연결 등록, 기능 켜고 끄기 | 설치 폴더의 `tweak.cmd`를 실행합니다. |
-| 상태 점검, 처음부터 다시 설정, 제거 | 설치 폴더의 `install.cmd`를 실행합니다. |
-| 새 버전으로 업데이트 | 번들을 만든 PC에서 `git pull` 뒤 `fetch-bundle.sh`를 다시 실행합니다. 같은 PC라면 저장소 폴더의 `install.cmd`를, 다른 PC라면 `package-bundle.sh`로 새 zip을 만들어 옮긴 뒤 압축을 푼 폴더의 `install.cmd`를 실행합니다. 설정과 연결은 그대로 남고, 실행 중인 psmux 세션은 업데이트 전에 닫습니다. |
+| `tweak.cmd` | LLM 연결과 모델, DB 연결, GitLab 연결, 브라우저, 확장 기능과 스킬 켜기/끄기, 실행 제한, PATH와 바로가기, 상태 점검 |
+| `install.cmd` | 처음부터 다시 설정, 상태 점검, 제거 |
+| 새 번들의 `install.cmd` | 업데이트 (설정과 연결 유지) |
 
-API 키는 DPAPI로 암호화되어 같은 PC의 같은 Windows 사용자만 풀 수 있습니다. 설치 폴더를 다른 PC나 다른 사용자 계정으로 옮기면 키를 다시 입력해야 합니다.
+## 내장 스킬
 
-## 스킬
+내장 스킬은 번들 도구의 사용법을 담은 문서입니다. **시스템 프롬프트에는 이름과 한 줄 설명만 실리고**, 모델은 필요할 때 본문을 읽습니다. 현재 13개를 제공합니다.
 
-스킬은 번들에 든 도구의 사용법을 적은 문서입니다. 모델은 평소에는 스킬의 이름과 한 줄 설명만 보고, 그 도구가 필요한 일을 만나면 본문을 꺼내 읽습니다. 사용자가 따로 부를 필요는 없습니다.
-지금은 코드 찾기(`find-code`), DB 조회(`sql-querying`), HTTP API 시험(`http-api-testing`), 대화형 프로그램 조작(`terminal-session-control`) 등 13개가 있습니다.
+- 이름이 하는 일 기준(`sql-querying`, `http-api-testing`)이라, 모델이 도구 이름을 몰라도 알맞은 스킬을 찾습니다.
+- 설치한 도구의 스킬만 켜지므로 프롬프트가 불필요하게 길어지지 않습니다.
+- 명령은 번들에 든 도구 버전으로, 설명은 실제 모델로 시험해 검증합니다.
 
-Oxygen Pi System의 스킬은 다음 원칙으로 만듭니다.
-
-- 이름은 도구가 아니라 하는 일로 짓습니다. 그래서 모델은 도구 이름을 몰라도 하려는 일로 스킬을 찾아 읽습니다.
-- 설치한 도구의 스킬만 켜집니다. 쓰지 않는 도구의 설명이 프롬프트를 차지하지 않습니다.
-- 명령과 옵션은 번들에 든 버전에서 직접 실행해 확인한 것만 적습니다.
-- 각 스킬의 한 줄 설명은 실제 모델로 시험해 다듬습니다. 읽어야 할 요청에서는 읽고, 읽지 않아야 할 요청에서는 읽지 않는지를 시험 문장으로 확인합니다.
-
-직접 만든 스킬은 설치 폴더의 `agent/skills/`에 넣으면 모델이 함께 씁니다. 기본 스킬과 이름이 같으면 설치나 업데이트 때 덮어써지므로 다른 이름을 붙입니다.
-전체 스킬 목록과 각 스킬이 다루는 내용은 [사용 안내서](docs/guide.md#도구별-skill-agentskill-library--agentskills)에 있습니다.
+직접 만든 스킬은 설치 폴더의 `agent/skills/`에 두면 내장 스킬과 함께 쓰입니다. 내장 스킬 목록은 [사용 안내서](docs/guide.md#도구별-skill-agentskill-library--agentskills)에 있습니다.
 
 ## 도구
 
-모델은 Git Bash에서 CLI 도구를 실행해 코드를 찾고, API를 호출하고, DB를 조회합니다. 번들에 넣는 도구는 다음 기준으로 고릅니다.
+모델은 실행 중인 셸 내에서 사용 가능한 CLI 도구를 선택해 사용합니다. 번들에 포함되는 도구는 다음 기준에 따라 선정됩니다.
 
-- 설치 프로그램 없이 압축을 풀거나 npm 패키지로 설치해 바로 쓸 수 있는 Windows용 공식 빌드가 있어야 합니다.
-- 버전을 고정하고, 받은 파일을 sha256이나 lockfile로 확인할 수 있어야 합니다.
-- 실행 중에 인터넷에 접속하거나 파일을 내려받지 않아야 하며, 그런 동작이 있으면 끌 수 있어야 합니다.
-- 오픈소스를 우선합니다. 오픈소스가 아닌 도구는 내려받을 때 약관 동의를 받습니다.
-- 같은 일을 하는 도구가 여럿이면 번들 선택 화면에서 가장 많이 시험해 본 것에 "추천"을 붙입니다.
+- Windows용 공식 빌드가 있고, 설치 프로그램 없이 실행할 수 있을 것
+- 버전을 고정하고 해시로 검증할 수 있을 것
+- 실행 중 인터넷에 접속하지 않거나, 그 동작을 끌 수 있을 것
+- 오픈소스를 우선하고, 그 밖의 도구는 내려받을 때 약관 동의를 거칠 것
 
-Node.js와 pi는 실행에 필요해 항상 들어가고, 모델이 쓰는 도구는 아래 묶음에서 고릅니다.
-
-| 묶음 | 용도 | 도구 |
-| --- | --- | --- |
-| core (필수) | 파일과 코드 찾기, JSON 다루기 | fd, ripgrep, jq |
-| dev-tools | 빌드와 테스트 명령 실행, HTTP API 시험, 입력을 기다리는 프로그램 조작 | just (명령 실행기), hurl (HTTP 요청 시험), psmux (터미널 멀티플렉서) |
-| repository | 머지 요청, 이슈, CI 확인 | glab (GitLab CLI), gh (GitHub CLI) |
-| code-intel | 문법 구조로 코드 찾기와 일괄 수정, 호출 관계 검색 | ast-grep (문법 기반 검색), graphin (코드 그래프 검색 서버, 직접 빌드해 넣음) |
-| internet-browsing | 웹 페이지 조작과 읽기 | agent-browser (브라우저 조작 CLI), obscura (가벼운 페이지 수집기), Chrome for Testing 또는 Chromium |
-| database | PostgreSQL, MySQL, SQL Server, Oracle, SQLite 조회 | usql (여러 DB용 CLI), Oracle SQLcl, dbhub (pi에서 SQL을 실행하는 MCP 서버) |
-
-도구별 버전과 라이선스, 내려받는 주소는 [`manifest/tools.lock.tsv`](manifest/tools.lock.tsv)에, 각 도구의 설명은 [사용 안내서](docs/guide.md#구성요소)에 있습니다.
+전체 도구와 용도는 [도구 목록](docs/tools.md)에 있습니다.
 
 ## 문서
 
 | 문서 | 대상 | 내용 |
 | --- | --- | --- |
-| [사용 안내서](docs/guide.md) | 사용자 | 번들과 설치 옵션, 설정 파일의 위치와 형식, LLM과 DB 연결, 기능별 자세한 동작 |
-| [개발 과정](docs/dev-process.md) | 기여자 | 기능 명세를 쓰고 승인받아 구현하고 검증하는 순서, 명세 문서와 진행판의 위치 |
+| [사용 안내서](docs/guide.md) | 사용자 | 설치 옵션, 설정 파일, LLM과 DB 연결, 기능별 상세 동작 |
+| [도구 목록](docs/tools.md) | 사용자 | 번들에 넣을 수 있는 도구, 용도, 연결되는 스킬 |
+| [개발 과정](docs/dev-process.md) | 기여자 | 개발 순서, 명세 문서 위치 |
 
-## 개발
+## 기여하기
 
-기능을 고치거나 버그를 고쳐 보내려는 분을 위한 절입니다. 기능을 바꿀 때는 `docs/`의 해당 명세를 먼저 고치고 [개발 과정](docs/dev-process.md)을 따릅니다.
+버그 제보와 기능 제안은 [GitHub 이슈](https://github.com/Salvia95/oxygen-pi-system/issues)로 받습니다.
+코드를 고칠 때는 관련 명세를 먼저 고친 뒤 [개발 과정](docs/dev-process.md)의 순서를 따르고, PR을 보내기 전에 아래 검사를 통과시켜 주세요.
 
-테스트는 번들 도구로 실행합니다. 먼저 저장소에서 `bash scripts/fetch-bundle.sh`로 just를 포함해 도구를 받고, `source ./env.sh`로 PATH에 추가합니다.
-
-| 명령 | 확인하는 것 |
-| --- | --- |
-| `just test` | 파일 형식과 키 노출 검사, 진행판 검사, 단위 테스트, mock LLM으로 돌리는 E2E 시나리오 |
-| `just tui-test` | 설치 화면, Tweak 화면, 모니터를 그리는 Rust 프로그램의 테스트 (Rust 필요) |
-| `just test-installer` | 임시 폴더에 실제로 설치해 보는 설치 화면 전체 흐름 |
-| `just demo` | 실제 LLM 없이 mock 서버로 pi 화면을 직접 써 봅니다. |
+```bash
+bash scripts/fetch-bundle.sh   # 검사에 쓰는 도구 내려받기 (just 포함)
+source ./env.sh                # 번들 도구를 PATH에 추가
+just test                      # 저장소 검사, 단위 테스트, mock LLM 기반 E2E 시나리오
+just tui-test                  # 설치, 설정 화면과 모니터 테스트 (Rust 필요)
+just test-installer            # 임시 폴더에 설치하는 전체 흐름
+```
 
 ## 라이선스
 
