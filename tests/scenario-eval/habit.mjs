@@ -81,7 +81,7 @@ function project() {
 }
 
 /** 프로젝트 파일 + data/library.db (번들 usql 로 만든다) */
-function makeProject(dir, root) {
+export function makeProject(dir, root) {
   for (const [rel, text] of Object.entries(project())) put(dir, rel, text);
   fs.mkdirSync(path.join(dir, "data"), { recursive: true });
   const q = (v) => (v == null ? "null" : `'${String(v).replace(/'/g, "''")}'`);

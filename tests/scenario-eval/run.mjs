@@ -24,6 +24,9 @@ import { makeFixture } from "./fixture.mjs";
 import { SCENARIOS } from "./scenarios.mjs";
 import { COMBO } from "./combo.mjs";
 import { HABIT } from "./habit.mjs";
+import { DELEGATE } from "./delegate.mjs";
+import { EXPLORE, PARALLEL } from "./explore.mjs";
+import { IMPACT } from "./impact.mjs";
 import { tagCall } from "./trace.mjs";
 import { scrub } from "./scrub.mjs";
 import * as L from "../../scripts/llm-connections.mjs";
@@ -36,7 +39,7 @@ const WORK = path.join(os.tmpdir(), "oxy-scenario-eval");
 const argv = process.argv.slice(2);
 const label = argv.shift();
 if (!label || label.startsWith("--")) { console.error("usage: run.mjs <label> [options]"); process.exit(2); }
-const opt = { only: null, model: null, level: null, thinking: null, tools: null, set: {}, minutes: null, rebuild: false, baseUrl: null, rev: null, maxCalls: null, suite: "base", llmFrom: null, keyEnv: null, hide: null };
+const opt = { only: null, model: null, level: null, thinking: null, tools: null, set: {}, minutes: null, rebuild: false, baseUrl: null, rev: null, maxCalls: null, suite: "base", llmFrom: null, keyEnv: null, hide: null, connMax: null };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--only") opt.only = argv[++i].split(",");
@@ -54,15 +57,17 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--llm-from") opt.llmFrom = argv[++i];
   else if (a === "--key-env") opt.keyEnv = argv[++i];
   else if (a === "--hide") opt.hide = argv[++i];
+  else if (a === "--conn-max") opt.connMax = Number(argv[++i]);
   else { console.error(`unknown option ${a}`); process.exit(2); }
 }
 
-if (!["base", "combo", "habit"].includes(opt.suite)) { console.error(`unknown suite ${opt.suite} (base | combo | habit)`); process.exit(2); }
-const COMBO_SUITE = opt.suite === "combo" || opt.suite === "habit";   // 여러 단계 작업 · skill 사용 기록 · python 숨김은 둘이 같다
+if (!["base", "combo", "habit", "delegate", "explore", "parallel", "impact"].includes(opt.suite)) { console.error(`unknown suite ${opt.suite} (base | combo | habit | delegate | explore | parallel | impact)`); process.exit(2); }
+const COMBO_SUITE = ["combo", "habit", "delegate", "explore", "parallel", "impact"].includes(opt.suite);
+const LONG_SUITE = ["delegate", "explore", "parallel", "impact"].includes(opt.suite);   // 위임하면 자식 pi 가 따로 돌므로 시간을 넉넉히   // 여러 단계 작업 · skill 사용 기록 · python 숨김은 둘이 같다
 // 여러 단계 작업이라 도구 호출 · 시간 한도를 넉넉히 (기본 suite 는 예전 값 그대로)
-opt.maxCalls ??= COMBO_SUITE ? 25 : 8;
+opt.maxCalls ??= ["parallel", "impact"].includes(opt.suite) ? 80 : opt.suite === "explore" ? 40 : COMBO_SUITE ? 25 : 8;
 opt.minutes ??= COMBO_SUITE ? 40 : 8;
-const RESULTS = path.join(HERE, { base: "results.jsonl", combo: "results-combo.jsonl", habit: "results-habit.jsonl" }[opt.suite]);
+const RESULTS = path.join(HERE, { base: "results.jsonl", combo: "results-combo.jsonl", habit: "results-habit.jsonl", delegate: "results-delegate.jsonl", explore: "results-explore.jsonl", parallel: "results-parallel.jsonl", impact: "results-impact.jsonl" }[opt.suite]);
 const HIDE = (opt.hide ?? (COMBO_SUITE ? "python,python3,py" : "none")) === "none" ? [] : (opt.hide ?? "python,python3,py").split(",").filter(Boolean);
 const LLM_SRC = path.resolve(opt.llmFrom ?? path.join(ROOT, "agent"));
 const fwd = (p) => p.replace(/\\/g, "/");
@@ -90,12 +95,13 @@ function build() {
   // LLM 연결은 llm.json 을 그대로 쓴다 (키는 복사하지 않는다). oxy.env 에 예전 LLM 값이 남아 있으면 스냅샷에서 옮겨지지 않게 뺀다
   const llm = L.loadLlm(LLM_SRC);
   if (!llm) throw new Error("agent/llm.json 이 없음 → just configure 또는 tweak.cmd 의 LLM 연결에서 연결을 등록하세요");
+  if (opt.connMax) for (const c of llm.connections) c.maxConcurrent = opt.connMax;
   L.saveLlm(AGENT, llm);
   const envText = fs.existsSync(path.join(ROOT, "agent/oxy.env")) ? fs.readFileSync(path.join(ROOT, "agent/oxy.env"), "utf8") : "";
   fs.writeFileSync(path.join(AGENT, "oxy.env"), L.removeEnvKeys(envText, L.LEGACY_ENV_KEYS));
   const tools = configure(opt.tools);
   const git = (...a) => spawnSync("git", ["-C", ROOT, ...a], { encoding: "utf8" }).stdout.trim();
-  const meta = { label, builtAt: new Date().toISOString(), head: git("rev-parse", "--short", opt.rev ?? "HEAD"), dirty: opt.rev ? "" : git("status", "--short"), tools, toolsOverride: opt.tools, set: opt.set };
+  const meta = { connMax: opt.connMax, label, builtAt: new Date().toISOString(), head: git("rev-parse", "--short", opt.rev ?? "HEAD"), dirty: opt.rev ? "" : git("status", "--short"), tools, toolsOverride: opt.tools, set: opt.set };
   fs.writeFileSync(path.join(T, "meta.json"), JSON.stringify(meta, null, 2));
   return meta;
 }
@@ -160,15 +166,15 @@ function inheritKeys() {
 const textOf = (content) => typeof content === "string" ? content : (content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("");
 const short = (v, n = 160) => { const s = (typeof v === "string" ? v : JSON.stringify(v)).replace(/org_[A-Za-z0-9]+/g, "org_***"); return s.length > n ? `${s.slice(0, n)}…` : s; };
 
-function runPi(prompt, cwd, eventsFile) {
+function runPi(prompt, cwd, eventsFile, sessionId = null) {
   return new Promise((resolve) => {
-    const args = [process.env.OXY_PI_CLI, "--no-session", "--mode", "json", "--provider", target.provider, "--model", target.model, "--thinking", target.thinking, prompt];
+    const args = [process.env.OXY_PI_CLI, ...(sessionId ? ["--session-id", sessionId] : ["--no-session"]), "--mode", "json", "--provider", target.provider, "--model", target.model, "--thinking", target.thinking, prompt];
     // 시험 조건: oxy-flow 끔(추가 턴 방지), 도구 출력 상한을 낮춤(Groq 분당 8000 토큰 = 요청 1건 크기 제한 때문). 모든 구성에 동일.
     const env = { ...process.env, ...hiddenPath(), PI_CODING_AGENT_DIR: fwd(AGENT), OXY_FLOW: "off", OXY_TOOL_OUTPUT_MAX_CHARS: "4000", OXY_READ_MAX_CHARS: "6000",
       PI_PACKAGE_DIR: fwd(PI_PKG_COPY), ...(keysB64 ? { OXY_LLM_INHERIT_KEYS: keysB64 } : {}), ...meta.set, ...opt.set };
     const child = spawn(process.env.OXY_NODE, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out = fs.createWriteStream(eventsFile);
-    const m = { requests: 0, inTok: 0, outTok: 0, firstIn: 0, cost: 0, calls: [], reads: [], cmds: [], trace: [], hints: 0, retries: [], errors: [], text: "", timedOut: false, capped: false };
+    const m = { requests: 0, inTok: 0, outTok: 0, firstIn: 0, cost: 0, calls: [], reads: [], cmds: [], trace: [], hints: 0, retries: [], errors: [], text: "", timedOut: false, capped: false, delegations: [], backgrounds: [], maxIn: 0, lastIn: 0, ins: [], subCalls: 0, childTimes: [], compacted: false, child: { jobs: 0, turns: 0, input: 0, output: 0, cache: 0, cost: 0, maxInput: 0 } };
     const pending = new Map();
     let buf = "", stderr = "";
     const onEvent = (e) => {
@@ -178,6 +184,8 @@ function runPi(prompt, cwd, eventsFile) {
           const inN = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);   // Claude 는 프롬프트 캐시에 쓴 몫이 cacheWrite 로 따로 온다
           m.requests++; m.inTok += inN; m.outTok += u.output ?? 0;
           if (!m.firstIn) m.firstIn = inN;
+          m.maxIn = Math.max(m.maxIn, inN);
+          m.lastIn = inN; m.ins.push(inN);
           m.cost += Number(u.cost?.total ?? 0) || 0;
         }
         if (e.message.errorMessage) m.errors.push(short(e.message.errorMessage, 300));
@@ -185,6 +193,10 @@ function runPi(prompt, cwd, eventsFile) {
         if (t.trim()) m.text = t;
       } else if (e.type === "tool_execution_start") {
         pending.set(e.toolCallId, { name: e.toolName, args: short(e.args, 240) });
+        if (e.toolName === "subagent") { const a = e.args ?? {}; const items = a.tasks?.length ? a.tasks : [{ agent: a.agent, level: a.level, task: a.task }];
+          m.subCalls++;
+          for (const t of items) m.delegations.push({ call: m.subCalls, at: Date.now(), agent: t.agent ?? null, level: t.level ?? a.level ?? null, taskChars: String(t.task ?? "").length, wait: a.wait !== false }); }
+        if (e.toolName === "background") m.backgrounds.push(String(e.args?.action ?? ""));
         if (e.toolName === "read") m.reads.push(String(e.args?.path ?? e.args?.file_path ?? ""));
         if (e.toolName === "bash") m.cmds.push(String(e.args?.command ?? ""));
         m.trace.push(tagCall(e.toolName, e.args));
@@ -192,10 +204,15 @@ function runPi(prompt, cwd, eventsFile) {
         if (m.calls.length >= opt.maxCalls) { m.capped = true; child.kill(); }
       } else if (e.type === "tool_execution_end") {
         const c = pending.get(e.toolCallId) ?? { name: e.toolName, args: "" };
+        // subagent 의 자식 pi 사용량: oxy-jobs 가 도구 결과의 details.usage 에 남긴다 (비대화형에는 상태 파일이 없다)
+        if (e.toolName === "subagent") for (const u of e.result?.details?.usage ?? []) { if (!u) continue; const k = m.child; k.jobs++; k.turns += u.turns ?? 0; k.input += u.input ?? 0; k.output += u.output ?? 0; k.cache += u.cache ?? 0; k.cost += u.cost ?? 0; k.maxInput = Math.max(k.maxInput, u.maxInput ?? 0); }
+        if (e.toolName === "subagent") for (const t of e.result?.details?.timing ?? []) m.childTimes.push(t);
         const t = textOf(e.result?.content);
         const om = t.match(/\[oxy: (\d+) characters omitted/);
         if (t.includes("[oxy-hint]")) m.hints++;
         m.calls.push({ ...c, out: t.length, raw: t.length + (om ? Number(om[1]) : 0), err: !!e.isError, head: short(t.replace(/\s+/g, " "), 120) });
+      } else if (/compact/i.test(e.type ?? "")) {
+        m.compacted = true;
       } else if (e.type === "auto_retry_start") {
         m.retries.push(short(e.errorMessage ?? "", 160));
       }
@@ -211,7 +228,7 @@ function runPi(prompt, cwd, eventsFile) {
       }
     });
     child.stderr.on("data", (d) => { stderr += d.toString("utf8"); });
-    const timer = setTimeout(() => { m.timedOut = true; child.kill(); }, 7 * 60 * 1000);
+    const timer = setTimeout(() => { m.timedOut = true; child.kill(); }, (["parallel", "impact"].includes(opt.suite) ? 25 : LONG_SUITE ? 15 : 7) * 60 * 1000);
     child.on("close", (code) => {
       clearTimeout(timer); out.end();
       if (code !== 0 && !m.capped && !m.timedOut) m.errors.push(`exit ${code}: ${short(stderr.trim().split("\n").slice(-3).join(" | "), 300)}`);
@@ -229,7 +246,7 @@ const target = resolveTarget(meta);
 const keysB64 = inheritKeys();
 console.log(`[${label}] tools=${meta.tools.join(",")} model=${target.key}${HIDE.length ? ` hide=${HIDE.join(",")}` : ""}`);
 const started = Date.now();
-const SUITE = { base: SCENARIOS, combo: COMBO, habit: HABIT }[opt.suite];
+const SUITE = { base: SCENARIOS, combo: COMBO, habit: HABIT, delegate: DELEGATE, explore: EXPLORE, parallel: PARALLEL, impact: IMPACT }[opt.suite];
 const todo = SUITE.filter((s) => (!opt.only || opt.only.includes(s.id)) && !done.has(`${label}|${target.key}|${s.id}`));
 for (const [i, s] of todo.entries()) {
   if ((Date.now() - started) / 60000 > opt.minutes) { console.log(`시간 한도(${opt.minutes}분) → 남은 ${todo.length - i}건은 다음 실행에서`); break; }
@@ -239,9 +256,17 @@ for (const [i, s] of todo.entries()) {
   if (s.setup) { fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true }); ctx = (await s.setup(dir, ROOT)) ?? {}; }
   else makeFixture(dir);
   spawnSync("git", ["init", "-q"], { cwd: dir });
-  const prompt = typeof s.prompt === "function" ? s.prompt(ctx) : s.prompt;
+  const prompts = (s.turns ?? [s.prompt]).map((p) => (typeof p === "function" ? p(ctx) : p));
+  const sid = s.turns ? `eval-${label}-${s.id}-${Date.now()}` : null;
+  const before = [];
+  for (const [ti, p] of prompts.slice(0, -1).entries()) {
+    const tb = Date.now();
+    const pm = await runPi(p, dir, path.join(T, `events-${s.id}-pre${ti + 1}.jsonl`), sid);
+    before.push({ seconds: Math.round((Date.now() - tb) / 1000), requests: pm.requests, lastIn: pm.lastIn, maxIn: pm.maxIn, cost: Number(pm.cost.toFixed(5)), did: pm.delegations.length ? "subagent" : "self", compacted: pm.compacted, errors: pm.errors.length });
+    console.log(`         앞 요청 ${ti + 1}: ${before.at(-1).seconds}s 마지막 입력=${pm.lastIn} 최대=${pm.maxIn} 위임=${before.at(-1).did}${pm.compacted ? " compaction" : ""}`);
+  }
   const t0 = Date.now();
-  const m = await runPi(prompt, dir, path.join(T, `events-${s.id}.jsonl`));
+  const m = await runPi(prompts.at(-1), dir, path.join(T, `events-${s.id}.jsonl`), sid);
   let verdict;
   try { verdict = await s.check({ text: m.text, dir, calls: m.calls, ctx }); } catch (e) { verdict = { pass: false, note: `check 오류: ${e.message}` }; }
   try { ctx.close?.(); } catch { /* 이미 닫힘 */ }
@@ -255,11 +280,29 @@ for (const [i, s] of todo.entries()) {
     calls: m.calls, retries: m.retries.length, errors: m.errors, timedOut: m.timedOut, capped: m.capped, seconds: Math.round((Date.now() - t0) / 1000),
     cost: Number(m.cost.toFixed(5)), trace: m.trace, hints: m.hints, ...(HIDE.length ? { hidden: HIDE } : {}), ...(usage ? { skills: usage, skillsUsed: usage.filter((u) => u.ran).length, skillsExpected: usage.length } : {}),
     text: short(m.text, 600),
+    ...(s.expect ? delegationOf(s.expect, m) : {}),
+    ...(LONG_SUITE ? { maxIn: m.maxIn, lastIn: m.lastIn, ins: m.ins, subCalls: m.subCalls, childTimes: m.childTimes, child: { ...m.child, cost: Number(m.child.cost.toFixed(5)) } } : {}),
+    ...(verdict.metrics ? { metrics: verdict.metrics } : {}),
+    ...(before.length ? { before, carriedIn: m.firstIn, compacted: m.compacted } : {}),
+    ...(opt.connMax ? { connMax: opt.connMax } : {}),
   };
   if (usage) console.log(`         skills ${usage.map((u) => `${u.skill}:${u.read ? "읽음" : "-"}/${u.ran ? "실행" : "-"}`).join(" ")} cost=${rec.cost}`);
+  if (s.expect) console.log(`         위임 기대=${rec.expect} 실제=${rec.did} ${rec.match ? "일치" : "불일치"} ${JSON.stringify(rec.delegations)} cost=${rec.cost} maxIn=${rec.maxIn ?? "-"} child=${JSON.stringify(rec.child ?? null)}`);
   console.log(`${s.id.padEnd(6)} ${rec.pass ? "PASS" : "FAIL"} req=${rec.requests} in=${rec.inTok} first=${rec.firstIn} toolOut=${rec.toolOut}/${rec.toolRaw} ${rec.seconds}s | ${m.calls.map((c) => `${c.name}${c.err ? "!" : ""}`).join(",") || "-"} | ${rec.note}${m.errors.length ? ` | ERR ${short(m.errors[0], 200)}` : ""}`);
   if (quota) { console.log("  → 한도 오류로 끝남: 기록하지 않음"); if (/tokens per day|TPD/i.test(m.errors.join(" "))) break; continue; }
   fs.appendFileSync(RESULTS, scrub(JSON.stringify(rec)) + "\n");
+}
+
+/**
+ * 위임 판단 (suite delegate): 실제로 한 것 did = subagent | background | self (둘 다 했으면 subagent+background).
+ * match = 기대(expect)와 같은지. subagent 를 기대한 경우 background 로 넘긴 것은 일치로 보지 않는다.
+ * 자식 pi(subagent)의 요청 비용은 cost 에 들어가지 않는다 (부모 events 에 없다).
+ */
+function delegationOf(expect, m) {
+  const sub = m.delegations.length > 0, bg = m.backgrounds.includes("start");
+  const did = sub && bg ? "subagent+background" : sub ? "subagent" : bg ? "background" : "self";
+  const match = expect === "free" ? true : expect === "self" ? did === "self" : did.split("+").includes(expect);
+  return { expect, did, match, delegations: m.delegations, backgrounds: m.backgrounds };
 }
 
 /**
