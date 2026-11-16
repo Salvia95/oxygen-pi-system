@@ -140,7 +140,7 @@ export async function runSubagent(mgr: JobManager, job: Job, agent: AgentDef, ta
     job.proc = proc;
     // 멈출 때 자식 pi 의 bash 도구가 띄운 손자 프로세스(MSYS)까지 끝낸다
     if (opts.shell) { const sh = opts.shell; job.kill = () => killTreeWithMsys(sh, proc); }
-    job.usage = { turns: 0, input: 0, output: 0 };
+    job.usage = { turns: 0, input: 0, output: 0, cache: 0, cost: 0, maxInput: 0 };
     let buf = "";
     let lastText = "";
     let errText = "";
@@ -150,6 +150,10 @@ export async function runSubagent(mgr: JobManager, job: Job, agent: AgentDef, ta
         job.usage!.turns++;
         job.usage!.input += m.usage?.input ?? 0;
         job.usage!.output += m.usage?.output ?? 0;
+        const cache = (m.usage?.cacheRead ?? 0) + (m.usage?.cacheWrite ?? 0);
+        job.usage!.cache = (job.usage!.cache ?? 0) + cache;
+        job.usage!.cost = (job.usage!.cost ?? 0) + (Number(m.usage?.cost?.total ?? 0) || 0);
+        job.usage!.maxInput = Math.max(job.usage!.maxInput ?? 0, (m.usage?.input ?? 0) + cache);
         const t = textOf(m).trim();
         if (t) { lastText = t; w.line(`[assistant] ${t.split("\n")[0].slice(0, 200)}`); }
         for (const b of m.content ?? []) {

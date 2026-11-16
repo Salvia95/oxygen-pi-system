@@ -324,7 +324,9 @@ export default async function (pi: ExtensionAPI) {
           }
           await Promise.all(runs);
           const per = Math.floor(outMax / jobs.length);
-          return ok(jobs.map((j) => summary(j, per)).join("\n\n---\n\n"), { ids: jobs.map((j) => j.id) });
+          // details.usage: 자식 pi 의 사용량 (모델에는 보이지 않는다. 비대화형에서는 상태 파일이 없어 평가 도구가 여기서 읽는다)
+          return ok(jobs.map((j) => summary(j, per)).join("\n\n---\n\n"), { ids: jobs.map((j) => j.id), usage: jobs.map((j) => j.usage ?? null),
+            timing: jobs.map((j) => ({ start: j.startedAt ?? null, end: j.endedAt ?? null })) });
         },
       });
     }

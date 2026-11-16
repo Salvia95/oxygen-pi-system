@@ -27,7 +27,8 @@ export interface JobSnapshot {
   startedAt: number | null;
   endedAt: number | null;
   exitCode: number | null;
-  usage: { turns: number; input: number; output: number } | null;
+  /** cache: 프롬프트 캐시로 읽고 쓴 입력 토큰(Claude), cost: 공급자가 알려 준 비용 합계 (없으면 0) */
+  usage: { turns: number; input: number; output: number; cache?: number; cost?: number; maxInput?: number } | null;
   log: string;          // 실행 폴더 기준 상대 경로 (/ 구분)
   last: string;         // 마지막 출력 한 줄
   result: string | null; // subagent 최종 답변 앞부분
