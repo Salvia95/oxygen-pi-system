@@ -37,6 +37,12 @@ fi
 if (( ${#proprietary[@]} )); then
   warn "비오픈소스 구성요소 포함: ${proprietary[*]} — 본인 반입용입니다. 다른 사람에게 배포하기 전에 약관을 확인하세요."
 fi
+# 패치 노트 (docs/tui-spec.md §13): 이 버전의 PATCH_NOTES.md 가 있어야 하고 첫 줄 버전이 VERSION 과 같아야 한다
+notes_problem="$("$NODE" --input-type=module -e '
+  const { patchNotesProblem } = await import(process.argv[1]);
+  process.stdout.write(patchNotesProblem(process.argv[2]) ?? "");
+' "$(winpath "$OXY_HOME/installer/update-bundle.mjs" | sed 's|^|file:///|')" "$(winpath "$OXY_HOME")")"
+[[ -z "$notes_problem" ]] || die "$notes_problem → PATCH_NOTES.md 를 이 버전($(tr -d '\r\n' < "$OXY_HOME/VERSION"))에 맞게 쓴 뒤 다시 실행하세요"
 (( CHECK_ONLY )) && { log "검사 통과 (--check)"; exit 0; }
 
 # ---- zip 생성 ----
@@ -53,7 +59,7 @@ log "압축 중: $out"
   base="$(basename "$OXY_HOME")"
   "$TAR" -a -c -f "$(winpath "$out")" \
     --exclude="$base/.cache" --exclude="$base/dist" --exclude="$base/.git" --exclude="$base/optional" \
-    --exclude="$base/.oxy-selection" \
+    --exclude="$base/.oxy-selection" --exclude="$base/docs/patch-notes" \
     --exclude="$base/installer/oxy-tui/target" --exclude="$base/tests/tui-capture/.state" \
     --exclude="$base/agent/oxy.env" --exclude="$base/agent/sessions" \
     --exclude="$base/agent/settings.json" --exclude="$base/agent/models.json" \

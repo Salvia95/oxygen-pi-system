@@ -561,3 +561,80 @@ test("글꼴 D2Coding: 새로 설치 · 이미 있음 · 새 버전 · 번들에
     assert.equal(createSystem({ root, sandbox: s1 }).fontRegistered(), null);
   } finally { rmSync(box, { recursive: true, force: true }); }
 });
+
+test("설치 폴더에서 업데이트 (tui-spec §13): 번들 판정 · zip 무결성 · 압축 풀기 · 버전 · 패치 노트 · 넘김 스크립트 · 임시 폴더 정리", async () => {
+  const U = await import("../installer/update-bundle.mjs");
+  const { mkdirSync, utimesSync } = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const { createHash } = await import("node:crypto");
+  const box = mkdtempSync(join(tmpdir(), "oxy-upd-"));
+  try {
+    // 번들 폴더 판정: install.cmd · VERSION · installer/install.mjs, 설치 폴더 자신은 안 된다
+    const bundle = join(box, "src", "oxygen-pi-system");
+    mkdirSync(join(bundle, "installer"), { recursive: true });
+    writeFileSync(join(bundle, "install.cmd"), "@echo off\r\n");
+    writeFileSync(join(bundle, "VERSION"), "0.2.0\n");
+    writeFileSync(join(bundle, "installer", "install.mjs"), "");
+    assert.equal(U.bundleProblem(bundle, join(box, "installed")), null);
+    assert.equal(U.bundleProblem(bundle, bundle), "설치 폴더 자신은 새 번들로 쓸 수 없습니다");
+    assert.equal(U.bundleProblem(join(box, "src")), "번들 폴더가 아닙니다: install.cmd 가 없습니다");
+    assert.equal(U.bundleProblem(join(box, "none")), "폴더를 찾을 수 없습니다");
+    assert.deepEqual([U.bundleKind(bundle), U.bundleKind(join(box, "none.zip"))], ["dir", null]);
+
+    // 패치 노트: 첫 줄 버전, 마크다운 기호를 뺀 글, 목록 수 · 번들 검사
+    writeFileSync(join(bundle, "PATCH_NOTES.md"), "# v0.2.0 (2026-11-16)\n\n## 새 기능\n\n- 설치 폴더에서 `install.cmd` 로 업데이트\n- 패치 노트\n\n## 고친 점\n\n- 하나\n");
+    const notes = U.readPatchNotes(bundle);
+    assert.deepEqual([notes.version, notes.title, notes.items], ["0.2.0", "v0.2.0 패치 노트", 3]);
+    assert.deepEqual(notes.lines, ["새 기능", "", "  설치 폴더에서 install.cmd 로 업데이트", "  패치 노트", "", "고친 점", "", "  하나"]);
+    assert.equal(U.patchNotesProblem(bundle), null);
+    writeFileSync(join(bundle, "VERSION"), "0.3.0\n");
+    assert.equal(U.patchNotesProblem(bundle), "PATCH_NOTES.md 의 버전(v0.2.0)이 VERSION(0.3.0)과 다릅니다");
+    writeFileSync(join(bundle, "VERSION"), "0.2.0\n");
+    assert.equal(U.readPatchNotes(join(box, "src")), null, "패치 노트가 없는 번들(이 절 이전)은 넘어간다");
+
+    // 버전 비교와 D2 문구
+    assert.ok(U.compareVersions("0.10.0", "0.9.1") > 0 && U.compareVersions("v0.2.0", "0.2.0") === 0);
+    assert.deepEqual([U.versionNote("0.1.0", "0.2.0"), U.versionNote("0.2.0", "0.2.0"), U.versionNote("0.3.0", "0.2.0")],
+      [null, "같은 버전으로 다시 설치합니다", "이전 버전으로 되돌립니다"]);
+
+    // zip 만들기 (Windows 내장 bsdtar) → 무결성 확인 → 압축 풀기
+    const dl = join(box, "Downloads");
+    mkdirSync(dl);
+    const zip = join(dl, "oxygen-pi-20261116.zip");
+    const tar = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+    const made = spawnSync(tar, ["-a", "-c", "-f", zip, "-C", join(box, "src"), "oxygen-pi-system"], { encoding: "utf8" });
+    assert.equal(made.status, 0, made.stderr);
+    assert.equal((await U.checkZipSha(zip)).status, "missing");
+    const sha = createHash("sha256").update(readFileSync(zip)).digest("hex");
+    writeFileSync(`${zip}.sha256`, `${sha}  oxygen-pi-20261116.zip\n`);
+    assert.equal((await U.checkZipSha(zip)).status, "ok");
+    writeFileSync(`${zip}.sha256`, `${"0".repeat(64)}  oxygen-pi-20261116.zip\n`);
+    assert.equal((await U.checkZipSha(zip)).status, "mismatch");
+    const tmp = join(box, "Temp");
+    const out = await U.extractBundle(zip, tmp, 123);
+    assert.equal(out, join(tmp, "oxygen-pi-update-123", "oxygen-pi-system"));
+    assert.equal(U.bundleProblem(out), null);
+
+    // 입력 화면의 처음 값: Downloads 의 가장 최근 번들 zip (다른 이름의 zip 은 무시)
+    writeFileSync(join(dl, "oxygen-pi-20261101.zip"), "");
+    writeFileSync(join(dl, "other.zip"), "");
+    utimesSync(join(dl, "oxygen-pi-20261101.zip"), new Date(2026, 0, 1), new Date(2026, 0, 1));
+    assert.equal(U.latestBundleZip(dl), zip);
+    assert.equal(U.latestBundleZip(join(box, "none")), null);
+
+    // 넘김 스크립트: cmd 는 새 번들의 install.cmd --update, sh 는 install.sh --update
+    const hc = U.writeHandoff(join(tmp, "oxygen-pi-update-1.cmd"), "C:\\b\\oxygen-pi-system");
+    assert.ok(readFileSync(hc, "utf8").endsWith('cd /d "C:\\b\\oxygen-pi-system"\r\n"C:\\b\\oxygen-pi-system\\install.cmd" --update\r\n'));
+    const hs = U.writeHandoff(join(tmp, "oxygen-pi-update-1.sh"), "C:\\b\\oxygen-pi-system");
+    assert.match(readFileSync(hs, "utf8"), /cd '\/c\/b\/oxygen-pi-system' && exec \.\/install\.sh --update\n$/);
+
+    // D3: 하루 넘은 oxygen-pi-update-* 만 지운다
+    const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    utimesSync(join(tmp, "oxygen-pi-update-123"), old, old);
+    utimesSync(hc, old, old);
+    writeFileSync(join(tmp, "keep.txt"), "");
+    utimesSync(join(tmp, "keep.txt"), old, old);
+    assert.equal(U.cleanupOldUpdates(tmp), 2);
+    assert.deepEqual(readdirSync(tmp).sort(), ["keep.txt", "oxygen-pi-update-1.sh"]);
+  } finally { rmSync(box, { recursive: true, force: true }); }
+});

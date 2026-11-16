@@ -2,10 +2,14 @@
 //   node installer/install.mjs [--sandbox <dir>]
 //   --sandbox: 레지스트리(PATH)·바탕화면·AppData 대신 지정 폴더에만 기록 (테스트용)
 // 화면 문구·배치 규칙: docs/tui-spec.md
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BACK, UI, c, errorBlock, padDisplay, rail } from "./tui.mjs";
+import { BACK, UI, c, errorBlock, padDisplay, rail, wrapText } from "./tui.mjs";
+import {
+  bundleKind, bundleProblem, checkZipSha, cleanupOldUpdates, extractBundle, latestBundleZip, readPatchNotes, versionNote, writeHandoff,
+} from "./update-bundle.mjs";
 import { SHELL_NAMES, WT_PROFILE_NAME, createSystem, normShell } from "./system.mjs";
 import { loadConnections } from "./connections.mjs";
 import { deleteSecret, getSecret, hasSecret, setSecret } from "./secrets.mjs";
@@ -1270,6 +1274,8 @@ async function done(state, passed) {
     ], { indent: 4, width: 16 }),
     "", `  ${c.bold("다음에 할 일")}`,
     ...rail([
+      // 업데이트로 들어온 새 버전의 패치 노트 (설치 폴더에 있을 때만, docs/tui-spec.md §13)
+      state.update && existsSync(join(state.installDir, "PATCH_NOTES.md")) ? ["패치 노트", `${state.installDir}\\PATCH_NOTES.md`] : null,
       ["설정 변경", "설치 폴더의 tweak.cmd"],
       state.sqlcl?.action === "skip" ? ["SQLcl 설치", "tweak.cmd의 DB 연결에서 zip 파일로 설치"] : null,
       ["업데이트, 제거", "install.cmd"],
@@ -1417,18 +1423,136 @@ async function removeNow(reg, backup) {
   return 0;
 }
 
-async function manage(reg) {
+// ------------------------------------------------------------------ 업데이트: 새 번들 고르기 · 패치 노트 · 넘기기 (docs/tui-spec.md §13)
+/** 압축 풀기 · 정리가 쓰는 임시 폴더. sandbox 에서는 sandbox 안에 둔다 */
+const updateTmpRoot = () => (sys.sandbox ? join(sys.sandbox, "tmp") : tmpdir());
+const bundleDownloadsDir = () => join(sys.sandbox ?? homedir(), "Downloads");
+/** 경로 입력: 탐색기에서 복사한 따옴표 붙은 경로도 받는다 */
+const bundlePathOf = (v) => String(v ?? "").trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+const bundlePathProblem = (installDir) => (v) => {
+  const p = bundlePathOf(v);
+  const kind = bundleKind(p);
+  return !kind ? "폴더 또는 zip 파일을 찾을 수 없습니다" : kind === "dir" ? bundleProblem(p, installDir) : null;
+};
+
+/** 압축 파일 → 번들 폴더. 무결성 확인과 압축 풀기를 작업 줄로 보인다 (실패하면 던진다: 호출한 쪽이 입력 화면으로 돌아간다) */
+async function prepareBundleZip(zip) {
+  ui.screen(`  ${c.bold("새 번들을 준비하는 중입니다")}\n  ${c.gray(zip)}\n`);
+  const saved = ui.interruptNote;
+  ui.interruptNote = () => `중단되었습니다. 완료하지 못한 작업: ${ui.current?.label ?? "새 번들 준비"}. 설치 폴더는 바뀌지 않았습니다. install.cmd를 다시 실행하세요.`;
+  try { return await unpackZip(zip); } finally { ui.interruptNote = saved; }
+}
+
+async function unpackZip(zip) {
+  if (existsSync(`${zip}.sha256`)) {
+    await ui.task("무결성 확인", async () => {
+      if ((await checkZipSha(zip)).status === "mismatch") {
+        throw Object.assign(new Error("sha256 mismatch"), { why: ".sha256 파일의 값과 다릅니다", fix: "zip 파일을 다시 복사하거나 내려받으세요" });
+      }
+    });
+  } else {
+    // 직접 옮긴 zip 만 따로 다니는 경우가 흔하다: 경고 줄을 남기고 계속한다 (D1)
+    await ui.task("무결성 확인", async () => { throw new Error("무결성 파일(.sha256)이 없습니다"); }, { warn: "확인을 건너뜁니다" });
+  }
+  let dir = "";
+  await ui.task("번들 압축 풀기", async () => {
+    dir = await extractBundle(zip, updateTmpRoot());
+  });
+  return dir;
+}
+
+/** 입력 화면: 새 번들의 위치 → { dir, source }. Esc 는 null (메뉴로 돌아간다) */
+async function askBundle(reg) {
+  let value = latestBundleZip(bundleDownloadsDir()) ?? "";
+  let error = "";
+  for (;;) {
+    const v = await ui.input("업데이트할 새 번들의 위치를 입력하세요", {
+      note: "압축을 푼 번들 폴더 또는 oxygen-pi-YYYYMMDD.zip 파일 경로", initial: value, validate: bundlePathProblem(reg.installDir), error,
+    });
+    if (v === BACK) return null;
+    value = v;
+    const source = resolve(bundlePathOf(v));
+    if (bundleKind(source) === "dir") return { dir: source, source };
+    try {
+      return { dir: await prepareBundleZip(source), source };
+    } catch (e) {
+      // 작업 줄이 보인 원인과 같은 말을 입력 화면의 오류 줄로 다시 보이고 입력 화면으로 돌아간다
+      error = e?.why ? `무결성 확인에 실패했습니다: ${e.why}` : String(e?.message ?? e);
+    }
+  }
+}
+
+/** 새 번들의 패치 노트를 본 화면에 보인다 (상태 점검 출력과 같은 방식: 화면 밖 출력 + 계속) */
+async function showPatchNotes(notes) {
+  const wrap = (l) => {
+    const ind = l.match(/^ */)[0];
+    return wrapText(l.slice(ind.length), 76 - ind.length - (ind ? 2 : 0)).map((x, i) => (ind ? ind + (i ? "  " : "") : "") + (ind ? x : c.bold(x)));
+  };
+  await ui.outside(() => {
+    for (const l of notes.lines) for (const x of l.trim() ? wrap(l) : [""]) ui.out.write(x ? `  ${x}\n` : "\n");
+  }, { title: notes.title });
+}
+
+/**
+ * 업데이트 확인 (중간 위험: 덮어쓰기). 패치 노트가 있으면 확인 바로 앞에 보인다.
+ * source: 설치 폴더에서 입력한 새 번들의 위치 (이 번들로 직접 실행했으면 null). 방금 메뉴에서 선택했고 설정이 유지되며
+ * 이전 번들로 되돌릴 수 있어 초기 포커스는 '업데이트 시작' (§7.8)
+ */
+async function confirmUpdate(reg, bundle, source) {
+  const next = bundle === ROOT ? VERSION : readFileSync(join(bundle, "VERSION"), "utf8").trim();
+  const notes = readPatchNotes(bundle);
+  if (notes) await showPatchNotes(notes);
+  const same = versionNote(reg.version, next);
+  return ui.confirm(`${source ? "새" : "이"} 번들(v${next})로 설치 폴더를 업데이트할까요?`, {
+    yes: "업데이트 시작", no: "업데이트 취소", level: "medium", danger: false, initial: true,
+    summary: [
+      ["설치 폴더", reg.installDir],
+      source ? ["새 번들", source] : null,
+      ["교체", "프로그램 파일"], ["유지", "oxy.env, LLM 연결, DB 연결, 비밀번호와 API 키, 스킬 설정, 세션"],
+      ["버전", `v${reg.version ?? "?"}에서 v${next}으로${same ? ` · ${same}` : ""}`],
+      notes ? ["패치 노트", `v${notes.version ?? next} (${notes.items}개 항목)`] : null,
+    ].filter(Boolean),
+    detail: { yes: "이전 버전으로 돌아가려면 이전 번들의 install.cmd로 업데이트하세요.",
+      no: "변경 없이 설치 관리 메뉴로 돌아갑니다." },
+  });
+}
+
+/**
+ * 설치 폴더에서 실행한 업데이트: 새 번들을 고르고 확인한 뒤 새 번들의 설치 화면으로 넘긴다.
+ * 이 설치 화면이 실행되는 동안에는 설치 폴더의 node.exe · oxy-tui.exe 가 잠겨 있어 여기서는 복사하지 않는다.
+ * 넘김 스크립트(install.cmd · install.sh 가 정한 OXY_UPDATE_HANDOFF)를 쓰고 끝나면, 런처가 새 번들의 `install.cmd --update` 로 넘긴다.
+ * 돌려주는 값: 종료 코드 (넘겼을 때) · null (취소: 메뉴로 돌아간다)
+ */
+async function updateFromInstallFolder(reg) {
+  setFrame(null, undefined, undefined, ["설치 관리", "업데이트"]);
+  const picked = await askBundle(reg);
+  if (!picked) return null;
+  setFrame(null, undefined, undefined, ["설치 관리", "업데이트"]);
+  if (!(await confirmUpdate(reg, picked.dir, picked.source))) return null;
+  const handoff = process.env.OXY_UPDATE_HANDOFF;
+  if (handoff) {
+    writeHandoff(handoff, picked.dir);
+    ui.screen(`  ${c.bold("새 번들의 설치 화면으로 넘어갑니다")}\n`);
+  } else {
+    // node 로 직접 실행해서 런처가 없다: 넘기지 않고 할 일을 알린다
+    ui.screen(`  ${c.bold("새 번들 폴더에서 install.cmd --update 를 실행하세요:")}\n  ${picked.dir}\n`);
+  }
+  return 0;
+}
+
+async function manage(reg, { autoUpdate = false } = {}) {
   for (;;) {
     setFrame(null, undefined, undefined, "설치 관리");
     const sameBundle = sys.isSameDir(ROOT, reg.installDir);
-    // 줄 입력 모드의 번호는 항상 1~5 (업데이트를 쓸 수 없어도 목록에 두고 이유를 보인다). `종료` 는 줄 입력 모드에만 있다 (화면에서는 Esc)
-    const choice = await ui.select("어떤 작업을 할까요?", [
+    // 새 번들의 `install.cmd --update`: 메뉴와 확인은 설치 폴더에서 이미 거쳤다. 한 번만 쓰고, 취소하면 평소 메뉴로 돌아간다
+    const handedOver = autoUpdate;
+    autoUpdate = false;
+    // 줄 입력 모드의 번호는 항상 1~5. `종료` 는 줄 입력 모드에만 있다 (화면에서는 Esc)
+    const choice = handedOver ? "update" : await ui.select("어떤 작업을 할까요?", [
       { label: "다시 설정", value: "reconfigure",
         detail: ["LLM 연결, 모델, GitLab, PATH·바로가기를 순서대로 다시 설정합니다.", "한 항목만 변경하려면 tweak.cmd를 사용하세요."] },
       { label: "상태 점검", value: "verify", detail: ["도구, 설정, LLM 연결이 정상인지 확인합니다.", "설정은 변경되지 않습니다."] },
-      { label: "업데이트", value: "update", hint: sameBundle ? "" : `v${reg.version ?? "?"}에서 v${VERSION}으로`,
-        disabled: sameBundle ? "사용 불가" : false,
-        why: "설치된 폴더에서 실행했기 때문에 업데이트할 수 없습니다.", fix: "새로 반입한 번들 폴더의 install.cmd를 실행하세요.",
+      { label: "업데이트", value: "update", hint: sameBundle ? "새 번들 위치 입력" : `v${reg.version ?? "?"}에서 v${VERSION}으로`,
         detail: ["프로그램 파일만 교체합니다. 설정과 DB 연결은 유지됩니다."] },
       { label: "제거", value: "uninstall",
         detail: reg.copied
@@ -1448,17 +1572,15 @@ async function manage(reg) {
       continue;
     }
     if (choice === "update") {
+      // 설치 폴더에서 실행했으면 새 번들을 고르고 그 번들의 설치 화면으로 넘긴다 (복사는 새 번들 쪽에서)
+      if (sameBundle) {
+        const r = await updateFromInstallFolder(reg);
+        if (r === null) continue;
+        return r;
+      }
       const state = { ...stateFromInstall(reg), copy: true, update: true, doneTitle: "업데이트를 마쳤습니다" };
       setFrame(null, undefined, undefined, ["설치 관리", "업데이트"]);
-      // 중간 위험(덮어쓰기). 방금 메뉴에서 선택했고 설정이 유지되며 이전 번들로 되돌릴 수 있어 초기 포커스는 '업데이트 시작' (§7.8)
-      const go = await ui.confirm(`이 번들(v${VERSION})로 설치 폴더를 업데이트할까요?`, {
-        yes: "업데이트 시작", no: "업데이트 취소", level: "medium", danger: false, initial: true,
-        summary: [["설치 폴더", state.installDir], ["교체", "프로그램 파일"], ["유지", "oxy.env, LLM 연결, DB 연결, 비밀번호와 API 키, 스킬 설정, 세션"],
-          ["버전", `v${reg.version ?? "?"}에서 v${VERSION}으로`]],
-        detail: { yes: "이전 버전으로 돌아가려면 이전 번들의 install.cmd로 업데이트하세요.",
-          no: "변경 없이 설치 관리 메뉴로 돌아갑니다." },
-      });
-      if (!go) continue;
+      if (!handedOver && !(await confirmUpdate(reg, ROOT, null))) continue;
       // 번들에 새로 들어온 선택 구성요소가 있을 때만 선택 화면을 보인다 (설치된 것은 잠금 '설치됨', 새것은 해제 상태)
       const rows = componentRows(state);
       const fresh = rows.filter((r) => !r.header && !r.locked && !r.disabled && hasComponent(r.value, ROOT));
@@ -1500,8 +1622,17 @@ async function manage(reg) {
 // ------------------------------------------------------------------ main
 async function main() {
   ui.intro();
+  // 설치 폴더에서 업데이트하며 풀어 둔 하루 넘은 임시 폴더를 지운다 (docs/tui-spec.md §13 D3). 지우지 못해도 설치에는 영향이 없다
+  try { cleanupOldUpdates(updateTmpRoot()); } catch { /* 다음에 */ }
+  // 넘김으로 시작했다면 런처가 정한 넘김 스크립트 경로가 앞 설치 화면의 것과 같을 수 있다 (install.sh 는 exec 로 넘겨 프로세스 번호가 같다).
+  // 남겨 두면 이 설치 화면이 끝난 뒤 런처가 같은 스크립트로 다시 넘기므로 시작할 때 지운다
+  if (process.env.OXY_UPDATE_HANDOFF) { try { rmSync(process.env.OXY_UPDATE_HANDOFF, { force: true }); } catch { /* 쓰는 중이면 그대로 */ } }
   const reg = sys.loadRegistry();
-  if (reg?.installDir && existsSync(reg.installDir)) return manage(reg);
+  if (reg?.installDir && existsSync(reg.installDir)) {
+    // `--update`: 설치 폴더의 install.cmd 가 넘겨 준 새 번들일 때만 쓴다 (등록된 설치가 있고 그 폴더가 이 번들과 다를 때). 아니면 무시한다
+    const autoUpdate = process.argv.includes("--update") && !sys.isSameDir(ROOT, reg.installDir);
+    return manage(reg, { autoUpdate });
+  }
   return install({});
 }
 

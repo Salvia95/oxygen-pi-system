@@ -19,7 +19,7 @@ chk() { if eval "$2"; then printf '  \033[32mPASS\033[0m %s\n' "$1"; else printf
 run() { # <설명> <installer node> <답...>
   local label="$1" node="$2"; shift 2
   log "$label"
-  printf '%s\n' "$@" | timeout 900 "$node" "$(winpath "${INSTALLER:-$OXY_HOME/installer/install.mjs}")" --sandbox "$(winpath "$SB")" > "$SB/out.txt" 2>&1
+  printf '%s\n' "$@" | timeout 900 "$node" "$(winpath "${INSTALLER:-$OXY_HOME/installer/install.mjs}")" ${RUN_ARGS:-} --sandbox "$(winpath "$SB")" > "$SB/out.txt" 2>&1
   RC=$?
 }
 
@@ -27,6 +27,8 @@ run() { # <설명> <installer node> <답...>
 NONE_IDX=$("$NODE" --input-type=module -e "import('$(winpath "$OXY_HOME/installer/components.mjs" | sed 's|^|file:///|')').then(m=>console.log(m.browserChoices(process.argv[1]).length))" "$(winpath "$OXY_HOME")")
 [[ -f "$OXY_HOME/runtime/sqlcl/bin/sql" && -f "$OXY_HOME/vendor/browsers/chromium/chrome.exe" ]]   || die "이 테스트는 SQLcl·Chromium 이 받아진 상태가 필요 → bash scripts/fetch-bundle.sh --all --accept-license"
 compgen -G "$OXY_HOME/vendor/fonts/d2coding/D2Coding-Ver*.ttf" >/dev/null   || die "이 테스트는 D2Coding 글꼴이 받아진 상태가 필요 → bash scripts/fetch-bundle.sh"
+# 번들의 패치 노트가 있으면 업데이트 확인 앞에 보이는 화면이 하나 더 있다 (줄 입력 모드에서는 Enter 한 번)
+[[ -f "$OXY_HOME/PATCH_NOTES.md" ]] || die "이 테스트는 저장소 루트의 PATCH_NOTES.md 가 필요 (docs/tui-spec.md §13)"
 
 # 1) 신규 설치: 점검 계속 / 기본 위치 / (긴 경로 경고 시 1 = 이 경로에 설치) / 구성요소: 표시된 대로("" = 반입된 것 전부, SQLcl 포함)
 #    / 브라우저: Chromium(2)
@@ -68,20 +70,30 @@ chk "oxy: 비대화형이면 psmux 세션 없이 바로 실행 ($ver)"   '[[ "$v
 ver2=$(cd "$SB" && env -u TMUX bash "$I/oxy" --no-mux --version </dev/null 2>&1 | tail -1)
 chk "oxy --no-mux: 바로 실행 ($ver2)"            '[[ "$ver2" == "$ver" ]]'
 
-# 2) 업데이트: 설치 관리 메뉴 3 업데이트 / 1 업데이트 시작 (덮어쓰기 확인) / 2 상태 점검 건너뛰기 / 종료
+# 2) 업데이트: 설치 관리 메뉴 3 업데이트 / 패치 노트 계속 / 1 업데이트 시작 (덮어쓰기 확인) / 2 상태 점검 건너뛰기 / 종료
 #    (번들에 새로 들어온 구성요소가 없으므로 구성요소 화면은 나오지 않는다)
 echo "OXY_CUSTOM_KEEP=1" >> "$I/agent/oxy.env"
 #    등록해 둔 WT 프로필 · 바로가기가 낡은 내용이면 업데이트가 이 번들의 내용으로 다시 쓴다 (colorScheme 을 지우고 바로가기를 비워 둔다)
 SHORTCUT="$SB/Desktop/Oxygen Pi.lnk.json"
 jq 'del(.profiles[0].colorScheme) | del(.schemes)' "$WTF" > "$SB/wt.stale" && cp "$SB/wt.stale" "$WTF"
 echo '{}' > "$SHORTCUT"
-run "업데이트" "$NODE" 3 1 2 ""
+run "업데이트" "$NODE" 3 "" 1 2 ""
 chk "업데이트: WT 프로필 다시 씀 (colorScheme 복원 · 셸 유지)"   '[[ $(jq -r ".profiles[0].colorScheme + \" \" + .schemes[0].background" "$WTF") == "Oxygen #141A17" ]] && grep -q "bash.exe.*env.sh" "$WTF"'
 chk "업데이트: 바탕화면 바로가기 다시 씀"            '[[ -n $(jq -r ".target // empty" "$SHORTCUT") ]]'
 chk "업데이트: 작업 줄 (WT 프로필 갱신 · 바로가기 갱신)"   'grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt" && grep -q "바탕화면 바로가기 갱신" "$SB/out.txt"'
 chk "업데이트: 글꼴 작업 줄 (설정 파일 다시 생성 뒤 · 프로필 갱신 앞, 같은 버전이면 이미 있음) + 기록 유지"   '[[ -n $(grep "✓ 글꼴 설치 (D2Coding)  이미 있음" "$SB/out.txt") ]] && a=$(grep -n "✓ 설정 파일 다시 생성" "$SB/out.txt" | head -1 | cut -d: -f1) && f=$(grep -n "✓ 글꼴 설치 (D2Coding)" "$SB/out.txt" | head -1 | cut -d: -f1) && p=$(grep -n "✓ Windows Terminal 프로필 갱신" "$SB/out.txt" | head -1 | cut -d: -f1) && (( a < f && f < p )) && [[ "$(jq -r ".font.files | length" "$SB/AppData/oxygen-pi/install.json" | tr -d "\r")" == 2 ]]'
 chk "업데이트 후 사용자 설정 유지"            'grep -q "^OXY_CUSTOM_KEEP=1$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=psmux$" "$I/agent/oxy.env" && grep -q "^OXY_TERMINAL_SHELL=git-bash$" "$I/agent/oxy.env"'
 chk "업데이트 후 LLM 연결 · 키 유지"           '[[ $(lj ".connections[0].models | length") == 2 ]] && has_key site'
+# 패치 노트 (§13): 확인 앞에 본 화면으로 보이고, 확인 요약에 버전 문구 · 패치 노트 행, 완료 화면 '다음에 할 일' 에 설치 폴더의 PATCH_NOTES.md
+chk "업데이트: 패치 노트 화면이 확인 앞에 나옴 (제목 · 계속)"   'a=$(grep -n "패치 노트$" "$SB/out.txt" | head -1 | cut -d: -f1) && c=$(grep -n "업데이트할까요" "$SB/out.txt" | head -1 | cut -d: -f1) && [[ -n $a && -n $c ]] && (( a < c )) && grep -q "Enter 계속" "$SB/out.txt"'
+chk "업데이트: 확인 요약 (같은 버전 문구 · 패치 노트 행 · 새 번들 행 없음)"   'grep -qE "버전 +v[0-9.]+에서 v[0-9.]+으로 · 같은 버전으로 다시 설치합니다" "$SB/out.txt" && grep -qE "패치 노트 +v[0-9.]+ \([0-9]+개 항목\)" "$SB/out.txt" && ! grep -qE "^ +새 번들  +" "$SB/out.txt"'
+chk "업데이트: 설치 폴더에 PATCH_NOTES.md · 완료 화면에 패치 노트 행"   '[[ -f "$I/PATCH_NOTES.md" ]] && grep -qE "^ +패치 노트 +.*PATCH_NOTES\.md$" "$SB/out.txt"'
+
+# 2-1) 설치 폴더에서 넘어온 새 번들 (`install.cmd --update`, §13): 메뉴 · 패치 노트 · 확인 없이 바로 업데이트 흐름
+#      입력: 2 상태 점검 건너뛰기 / 종료 (이 번들 = 저장소, 설치 폴더와 다르다)
+RUN_ARGS="--update" run "업데이트 (--update 로 시작)" "$NODE" 2 ""
+chk "--update: 메뉴 · 패치 노트 · 확인 없이 업데이트 진행"   '[[ $RC == 0 ]] && ! grep -q "어떤 작업을 할까요" "$SB/out.txt" && ! grep -q "업데이트할까요" "$SB/out.txt" && ! grep -qE "v[0-9.]+ 패치 노트$" "$SB/out.txt" && grep -q "업데이트하는 중입니다" "$SB/out.txt" && grep -q "✓ 파일 복사" "$SB/out.txt" && grep -q "✓ 업데이트를 마쳤습니다" "$SB/out.txt"'
+chk "--update: 완료 화면에 패치 노트 행"   'grep -qE "^ +패치 노트 +.*PATCH_NOTES\.md$" "$SB/out.txt"'
 
 # 3) 설정 변경 (설치 관리 메뉴 1 다시 설정): / SQLcl 유지 / 브라우저 '사용 안 함'
 #    / LLM: 종류 · 이름 · 주소 그대로 / 저장된 키 유지 / 결과대로 계속 / 모델 1 하나만 / 컨텍스트 · 응답 최대 길이 · 계열 그대로 / GitLab 유지
@@ -97,14 +109,14 @@ chk "바로가기만 해제"                    '[[ ! -f "$SB/Desktop/Oxygen Pi.
 chk "셸 변경: WT 프로필이 cmd.exe /k 로, OXY_MUX=none"  'grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && ! grep -q "env.sh" "$WTF" && grep -q "^OXY_TERMINAL_SHELL=cmd$" "$I/agent/oxy.env" && grep -q "^OXY_MUX=none$" "$I/agent/oxy.env"'
 #    바로가기를 해제한 뒤의 업데이트: 등록하지 않은 바로가기는 새로 만들지 않고, 프로필은 기록된 셸(cmd)로 다시 쓴다
 jq 'del(.profiles[0].colorScheme)' "$WTF" > "$SB/wt.stale" && cp "$SB/wt.stale" "$WTF"
-run "업데이트 (바로가기 없음)" "$NODE" 3 1 2 ""
+run "업데이트 (바로가기 없음)" "$NODE" 3 "" 1 2 ""
 chk "업데이트: 등록하지 않은 바로가기는 만들지 않음"   '[[ ! -f "$SB/Desktop/Oxygen Pi.lnk.json" ]] && ! grep -q "바탕화면 바로가기 갱신" "$SB/out.txt"'
 chk "업데이트: WT 프로필 다시 씀 (기록된 셸 cmd)"      '[[ $(jq -r ".profiles[0].colorScheme" "$WTF") == "Oxygen" ]] && grep -q "cmd.exe.*/k.*OXY_HOME=" "$WTF" && grep -q "Windows Terminal 프로필 갱신" "$SB/out.txt"'
 #    글꼴이 이미 시스템에 있는 PC (<sandbox>/fonts.json = system, 우리가 깐 기록 없음): 이미 있음 · 기록은 남기지 않는다 (제거 때 지울 것도 없다)
 INST_JSON="$SB/AppData/oxygen-pi/install.json"
 cp "$INST_JSON" "$SB/install.json.keep"; cp "$SB/fonts.json" "$SB/fonts.json.keep"
 jq 'del(.font)' "$SB/install.json.keep" > "$INST_JSON"; echo '{"registered":"system"}' > "$SB/fonts.json"
-run "업데이트 (글꼴이 이미 시스템에 있음)" "$NODE" 3 1 2 ""
+run "업데이트 (글꼴이 이미 시스템에 있음)" "$NODE" 3 "" 1 2 ""
 chk "업데이트: 시스템 글꼴 → 이미 있음 · 설치 기록에 font 없음"   'grep -q "✓ 글꼴 설치 (D2Coding)  이미 있음" "$SB/out.txt" && [[ "$(jq -r "has(\"font\") and .font != null" "$INST_JSON" | tr -d "\r")" == false ]]'
 cp "$SB/install.json.keep" "$INST_JSON"; cp "$SB/fonts.json.keep" "$SB/fonts.json"
 
@@ -190,8 +202,47 @@ chk "스킬: 끈 스킬만 agent/skills 에서 빠짐"  '[[ ! -d "$I/agent/skill
 bash "$I/scripts/configure.sh" > "$SB/configure.txt" 2>&1; CRC=$?
 chk "configure.sh 를 다시 돌려도 꺼진 채 남음"       '[[ $CRC == 0 && ! -d "$I/agent/skills/terminal-session-control" && -d "$I/agent/skills/find-code" ]]'
 
+# 3-5) 설치 폴더에서 업데이트 (§13): 새 번들(zip · 폴더)을 입력하고 확인한 뒤 새 번들의 설치 화면으로 넘기는 것까지.
+#      넘김 스크립트는 OXY_UPDATE_HANDOFF 로 정한 경로에 쓰고, 복사는 새 번들 쪽(위 2-1)에서 한다. 시험용 번들은 설치 파일 세 개와 패치 노트뿐이다.
+#      메뉴: 1 다시 설정 · 2 상태 점검 · 3 업데이트 · 4 제거 · 5 종료
+UB="$SB/upd/src/oxygen-pi-system"; mkdir -p "$UB/installer" "$SB/Downloads"
+echo '@echo off' > "$UB/install.cmd"; echo 9.9.9 > "$UB/VERSION"; : > "$UB/installer/install.mjs"
+printf '# v9.9.9 (2026-11-16)\n\n## 새 기능\n\n- 테스트 항목 하나\n- 테스트 항목 둘\n' > "$UB/PATCH_NOTES.md"
+TARX="$(cygpath -u "${SYSTEMROOT:-C:/Windows}")/System32/tar.exe"
+ZIP="$SB/Downloads/oxygen-pi-20261116.zip"
+"$TARX" -a -c -f "$(winpath "$ZIP")" -C "$(winpath "$SB/upd/src")" oxygen-pi-system
+(cd "$SB/Downloads" && sha256sum oxygen-pi-20261116.zip > oxygen-pi-20261116.zip.sha256)
+HO="$SB/handoff.cmd"
+mkdir -p "$SB/tmp/oxygen-pi-update-1"; touch -d "3 days ago" "$SB/tmp/oxygen-pi-update-1"   # 하루 넘은 임시 폴더 (D3: 시작할 때 지운다)
+#    (a) zip + .sha256 일치: 3 업데이트 / 새 번들 위치 Enter (처음 값 = Downloads 의 가장 최근 zip) / 패치 노트 계속 / 1 업데이트 시작
+rm -f "$HO"
+INSTALLER="$I/installer/install.mjs" RUN_ARGS="--update" OXY_UPDATE_HANDOFF="$(winpath "$HO")" run "설치 폴더에서 업데이트 (zip, .sha256 일치)" "$I/runtime/node/node.exe" 3 "" "" 1
+chk "zip: 메뉴 · 입력 화면 (처음 값 = Downloads 의 zip) · 종료코드 0 (--update 는 설치 폴더에서 무시)"   '[[ $RC == 0 ]] && grep -q "3) 업데이트 *새 번들 위치 입력" "$SB/out.txt" && grep -q "업데이트할 새 번들의 위치를 입력하세요" "$SB/out.txt" && grep -q "Enter=.*oxygen-pi-20261116.zip 유지" "$SB/out.txt"'
+chk "zip: 작업 줄 (무결성 확인 · 번들 압축 풀기) 뒤 패치 노트 · 확인 요약"   'a=$(grep -n "✓ 무결성 확인" "$SB/out.txt" | cut -d: -f1) && b=$(grep -n "✓ 번들 압축 풀기" "$SB/out.txt" | cut -d: -f1) && n=$(grep -n "v9.9.9 패치 노트" "$SB/out.txt" | cut -d: -f1) && q=$(grep -n "업데이트할까요" "$SB/out.txt" | cut -d: -f1) && (( a < b && b < n && n < q )) && grep -q "테스트 항목 하나" "$SB/out.txt" && grep -qE "새 번들 +.*oxygen-pi-20261116\.zip$" "$SB/out.txt" && grep -qE "버전 +v[0-9.]+에서 v9\.9\.9으로$" "$SB/out.txt" && grep -qE "패치 노트 +v9\.9\.9 \(2개 항목\)" "$SB/out.txt"'
+chk "zip: 넘김 스크립트 (풀린 번들 폴더의 install.cmd --update) · 안내 한 줄"   'ub=$(ls -d "$SB"/tmp/oxygen-pi-update-*/oxygen-pi-system | head -1) && [[ -f "$HO" ]] && grep -Fq "cd /d \"$(cygpath -w "$ub")\"" "$HO" && grep -q "install.cmd\" --update" "$HO" && grep -q "새 번들의 설치 화면으로 넘어갑니다" "$SB/out.txt"'
+chk "zip: 하루 넘은 임시 폴더만 정리 (D3) · 설치 폴더는 그대로"   '[[ ! -d "$SB/tmp/oxygen-pi-update-1" && $(ls -d "$SB"/tmp/oxygen-pi-update-*/ | wc -l) == 1 ]] && ! grep -q "9.9.9" "$I/VERSION"'
+#    (b) 폴더 + 넘김 스크립트가 sh: 3 / 폴더 경로 / 패치 노트 계속 / 1
+HOS="$SB/handoff.sh"; rm -f "$HOS"
+INSTALLER="$I/installer/install.mjs" OXY_UPDATE_HANDOFF="$(winpath "$HOS")" run "설치 폴더에서 업데이트 (폴더)" "$I/runtime/node/node.exe" 3 "$(winpath "$UB")" "" 1
+chk "폴더: 종료코드 0 · zip 작업 줄 없음 · 넘김 스크립트(sh)가 그 폴더의 install.sh --update"   '[[ $RC == 0 && -f "$HOS" ]] && ! grep -q "무결성 확인" "$SB/out.txt" && grep -q "cd .*/upd/src/oxygen-pi-system. && exec ./install.sh --update" "$HOS" && grep -q "새 번들의 설치 화면으로 넘어갑니다" "$SB/out.txt"'
+#    (c) .sha256 불일치 → 오류를 보이고 입력 화면으로 돌아감 (다시 입력한 폴더로 계속)
+cp "$ZIP" "$SB/Downloads/oxygen-pi-20261117.zip"; echo "$(printf '0%.0s' $(seq 64))  oxygen-pi-20261117.zip" > "$SB/Downloads/oxygen-pi-20261117.zip.sha256"
+rm -f "$HO"
+INSTALLER="$I/installer/install.mjs" OXY_UPDATE_HANDOFF="$(winpath "$HO")" run "설치 폴더에서 업데이트 (.sha256 불일치)" "$I/runtime/node/node.exe" 3 "$(winpath "$SB/Downloads/oxygen-pi-20261117.zip")" "$(winpath "$UB")" "" 1
+chk ".sha256 불일치: 오류 줄 · 입력 화면 다시 · 압축 풀기 안 함"   '[[ $RC == 0 ]] && grep -q "× 무결성 확인에 실패했습니다: .sha256 파일의 값과 다릅니다" "$SB/out.txt" && [[ $(grep -c "업데이트할 새 번들의 위치를 입력하세요" "$SB/out.txt") == 2 ]] && ! grep -q "번들 압축 풀기" "$SB/out.txt" && [[ -f "$HO" ]]'
+#    (d) .sha256 없음 → 경고 줄(!)을 남기고 계속
+rm "$SB/Downloads/oxygen-pi-20261117.zip.sha256" "$ZIP.sha256"; rm -f "$HO"
+INSTALLER="$I/installer/install.mjs" OXY_UPDATE_HANDOFF="$(winpath "$HO")" run "설치 폴더에서 업데이트 (.sha256 없음)" "$I/runtime/node/node.exe" 3 "$(winpath "$ZIP")" "" 1
+chk ".sha256 없음: 경고 줄 후 압축 풀기 · 넘김"   '[[ $RC == 0 && -f "$HO" ]] && grep -q "! 무결성 확인 *확인을 건너뜁니다: 무결성 파일(.sha256)이 없습니다" "$SB/out.txt" && grep -q "✓ 번들 압축 풀기" "$SB/out.txt"'
+#    (e) 잘못된 입력은 그 자리에서 오류 → 이전(<) 으로 메뉴 / 새 번들 폴더가 아닌 폴더 · 설치 폴더 자신 / 취소: 같은 버전 문구, 패치 노트 없는 번들 (화면 없음)
+SAME="$SB/upd/same/oxygen-pi-system"; mkdir -p "$SAME/installer"; echo '@echo off' > "$SAME/install.cmd"; cp "$I/VERSION" "$SAME/VERSION"; : > "$SAME/installer/install.mjs"
+echo stale > "$HO"   # 앞 설치 화면이 남긴 넘김 스크립트 (install.sh 는 exec 로 넘겨 경로가 같다): 시작할 때 지우므로 취소하면 남지 않아야 한다
+INSTALLER="$I/installer/install.mjs" OXY_UPDATE_HANDOFF="$(winpath "$HO")" run "설치 폴더에서 업데이트 (잘못된 위치 · 취소)" "$I/runtime/node/node.exe" 3 "$(winpath "$SB/none.zip")" "$(winpath "$SB/upd/src")" "$(winpath "$I")" "$(winpath "$SAME")" 2 3 "<" 5
+chk "입력 오류: 없는 파일 · 번들이 아닌 폴더 · 설치 폴더 자신"   'grep -q "× 폴더 또는 zip 파일을 찾을 수 없습니다" "$SB/out.txt" && grep -q "× 번들 폴더가 아닙니다: install.cmd 가 없습니다" "$SB/out.txt" && grep -q "× 설치 폴더 자신은 새 번들로 쓸 수 없습니다" "$SB/out.txt"'
+chk "취소: 같은 버전 문구 · 패치 노트 없으면 화면 없이 확인 · 취소하면 메뉴로 · 넘기지 않음 (남아 있던 넘김 스크립트도 지움)"   '[[ $RC == 0 && ! -f "$HO" ]] && grep -qE "버전 +v[0-9.]+에서 v[0-9.]+으로 · 같은 버전으로 다시 설치합니다" "$SB/out.txt" && ! grep -q "패치 노트" "$SB/out.txt" && [[ $(grep -c "어떤 작업을 할까요" "$SB/out.txt") == 3 ]]'
+
 # 4) 설치된 복사본으로 제거 (실행 중인 node.exe 가 설치 폴더 안 → 종료 후 삭제 예약)
-#    설치 관리 메뉴는 항상 5개: 1 다시 설정 · 2 상태 점검 · 3 업데이트(여기서는 같은 폴더라 비활성) · 4 제거 · 5 종료
+#    설치 관리 메뉴는 항상 5개: 1 다시 설정 · 2 상태 점검 · 3 업데이트(새 번들 위치 입력) · 4 제거 · 5 종료
 #    입력: 4 제거 / 1 설치 폴더 삭제하고 등록 해제 (초기값은 2 제거 취소) / 폴더 이름 확인 입력 / 종료
 INSTALLER="$I/installer/install.mjs" run "자기 제거" "$I/runtime/node/node.exe" 4 1 oxygen-pi ""
 chk "제거 종료코드 0"                      '[[ $RC == 0 ]]'

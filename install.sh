@@ -8,6 +8,12 @@ script="$(cygpath -m "$here/installer/install.mjs")"
 # 터미널을 되돌리지 못하고 표식이 남는다. 그때만 installer/restore-terminal.mjs 가 터미널을 되돌린다.
 mark="${TMPDIR:-/tmp}/oxy-tui-$$.mark"
 export OXY_TUI_MARK="$(cygpath -w "$mark")"
+# 업데이트 넘김 (docs/tui-spec.md §13): 설치 폴더의 업데이트에서 새 번들을 고르면 install.mjs 가 이 스크립트를 쓰고 끝난다.
+# 업데이트가 이 파일 자체를 바꾸므로 exec 로 넘기고 돌아오지 않는다.
+handoff="${TMPDIR:-/tmp}/oxygen-pi-update-$$.sh"
+# exec 로 넘기면 프로세스 번호가 그대로라 새 번들의 install.sh 가 같은 이름을 만든다. 남은 파일로 다시 넘기지 않게 지운다
+rm -f "$handoff"
+export OXY_UPDATE_HANDOFF="$(cygpath -w "$handoff")"
 if [[ "${TERM_PROGRAM:-}" == mintty ]] && command -v winpty >/dev/null 2>&1; then
   winpty "$node" "$script" "$@"
 else
@@ -15,4 +21,5 @@ else
 fi
 rc=$?
 if [[ -e "$mark" ]]; then "$node" "$(cygpath -m "$here/installer/restore-terminal.mjs")" "$OXY_TUI_MARK"; fi
+if [[ $rc == 0 && -f "$handoff" ]]; then exec bash "$handoff"; fi
 exit $rc
