@@ -25,7 +25,7 @@
 | `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 릴리스 반영 뒤 화면 확인 | 확인되면 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (oxy-tui 0.4.0) |
 | `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 검증 | 사용자: 모니터 pane 에서 r · u 화면 확인 | 확인되면 `완료` (부모). 실제 Haiku 로 4단계 확인함 | 2026-11-14 | cfec477 16ee6b8 6500822 09d1780 4593e19 | 2026-11-14 |
 | `rate-limit` | `docs/rate-limit-spec.md` 연결별 RPM · TPM 한도 대기 (프로세스 공유, 푸터 · Flow Monitor 표시) | 검증 | 사용자: 실제 vLLM 에서 한도를 걸어 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | 67e8b3c dc4d55d 3ebf058 0a79c01 | 2026-11-14 |
-| `upgrade-check` | `docs/upgrade-check-spec.md` 구성요소 업데이트 검증 (영향 표 · pi 계약 · 타입 · 도구 확인 · `just upgrade-check`) | 완료 | 사용자: ast-grep 0.51.3 시험 업데이트를 커밋할지 | 없음. 미커밋 lock 변경(ast-grep)은 사용자 결정 (부모) | 2026-11-20 | 안 됨 | 해당 없음 |
+| `upgrade-check` | `docs/upgrade-check-spec.md` 구성요소 업데이트 검증 (영향 표 · pi 계약 · 타입 · 도구 확인 · `just upgrade-check`) | 완료 | – | 없음 (ast-grep 0.51.3 은 사용자 결정으로 유지, 2026-11-20) | 2026-11-20 | 0cf12e7 | 해당 없음 |
 
 ## 단계
 
