@@ -1,0 +1,25 @@
+# 구성요소 업데이트 검증 영향 표 (docs/upgrade-check-spec.md §2). TAB 구분.
+# name	자동 검사 (공백 구분)	남는 실측 (" ; " 구분, "-" = 없음)
+#   name      : manifest/tools.lock.tsv 의 이름. lock 의 모든 행이 여기 있어야 한다 (tests/unit-upgrade.test.mjs)
+#   자동 검사 : hygiene(위생 · 진행판) unit(단위) contract(pi 계약) typecheck(타입) e2e(E2E mock) installer(설치 흐름 sandbox) rust(oxy-tui) tools(도구 확인: 그 구성요소)
+#               just upgrade-check 는 바뀐 구성요소들의 검사를 모아 한 번씩 돌린다. hygiene · unit 은 늘 돈다
+node	hygiene unit contract typecheck e2e installer tools	설치본 verify.sh (사용자 승인)
+pi	hygiene unit contract typecheck e2e installer	pi 화면 캡처 mintty 80×24 · WT (docs/pi-tui-spec.md) ; WT 실제 클릭 (docs/dev-process.md §7 함정 5) ; 실제 LLM 한 번 (과금 승인)
+fd	hygiene unit tools e2e	-
+rg	hygiene unit tools e2e	-
+jq	hygiene unit tools e2e installer	-
+just	hygiene unit tools	-
+hurl	hygiene unit tools	-
+psmux	hygiene unit tools	모니터 pane 캡처 · WT 클릭
+glab	hygiene unit tools	-
+gh	hygiene unit tools	-
+ast-grep	hygiene unit tools	-
+agent-browser	hygiene unit tools	-
+obscura	hygiene unit tools	-
+chromium	hygiene unit tools installer	-
+chrome	hygiene unit tools	-
+usql	hygiene unit tools e2e installer	-
+sqlcl	hygiene unit tools installer	실제 Oracle 연결 (있을 때)
+dbhub	hygiene unit e2e installer	-
+d2coding	hygiene unit installer	기호 1칸 확인 캡처 mintty · WT
+oxy-tui	hygiene unit rust installer	바뀐 화면의 mintty 80×24 캡처

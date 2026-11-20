@@ -4051,5 +4051,93 @@
    "cacheWrite": 0,
    "out": 120
   }
+ },
+ {
+  "variant": "glab-fix",
+  "id": 11,
+  "kind": "P",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "내 MR 중에 파이프라인이 실패한 게 있는지 확인하고, 실패한 잡 로그를 요약해줘",
+  "expect": {
+   "want": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 123,
+   "cacheRead": 0,
+   "cacheWrite": 7462,
+   "out": 208
+  }
+ },
+ {
+  "variant": "glab-fix",
+  "id": 12,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "지금 변경사항을 커밋하고 feature/login 브랜치를 만들어줘",
+  "expect": {
+   "not": [
+    "gitlab-workflow",
+    "github-workflow"
+   ]
+  },
+  "read": [],
+  "first": [
+   "bash"
+  ],
+  "habits": [],
+  "bash": [
+   "git status --short && echo \"---\" && git branch --show-current && echo \"---\" && git diff --stat && git log --oneline -3"
+  ],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": null,
+  "usage": {
+   "in": 107,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 135
+  }
+ },
+ {
+  "variant": "glab-fix",
+  "id": 14,
+  "kind": "N",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab의 MR !17에 달린 코멘트를 보여줘",
+  "expect": {
+   "not": "github-workflow",
+   "alt": "gitlab-workflow"
+  },
+  "read": [
+   "gitlab-workflow"
+  ],
+  "first": [
+   "read"
+  ],
+  "habits": [],
+  "bash": [],
+  "text": "",
+  "error": null,
+  "pass": true,
+  "altOk": true,
+  "usage": {
+   "in": 104,
+   "cacheRead": 7462,
+   "cacheWrite": 0,
+   "out": 158
+  }
  }
 ]

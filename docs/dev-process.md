@@ -212,11 +212,12 @@ powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object
 
 | 바꾼 곳 | 자동 검증 |
 | --- | --- |
-| `agent/extensions/**` | 단위 + E2E |
+| `agent/extensions/**` | 단위 + E2E + 타입 검사 + pi 계약 |
 | `installer/*.mjs` (흐름 · 문구) | 단위 + 설치 흐름 |
 | `installer/oxy-tui/**` | Rust + 단위 (+ `just tui-build`) |
 | `scripts/llm-*.mjs` · `render-config.mjs` · `configure.sh` | 단위 + E2E + 설치 흐름 |
 | `agent/skill-library/**` · `agent/AGENTS.md` | 단위 (frontmatter) + 실제 LLM 측정 (skill-evaluator) |
+| `manifest/**` (구성요소 버전 · lock) | `just upgrade-check` (바뀐 구성요소에 기대는 자동 검사 전부, `docs/upgrade-check-spec.md` §2) + 출력의 남은 실측 |
 | `tests/**` 만 | 그 테스트 + 고치기 전 실패 확인 |
 | `docs/**` · `.claude/agents/**` 만 | 위생 + 진행판 검사 |
 
@@ -232,6 +233,10 @@ powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object
 | 실제 LLM: 사용 | `bash tests/scenario-eval/run.sh <label> …` | `results.jsonl` 의 행 (연결/모델 포함) | | 실행 안 함 (과금 · 한도) |
 | 실제 LLM: 선택 | `bash tests/skill-eval/run.sh` | `results.json` 의 항목 | | 실행 안 함 |
 | 설치본 상태 점검 | 설치본에서 `bash scripts/verify.sh` | `FAIL` 없음 (종료코드 0) | | 실행 안 함 (실제 설치본, 사용자 승인) |
+| 타입 검사 (새로, 2026-11-20) | `./bin/just.exe typecheck` (typescript 는 `just fetch --dev`) | `타입 검사 통과` | 몇 초 | |
+| pi 계약 (새로) | `./bin/just.exe contract` | `pi 계약 검사 통과` | 약 40초 (pi 를 불러옴) | |
+| 도구 확인 (새로) | `bash tests/upgrade-check/tools.sh [이름 …]` | `도구 확인 통과` | 약 1분 (브라우저 포함) | |
+| 업데이트 검증 (새로) | `./bin/just.exe upgrade-check [이름 …]` | `업데이트 검증 통과` + `tests/upgrade-check/results.jsonl` 의 행 | 바뀐 것에 따라 (전부면 수십 분) | |
 
 - Claude Code 의 Bash 도구에서는 `just` 를 PATH 로 부르지 말고 `./bin/just.exe` 로 부르거나 `bash -c 'cd /c/<저장소> && source ./env.sh && just <작업>'` 로 부른다 (§7 의 2).
 - 자동 검증 결과는 "통과" 한 낱말이 아니라 결과 줄과 기준 rev 를 남긴다 (나중에 어느 코드로 통과했는지 알 수 있게).

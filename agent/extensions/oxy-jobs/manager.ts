@@ -7,6 +7,8 @@ import { type JobsState, type JobSnapshot, STATE_VERSION, clipResult, lastLine, 
 
 export type JobKind = "bash" | "agent";
 export type JobState = "queued" | "running" | "done" | "failed" | "stopped";
+/** 기다리는 동안(await) 다른 곳에서 멈췄는지. 비교를 함수로 해서 TypeScript 가 앞선 대입으로 좁힌 타입을 쓰지 않게 한다 */
+export const isStopped = (job: { state: JobState }): boolean => job.state === "stopped";
 
 export interface Job {
   id: string;
@@ -23,7 +25,7 @@ export interface Job {
   logFile: string;
   tail: string[];         // 마지막 출력 줄 (최대 TAIL_MAX)
   result?: string;        // subagent 최종 답변
-  usage?: { turns: number; input: number; output: number };
+  usage?: { turns: number; input: number; output: number; cache?: number; cost?: number; maxInput?: number };
   reported: boolean;      // 완료를 모델에게 알렸는지
   notify: boolean;        // 완료 시 모델에게 알릴지 (wait:false 로 시작한 작업)
   proc?: ChildProcess;

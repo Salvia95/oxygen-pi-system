@@ -40,3 +40,17 @@
 before-r2: 전체 33/36 · P 12/15 · N 15/15 · G 6/6 · N 의 대체 skill 적중 7/7
 
 after-r2: 전체 36/36 · P 15/15 · N 15/15 · G 6/6 · N 의 대체 skill 적중 7/7
+
+## glab-fix (2026-11-20, gitlab-workflow 본문 35줄 `glab api … | jq` 수정 뒤, #11 · #12 · #14 만)
+
+판정 모델: `anthropic-claude/claude-haiku-5-5:low`. 위 표와 같은 시험 문장 · 같은 판정.
+
+| # | 종류 | 기대 | before | before-r2 | after | after-r2 | glab-fix |
+|---|---|---|---|---|---|---|---|
+| 11 | P | gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow |
+| 12 | N | not gitlab-workflow/github-workflow | ✓ bash | ✓ bash | ✓ bash | ✓ bash | ✓ bash |
+| 14 | N | not github-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow | ✓ gitlab-workflow |
+
+glab-fix: 전체 3/3 · P 1/1 · N 2/2 · G 0/0 · N 의 대체 skill 적중 1/1
+
+사용(본문) 판정은 `results-claude-usage.json`: glab-fix 3/3 (`glab api` 에 `--jq` 없음), 대조 head-old(고치기 전 본문) 0/3 (3회 모두 `glab api … -F json --jq`).

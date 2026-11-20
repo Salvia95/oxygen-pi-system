@@ -15,8 +15,8 @@ lock:
     bash scripts/fetch-bundle.sh --update-lock
 
 # [인터넷 PC] 필수 구성요소 검사 후 폐쇄망 반입용 zip 생성
-package:
-    bash scripts/package-bundle.sh
+package *args:
+    bash scripts/package-bundle.sh {{args}}
 
 # [인터넷 PC] 번들링 전 구성요소 검사만
 check:
@@ -40,7 +40,20 @@ e2e:
 
 # extension 단위 테스트
 unit:
-    ./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts tests/unit-tui.test.mjs
+    ./runtime/node/node.exe --experimental-strip-types --no-warnings --test tests/unit-extensions.test.ts tests/unit-tui.test.mjs tests/unit-upgrade.test.mjs
+
+# extension 타입 검사: 번들 pi 의 .d.ts 에 맞춰 agent/extensions 를 본다 (typescript 는 `just fetch --dev` 로 받는다)
+typecheck:
+    @test -f .cache/dev/node_modules/typescript/bin/tsc || { echo "typescript 가 없음 → just fetch --dev (인터넷 PC)"; exit 1; }
+    ./runtime/node/node.exe .cache/dev/node_modules/typescript/bin/tsc -p tests/upgrade-check/tsconfig.json && echo "타입 검사 통과"
+
+# pi 계약 검사: extension 이 기대는 pi 의 이름 · 이벤트 · 필드 · 프롬프트 문구가 번들 pi 에 있는지
+contract:
+    ./runtime/node/node.exe --experimental-strip-types --no-warnings tests/upgrade-check/pi-contract.mjs
+
+# 구성요소 업데이트 검증: lock 에서 바뀐 구성요소(또는 지정한 것)에 기대는 자동 검사를 모두 돌리고 tests/upgrade-check/results.jsonl 에 기록 (docs/upgrade-check-spec.md §4)
+upgrade-check *names:
+    ./runtime/node/node.exe tests/upgrade-check/run.mjs {{names}}
 
 # 전체 테스트 (위생 · 진행판 + 단위 + E2E)
 test: hygiene unit e2e

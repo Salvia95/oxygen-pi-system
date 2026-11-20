@@ -78,7 +78,13 @@ bash scripts/package-bundle.sh --check                          # 번들링 전 
 ```
 
 - 선택에서 뺀 구성요소가 이전에 받아져 있으면 지운다 (번들에 원치 않는 파일이 들어가지 않도록).
-- 버전을 올릴 때는 `manifest/tools.lock.tsv` 의 version/url 을 수정하고 `--update-lock` 을 붙여 실행한다.
+- 버전을 올릴 때 ([업데이트 검증 명세](upgrade-check-spec.md) §4):
+  1. `manifest/tools.lock.tsv` 의 version/url 을 고치고 `just lock` (= `fetch-bundle.sh --update-lock`).
+  2. pi 를 올렸으면 `vendor/pi/node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md` 에서 지난 버전 이후의 extension API · 이벤트 · TUI 변경을 읽는다.
+  3. `just upgrade-check` — 바뀐 구성요소에 기대는 자동 검사(위생 · 단위 · pi 계약 · 타입 · 도구 확인 · E2E · 설치 흐름 …)를 돌리고 `tests/upgrade-check/results.jsonl` 에 기록한다.
+     타입 검사에 쓰는 typescript 는 `just fetch --dev` 로 `.cache/dev` 에 받는다 (번들에 들어가지 않는다).
+  4. 출력의 "남은 실측"(화면 캡처 · WT 클릭 · 실제 LLM)을 진행판 메모로 옮겨 사람이 확인한다.
+  5. `just package` — 지금 lock 으로 통과한 기록이 없으면 번들을 만들지 않는다 (`--force` 로 넘길 수 있다).
 - 설치·설정 TUI 의 화면 프로그램 `oxy-tui.exe` 는 선택과 상관없이 함께 받는다 (아래 [화면 프로그램](#화면-프로그램-oxy-tuiexe) 참고).
 - 번들에 없는 SQLcl·Chrome for Testing 은 폐쇄망 PC 에서 zip 으로 추가할 수도 있다: 받은 `sqlcl-*.zip` / `chrome-win64.zip` 을
   `Downloads` 폴더나 번들의 `optional/` 에 두면 설치 TUI 가 찾는다.

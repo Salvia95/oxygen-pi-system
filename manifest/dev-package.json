@@ -1,0 +1,9 @@
+{
+  "name": "oxy-dev-tools",
+  "private": true,
+  "description": "개발용 도구 (번들 · 설치본에 넣지 않는다). bash scripts/fetch-bundle.sh --dev 가 .cache/dev 에 받는다. docs/upgrade-check-spec.md §3 C2",
+  "dependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "22.20.5"
+  }
+}

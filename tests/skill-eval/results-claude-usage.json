@@ -1,0 +1,164 @@
+[
+ {
+  "variant": "glab-fix",
+  "id": "u1-r1",
+  "kind": "U",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘",
+  "readSkill": true,
+  "turns": 2,
+  "tools": [
+   "read:skills/gitlab-workflow/SKILL.md",
+   "bash:glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes 2>&1 | jq -r '.changes[]? | .new_path' 2>&1"
+  ],
+  "bash": [
+   "glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes 2>&1 | jq -r '.changes[]? | .new_path' 2>&1"
+  ],
+  "text": "",
+  "error": null,
+  "usage": {
+   "in": 1301,
+   "cacheRead": 14924,
+   "cacheWrite": 0,
+   "out": 319
+  },
+  "glabApiJq": false,
+  "listingCmd": "glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes 2>&1 | jq -r '.changes[]? | .new_path' 2>&1",
+  "pass": true
+ },
+ {
+  "variant": "glab-fix",
+  "id": "u1-r2",
+  "kind": "U",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘",
+  "readSkill": true,
+  "turns": 2,
+  "tools": [
+   "read:skills/gitlab-workflow/SKILL.md",
+   "bash:glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes 2>&1 | jq -r '.changes[] | \"\\(.new_path)\"' 2>&1"
+  ],
+  "bash": [
+   "glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes 2>&1 | jq -r '.changes[] | \"\\(.new_path)\"' 2>&1"
+  ],
+  "text": "",
+  "error": null,
+  "usage": {
+   "in": 1301,
+   "cacheRead": 14924,
+   "cacheWrite": 0,
+   "out": 318
+  },
+  "glabApiJq": false,
+  "listingCmd": "glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes 2>&1 | jq -r '.changes[] | \"\\(.new_path)\"' 2>&1",
+  "pass": true
+ },
+ {
+  "variant": "glab-fix",
+  "id": "u1-r3",
+  "kind": "U",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘",
+  "readSkill": true,
+  "turns": 2,
+  "tools": [
+   "read:skills/gitlab-workflow/SKILL.md",
+   "bash:glab api projects/:id/merge_requests/123/changes | jq -r '.changes[] | \"\\(.change_type)\\t\\(.new_path)\" + (if .renamed_file then \"  (renamed from \\(.old_path))\" else \"\" end)' 2>&1"
+  ],
+  "bash": [
+   "glab api projects/:id/merge_requests/123/changes | jq -r '.changes[] | \"\\(.change_type)\\t\\(.new_path)\" + (if .renamed_file then \"  (renamed from \\(.old_path))\" else \"\" end)' 2>&1"
+  ],
+  "text": "",
+  "error": null,
+  "usage": {
+   "in": 1301,
+   "cacheRead": 14924,
+   "cacheWrite": 0,
+   "out": 371
+  },
+  "glabApiJq": false,
+  "listingCmd": "glab api projects/:id/merge_requests/123/changes | jq -r '.changes[] | \"\\(.change_type)\\t\\(.new_path)\" + (if .renamed_file then \"  (renamed from \\(.old_path))\" else \"\" end)' 2>&1",
+  "pass": true
+ },
+ {
+  "variant": "head-old",
+  "id": "u1-r1",
+  "kind": "U",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘",
+  "readSkill": true,
+  "turns": 2,
+  "tools": [
+   "read:skills/gitlab-workflow/SKILL.md",
+   "bash:glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[] | \"\\(.new_path)\"' 2>&1"
+  ],
+  "bash": [
+   "glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[] | \"\\(.new_path)\"' 2>&1"
+  ],
+  "text": "",
+  "error": null,
+  "usage": {
+   "in": 1282,
+   "cacheRead": 14924,
+   "cacheWrite": 0,
+   "out": 313
+  },
+  "glabApiJq": true,
+  "listingCmd": "glab auth status 2>&1 | head -5; glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[] | \"\\(.new_path)\"' 2>&1",
+  "pass": false
+ },
+ {
+  "variant": "head-old",
+  "id": "u1-r2",
+  "kind": "U",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘",
+  "readSkill": true,
+  "turns": 2,
+  "tools": [
+   "read:skills/gitlab-workflow/SKILL.md",
+   "bash:glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[].new_path' 2>&1; echo \"---\"; glab auth status 2>&1 | head -3"
+  ],
+  "bash": [
+   "glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[].new_path' 2>&1; echo \"---\"; glab auth status 2>&1 | head -3"
+  ],
+  "text": "",
+  "error": null,
+  "usage": {
+   "in": 1282,
+   "cacheRead": 14924,
+   "cacheWrite": 0,
+   "out": 330
+  },
+  "glabApiJq": true,
+  "listingCmd": "glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[].new_path' 2>&1; echo \"---\"; glab auth status 2>&1 | head -3",
+  "pass": false
+ },
+ {
+  "variant": "head-old",
+  "id": "u1-r3",
+  "kind": "U",
+  "model": "anthropic-claude/claude-haiku-5-5:low",
+  "prompt": "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘",
+  "readSkill": true,
+  "turns": 2,
+  "tools": [
+   "read:skills/gitlab-workflow/SKILL.md",
+   "bash:glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[].new_path' 2>&1 | head -200"
+  ],
+  "bash": [
+   "glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[].new_path' 2>&1 | head -200"
+  ],
+  "text": "",
+  "error": null,
+  "usage": {
+   "in": 1282,
+   "cacheRead": 14924,
+   "cacheWrite": 0,
+   "out": 312
+  },
+  "glabApiJq": true,
+  "listingCmd": "glab api projects/:id/merge_requests/123/changes -F json --jq '.changes[].new_path' 2>&1 | head -200",
+  "pass": false
+ }
+]

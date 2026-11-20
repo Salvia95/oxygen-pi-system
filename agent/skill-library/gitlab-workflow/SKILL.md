@@ -32,7 +32,7 @@ glab ci status                                 # pipeline of the current branch
 glab ci status -F json --jq '.status'
 glab ci view                                   # jobs of the latest pipeline (interactive: avoid)
 glab ci trace <job-id>                         # job log
-glab api projects/:id/merge_requests/123/changes --jq '.changes[].new_path'
+glab api projects/:id/merge_requests/123/changes | jq -r '.changes[].new_path'   # glab api has no --jq: pipe to jq
 ```
 
 `:id` in `glab api` paths is replaced with the current project. Use `--paginate` for long lists.

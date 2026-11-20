@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Job, JobManager, Semaphore } from "./manager.ts";
-import { killTreeWithMsys, parseVllmMetrics } from "./manager.ts";
+import { isStopped, killTreeWithMsys, parseVllmMetrics } from "./manager.ts";
 
 /**
  * agent/agents/*.md 하나. provider · model · thinking 은 선택: frontmatter 에 적으면 그 값, 없으면 부모 pi 의 현재 값을 물려받는다
@@ -115,7 +115,7 @@ export async function runSubagent(mgr: JobManager, job: Job, agent: AgentDef, ta
   try {
     if (job.state === "stopped") return;
     await waitForVllm(opts.metricsBaseUrl, w.line, opts.signal);
-    if (job.state === "stopped") return;
+    if (isStopped(job)) return;
     job.state = "running";
     job.startedAt = Date.now();
     w.line(`[oxy-jobs] ${job.id} agent=${agent.name} cwd=${cwd}`);
@@ -186,7 +186,7 @@ export async function runSubagent(mgr: JobManager, job: Job, agent: AgentDef, ta
 
     job.exitCode = code;
     job.result = lastText || (errText ? `(no answer) ${errText.trim().split("\n").slice(-3).join(" ")}` : "(no answer)");
-    if (job.state !== "stopped") job.state = code === 0 && lastText ? "done" : "failed";
+    if (!isStopped(job)) job.state = code === 0 && lastText ? "done" : "failed";
     w.line(`[result] ${job.result}`);
   } catch (e: any) {
     job.state = "failed";

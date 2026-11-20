@@ -18,13 +18,14 @@
 | `jobs-view` | `docs/jobs-view-spec.md` Job Monitor 구성 개편 (Main · Sub Context, subagent 의 셸) | 완료 | – | 없음. 후속: 업데이트가 WT 프로필을 다시 쓰지 않음 (아래 메모) | 2026-11-13 | f8b4b5c 4ce6514 | 2026-11-13 (`oxygen-pi-20261113.zip`, oxy-tui 0.3.0) |
 | `tui-fix` | `docs/tui-spec.md` §10 업데이트가 등록 항목을 다시 씀 · §6 값 열의 경로 | 검증 | 사용자: 커밋 · 다음 번들에 반영 | 커밋 후 다음 번들 · 설치본 업데이트 때 반영 (부모) | 2026-11-13 | – | 안 됨 |
 | `skill-combo` | `docs/skill-combo-spec.md` 여러 skill 상황 시험 · CI 계획 | 보류 | 사용자: CI 적용 시점 (지금은 로컬에서만) | CI 를 적용하기로 하면 `ci/github-workflows/` 를 `.github/workflows/` 로 (부모) | 2026-11-13 | af5bdfa 2b5bbe3 4708a58 | 해당 없음 |
-| `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 검증 | 부모: 다음 실제 Haiku 세션 기록으로 개선 확인 | 2026-11-14 Claude Haiku 5.5 측정 · 반영 (선택 P · N · G 66→70/72, habit suite: http skill 2/4→4/4 · hurl 2/4→4/4 · curl 17→5). 남은 것: hurl 재실행 시 폼 POST 중복 경고 · edit 전 read 강화 (사용자 결정). Groq `skill-eval/1` 은 13/28 에서 보류 (skill-evaluator) | 2026-11-14 | eed08b1 751a808 b2b1033 2b59f43 | 2026-11-15 |
+| `skill-eval` | `tests/skill-eval/README.md` · `.claude/agents/skill-evaluator.md` 확정 사항 | 검증 | 부모: 다음 실제 Haiku 세션 기록으로 개선 확인 | 2026-11-14 Claude Haiku 5.5 측정 · 반영 (선택 P · N · G 66→70/72, habit suite: http skill 2/4→4/4 · hurl 2/4→4/4 · curl 17→5). 2026-11-20 `gitlab-workflow` 본문 `glab api --jq` 수정 측정: 선택 #11 · #12 · #14 3/3 (기준선과 같음), 사용 3/3 (고치기 전 본문 0/3), `tests/skill-eval/results-claude-usage.json`. 남은 것: hurl 재실행 시 폼 POST 중복 경고 · edit 전 read 강화 (사용자 결정). Groq `skill-eval/1` 은 13/28 에서 보류 (skill-evaluator) | 2026-11-14 | eed08b1 751a808 b2b1033 2b59f43 | 2026-11-15 |
 | `agents` | `.claude/agents/skill-evaluator.md` · `.claude/agents/harness-engineer.md` · `.claude/agents/tui-implementer.md` 보고 · 검증 | 검증 | – | 다음 위임 한 번에서 새 보고 항목이 지켜지는지 확인 (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `dev-process` | `docs/dev-process.md` · 이 진행판 · `.claude/rules/delegation-rule.md` | 검증 | – | 다음 위임 한 번을 이 진행판으로 기록해 보고 `완료` (부모) | 2026-11-12 | 안 됨 | 해당 없음 |
 | `pi-tui` | `docs/pi-tui-spec.md` oxygen-pi-tui (pi 헤더 · 메시지창 · 입력창 · 푸터, 도구 출력 구조화, D2Coding) | 검증 | 사용자: 웰컴 카드 · 화면 캡처 확인. 9단계(실제 LLM)는 사용자가 보류 | 사용자 확인 뒤 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (저장소 폴더로 업데이트, oxy-tui 0.4.0) |
 | `ui-unify` | `docs/ui-unify-spec.md` 하단 바 · 모니터 디자인 일체화 · Oxygen 테마 (Tokyo Night 대체) | 검증 | 사용자: 릴리스 반영 뒤 화면 확인 | 확인되면 `완료` (부모) | 2026-11-13 | eb18916 725d786 | 2026-11-13 (oxy-tui 0.4.0) |
 | `flow-rollback` | `docs/flow-rollback-spec.md` Completed Flow · Task 단위 롤백 · 그림자 저장소 (Before Commit Task 대체) | 검증 | 사용자: 모니터 pane 에서 r · u 화면 확인 | 확인되면 `완료` (부모). 실제 Haiku 로 4단계 확인함 | 2026-11-14 | cfec477 16ee6b8 6500822 09d1780 4593e19 | 2026-11-14 |
 | `rate-limit` | `docs/rate-limit-spec.md` 연결별 RPM · TPM 한도 대기 (프로세스 공유, 푸터 · Flow Monitor 표시) | 검증 | 사용자: 실제 vLLM 에서 한도를 걸어 화면 확인 | 확인되면 `완료` (부모) | 2026-11-14 | 67e8b3c dc4d55d 3ebf058 0a79c01 | 2026-11-14 |
+| `upgrade-check` | `docs/upgrade-check-spec.md` 구성요소 업데이트 검증 (영향 표 · pi 계약 · 타입 · 도구 확인 · `just upgrade-check`) | 완료 | 사용자: ast-grep 0.51.3 시험 업데이트를 커밋할지 | 없음. 미커밋 lock 변경(ast-grep)은 사용자 결정 (부모) | 2026-11-20 | 안 됨 | 해당 없음 |
 
 ## 단계
 
@@ -84,6 +85,11 @@
 | `pi-tui/7` | 글꼴 반입 (§8) | 완료 | `fetch-bundle.sh --only=d2coding` sha256 확인 · 세 파일, `package-bundle.sh --check` 통과, `tests/repo-hygiene.sh` 통과, 단위 `# pass 81` (2026-11-13 부모) | 해당 없음 (반입만) | `docs/pi-tui-spec.md` §8 |
 | `pi-tui/8` | 글꼴 설치 · 터미널 적용 (§8, `docs/tui-spec.md` §12) | 완료 | 단위 `# tests 83` `# pass 83` `# fail 0` (부모가 다시 실행) · `just tui-test` `45 passed` · `tests/installer-sandbox.sh` PASS 73 (tui-implementer, 새 검사 8건) · 위생 통과, 기준 `HEAD 6d54d6e + 미커밋` (2026-11-13) | mintty 80×24 sandbox 설치 · 업데이트 · 업데이트 실패(`!`) · 제거 진행 캡처 (tui-implementer). 설치본 업데이트 2회 (2026-11-13): `글꼴 설치 (D2Coding)  이미 있음` (이 PC 는 1단계에서 직접 깐 글꼴이라 기록 없음), WT 프로필 `Oxygen / font=D2Coding`, `!` 노란색은 oxy-tui 0.4.0 | `docs/tui-spec.md` §12 |
 | `pi-tui/9` | 실제 LLM 확인 (승인 필요: 과금 LLM) | 예정 | 사용자가 보류 (2026-11-13: "9단계는 나중에 생각하고") | – | – |
+| `upgrade-check/1` | 영향 표 데이터 · lock 행 누락 테스트 (§2) | 완료 | 단위 `tests/unit-upgrade.test.mjs` (HEAD 47ae34e + 미커밋). jq 행을 지운 표에서 `영향 표에 없음: jq` | 확인 방법이 자동 검증 | `tests/upgrade-check/map.tsv` `tests/upgrade-check/map.mjs` |
+| `upgrade-check/2` | pi 계약 검사 · E2E prompt-trim 검사 (§3 C1) | 완료 | `just contract` `pi 계약 검사 통과` · E2E `E2E 통과` (PASS 77) (HEAD 47ae34e + 미커밋) | 바꾼 복사본에서 `FAIL` 4 · 종료코드 1 (2026-11-20) | `tests/upgrade-check/pi-contract.mjs` `docs/upgrade-check-spec.md` §3 |
+| `upgrade-check/3` | 타입 검사 `just typecheck` (§3 C2, D1) | 완료 | `타입 검사 통과` (typescript 7.0.2) · 단위 `# pass 108` `# fail 0` (HEAD 47ae34e + 미커밋) | 틀린 사용 파일에서 TS2769 · TS2551 (2026-11-20). 처음 오류 12개는 extension 타입 선언을 고쳐 없앰 | `tests/upgrade-check/tsconfig.json` `docs/upgrade-check-spec.md` §3 |
+| `upgrade-check/4` | 도구 확인 (§3 C3) | 완료 | `bash tests/upgrade-check/tools.sh` 16개 도구 (HEAD 47ae34e + 미커밋): 처음 `FAIL glab: api --jq` → skill 수정 뒤 `도구 확인 통과` | 진짜 결함 1건: `gitlab-workflow` 의 `glab api --jq` (2026-11-20) | `tests/upgrade-check/tools.sh` `tests/upgrade-check/tool-usage.mjs` |
+| `upgrade-check/5` | `just upgrade-check` · 통과 기록 · 번들링 막기 · 문서 (§4, D2 · D3) | 완료 | 단위 `# pass 15` (`tests/unit-upgrade.test.mjs`) · 위생 · 진행판 통과. `package-bundle.sh --check` 가 기록 없음으로 막고 `--force` 로 넘김 (2026-11-20) | 전체 실행 8개 검사 PASS (lock b60621db089c780f) · D4 ast-grep 0.51.3 시험: gate 막음 → `just upgrade-check` PASS → `package --check` 통과 (2026-11-20, `docs/upgrade-check-spec.md` §5) | `tests/upgrade-check/run.mjs` |
 
 ## 메모
 
@@ -134,3 +140,5 @@
 - 2026-11-13 `flow-view/6`: 설치 TUI 의 업데이트는 파일 복사와 설정 파일만 다시 만들고 PATH · WT 프로필 · 바로가기는 다시 쓰지 않는다. 그래서 WT 프로필의 Tokyo Night 색 구성(`flow-view` T3)이 업데이트로는 기존 설치본에 들어가지 않았다 (이 PC 는 부모가 설치본의 `addTerminalProfile` 로 다시 씀, 기존 파일은 scratchpad `wt-fragment.bak.json`). 후속: 업데이트가 등록된 WT 프로필을 다시 쓰도록 (`docs/tui-spec.md` 의 업데이트 단계, tui-implementer).
 - 2026-11-13 `jobs-view/1`: E2E `liveHeartbeat` 가 한 번 실패, 다시 돌리면 통과. 원인: 8초 도구에서 상태를 늦게 읽으면 다음 5초 갱신 전에 도구가 끝난다 → 도구를 12초로. 같은 날 단위 시험의 `FLOW.md` 걸린 시간 `(0:00)` 도 커밋이 1초를 넘으면 실패 → `m:ss` 형태만 본다 (회고: 시간 값을 정확히 맞추는 시험은 경계보다 넉넉한 여유를 둔다).
 - 2026-11-13 `monitor-tui/5`: 실제 LLM 실측에서 모니터가 `flow.json` 을 읽는 순간 oxy-flow 의 쓰기(이름 바꾸기)가 Windows EPERM 으로 실패. mock E2E 는 모니터 pane 을 띄우지 않아 놓쳤다. → 공용 `writeAtomic` 으로 다시 시도, 동시 읽기 단위 시험 추가 (회고: 다른 프로세스가 읽는 파일을 쓰는 코드는 동시 읽기 시험을 둔다).
+- 2026-11-20 `upgrade-check/5`: 여유 메모리 1.1GB 에서 전체 실행의 Rust · E2E · 설치 흐름이 0초 · 빈 출력으로 FAIL (프로세스가 뜨지 못함), 이유가 로그에 없었다. → `tests/upgrade-check/run.mjs` 가 실행 오류 · 신호를 결과 줄로 남긴다. 전체 실행은 약 15분이라 메모리 여유를 보고 돌린다.
+- 2026-11-20 `upgrade-check/4`: 새 도구 확인이 처음 실행에서 진짜 결함(`glab api --jq`, glab 1.128.0 에 없음)을 찾았다. skill 문서의 예시도 도구 버전과 함께 낡는다. → skill 의 코드 블록 옵션을 `--help` 와 맞춰 보는 검사가 `just upgrade-check` 에 들어감.

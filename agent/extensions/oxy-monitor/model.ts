@@ -90,6 +90,7 @@ export function doingItem(plan: PlanItem[]): PlanItem | null {
 export interface FlowLike {
   id?: string;
   goal: string; plan?: PlanItem[];
+  status?: string;    // flow.json 의 상태 (view.ts 의 FlowLike 와 같게)
   rollbacks?: RollbackLike[];   // 이 Flow 에서 한 되돌리기 (docs/flow-rollback-spec.md §3: ↶ 줄)
   next?: string;      // 모델이 flow_note(kind=next) 로 남긴 다음 단계
   blocked?: string;   // flow_note(kind=blocked) 로 남긴 막힘 (할 일을 다시 시작하면 oxy-flow 가 지운다)

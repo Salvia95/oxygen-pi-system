@@ -1,0 +1,21 @@
+{
+  // extension 타입 검사 (docs/upgrade-check-spec.md §3 C2): 번들 pi 의 .d.ts 에 맞춰 agent/extensions 를 본다. 내보내지 않는다.
+  //   just typecheck  (typescript 는 bash scripts/fetch-bundle.sh --dev 로 .cache/dev 에 받는다)
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "typeRoots": ["../../.cache/dev/node_modules/@types"],
+    "paths": {
+      "@earendil-works/*": ["../../vendor/pi/node_modules/@earendil-works/*"],
+      "typebox": ["../../vendor/pi/node_modules/typebox"]
+    }
+  },
+  "include": ["../../agent/extensions/**/*.ts"]
+}

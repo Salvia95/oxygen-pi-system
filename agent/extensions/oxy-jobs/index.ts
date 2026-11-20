@@ -22,7 +22,7 @@ import { blocked, enabled, envInt, harnessHome } from "../_lib/common.ts";
 import { pinArgs, resolveMuxTarget } from "../_lib/psmux.ts";
 import { inspect } from "../oxy-bash-guard.ts";
 import { clip } from "../oxy-context-budget.ts";
-import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration } from "./manager.ts";
+import { type Job, JobManager, bashJobScript, bashKiller, fmtDuration, isStopped } from "./manager.ts";
 import { type ControlResult, ControlInbox, StateWriter, pruneRuns, subRunFromEnv } from "./state.ts";
 import { type AgentDef, type LevelTarget, loadAgents, runSubagent } from "./subagent.ts";
 import { harnessRoot, INHERIT_ENV, sharedLlm } from "../oxy-llm.ts";
@@ -186,7 +186,7 @@ export default async function (pi: ExtensionAPI) {
       proc.stderr.on("data", (d) => w.chunk(d.toString()));
       const code: number = await new Promise((r) => { proc.on("close", (c) => r(c ?? 1)); proc.on("error", () => r(1)); });
       job.exitCode = code;
-      if (job.state !== "stopped") job.state = code === 0 ? "done" : "failed";
+      if (!isStopped(job)) job.state = code === 0 ? "done" : "failed";
       w.line(`[exit ${code}]`);
     } finally {
       job.endedAt = Date.now();

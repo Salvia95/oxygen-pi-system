@@ -2,12 +2,19 @@
 # [인터넷 연결 PC 전용] fetch 로 받은 구성요소와 하네스를 폐쇄망 반입용 zip 으로 묶는다.
 #   bash scripts/package-bundle.sh           # 필수 구성요소 검사 → dist/oxygen-pi-<날짜>.zip (+ .sha256)
 #   bash scripts/package-bundle.sh --check   # 검사만
+#   bash scripts/package-bundle.sh --force   # 업데이트 검증 기록이 없어도 묶는다 (docs/upgrade-check-spec.md D2)
 # 필수(role=required) 구성요소가 하나라도 없으면 zip 을 만들지 않는다.
 # 만든 번들은 본인 반입용이다. 비오픈소스 구성요소가 들어 있으면 다른 사람에게 배포하기 전에 해당 약관을 확인한다.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-CHECK_ONLY=0
-[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
+CHECK_ONLY=0 FORCE=0
+for a in "$@"; do
+  case "$a" in
+    --check) CHECK_ONLY=1 ;;
+    --force) FORCE=1 ;;
+    *) die "알 수 없는 인자: $a" ;;
+  esac
+done
 
 NODE="$OXY_HOME/runtime/node/node.exe"
 [[ -x "$NODE" ]] || die "필수 구성요소 node 가 없습니다 → bash scripts/fetch-bundle.sh"
@@ -34,6 +41,10 @@ log "포함: ${included[*]/%/,}"
 if (( ${#missing[@]} )); then
   die "필수 구성요소 누락: ${missing[*]} → bash scripts/fetch-bundle.sh 로 받은 뒤 다시 실행하세요"
 fi
+# 업데이트 검증 (docs/upgrade-check-spec.md D2): 지금 lock 으로 just upgrade-check 를 통과한 기록이 있어야 묶는다
+if gate="$("$NODE" "$(winpath "$OXY_HOME/tests/upgrade-check/run.mjs")" --gate | tr -d '\r')"; then log "$gate"
+elif (( FORCE )); then warn "$gate — --force 로 그대로 묶습니다"
+else die "$gate (검증 없이 묶으려면 --force)"; fi
 if (( ${#proprietary[@]} )); then
   warn "비오픈소스 구성요소 포함: ${proprietary[*]} — 본인 반입용입니다. 다른 사람에게 배포하기 전에 약관을 확인하세요."
 fi

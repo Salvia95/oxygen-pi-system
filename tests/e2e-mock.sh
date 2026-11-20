@@ -72,6 +72,8 @@ ENABLED=$(ls "$TMP/agent/skills")
 missing_skill=$(for s in $ENABLED; do grep -q "<name>$s</name>" <<< "$SYS" || echo "$s"; done)
 chk "켜진 skill $(wc -w <<< "$ENABLED")개가 모두 프롬프트에 노출" '[[ -n "$ENABLED" && -z "$missing_skill" ]]'
 chk "skill-library 원본은 프롬프트에 없음"        '[[ "$SYS" != *"skill-library"* ]]'
+# prompt-trim: pi 의 docs 안내(문서 위치 3줄 + 주제별 안내)를 한 문단으로 바꿨다. pi 가 문구를 바꾸면 조용히 꺼지므로 실제 요청으로 본다 (docs/upgrade-check-spec.md §3 C1)
+chk "prompt-trim: pi 문서 안내를 한 문단으로 바꿈"   '[[ "$SYS" == *"Pi harness docs — read only when"* && "$SYS" != *"- Additional docs: "* ]]'
 log "첫 요청 크기: system $(first '.body.messages[0].content | tostring | length')자, tools $(first '.body.tools | tostring | length')자"
 
 run offline-install

@@ -13,9 +13,9 @@ import { harnessHome } from "../_lib/common.ts";
 import { type JobsState, findRun, readState, readSubStates, sendControl, subRunDir } from "../oxy-jobs/state.ts";
 import { flowKeep, projectRoot, readCompleted } from "../oxy-flow/store.ts";
 import type { LiveState } from "./live.ts";
-import { type FlowHistory, type FlowRequest, type FlowUiState, type JobsUiState, type StopTarget, flowModel, jobOrder, jobsModel, jobsUiInit } from "./model.ts";
+import { type FlowHistory, type FlowLike, type FlowRequest, type FlowUiState, type JobsUiState, type StopTarget, flowModel, jobOrder, jobsModel, jobsUiInit } from "./model.ts";
 import { KEYS, type MonitorKey, flowKeyEx, jobsKey, monitorTheme, supportsMonitor } from "./controller.ts";
-import { type Fit, type FlowLike, type FlowUi, type JobsUi, flowKeys, flowView, jobsView } from "./view.ts";
+import { type Fit, type FlowUi, type JobsUi, flowKeys, flowView, jobsView } from "./view.ts";
 
 const args = process.argv.slice(2);
 const kind = args[0] === "flow" ? "flow" : "jobs";

@@ -173,7 +173,7 @@ function oneLineRenderer(toolName: string, base: any, glyphMode: () => "unicode"
           : { verb: "Searched", target };
         if (expanded) {
           body = parsed
-            ? (w) => { const ex = grepExpanded(measure, parsed, matcher(a.pattern, { literal: a.literal, ignoreCase: a.ignoreCase }), g.vbar, theme); const all = typeof ex === "function" ? ex(Math.max(1, w - 3)) : ex.map((l: any) => (typeof l === "function" ? l(Math.max(1, w - 3)) : l)); return indent(all); }
+            ? (w) => { const ex = grepExpanded(measure, parsed, matcher(a.pattern, { literal: a.literal, ignoreCase: a.ignoreCase }), g.vbar, theme); const all = ex.map((l: any) => (typeof l === "function" ? l(Math.max(1, w - 3)) : l)); return indent(all); }
             : () => indent(text.split("\n").map((l) => theme.fg("toolOutput", l)));
         }
       } else if (toolName === "read") {

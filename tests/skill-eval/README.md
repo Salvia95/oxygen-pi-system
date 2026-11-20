@@ -61,6 +61,25 @@ after 후보 = http-api-testing description 교체 + AGENTS.md 의 "Which tool f
 - 처음 실행 36건은 `anthropic-beta` 헤더를 빼고 보내 모두 400 (`messages.1.output_config: Extra inputs are not permitted`) 이었다. 측정 도구 오류라 그 36건을 지우고 다시 쟀다 (모델 응답 없음).
 - 실패 원인: #1 은 `fd --changed-within` + `grep -c` 를 바로 실행(find-code 를 안 읽음, 결과는 맞는 방법), #7 은 justfile 을 바로 읽거나 `cat` (skill 을 안 읽음), #19 · #9 는 skill 없이 bash 로 시작. 모두 (a) description 쪽, 도구 오류(c) 없음.
 
+### gitlab-workflow 본문 수정 확인 (2026-11-20, 같은 모델 `anthropic-claude/claude-haiku-5-5:low`)
+
+본문 35줄 `glab api …/changes --jq …` → `glab api …/changes | jq -r …` (glab 1.128.0 의 `glab api` 에 `--jq` 가 없다). description 은 그대로.
+시스템 프롬프트(지금 작업 트리 47ae34e + 이 수정): 12,558자 (본문은 시스템 프롬프트에 들어가지 않으므로 이 수정으로 바뀌는 크기는 0).
+
+| variant | 완료 | 전체 | P | N | G | 실패 |
+|---|---|---|---|---|---|---|
+| glab-fix (#11 · #12 · #14 만) | 3 / 3 | 3 | 1/1 | 2/2 | – | – |
+
+같은 세 사례는 before · before-r2 · after · after-r2 에서도 모두 통과였다 (나빠짐 없음).
+
+사용 판정 `results-claude-usage.json` (kind `U`): 문장 "사내 GitLab MR !123 에서 바뀐 파일 목록만 보여줘" 를 pi 첫 요청에 넣고, 모델이 read 한 SKILL.md 원문을 tool_result 로 준 뒤 다음 응답의 bash 명령을 본다
+(GitLab 서버가 없어 glab 은 실행하지 않는다). 통과 = skill 을 읽고, 바뀐 파일 목록 명령을 냈고, `glab api` 조각에 `--jq` 가 없음.
+
+| variant | 본문 | 통과 | 낸 명령 |
+|---|---|---|---|
+| glab-fix | 수정 뒤 | 3/3 | 3회 모두 `glab api projects/:id/merge_requests/123/changes … \| jq -r …` |
+| head-old (대조) | 수정 전 (HEAD) | 0/3 | 3회 모두 `glab api projects/:id/merge_requests/123/changes -F json --jq …` |
+
 ### 이어서 실행
 
 ```bash

@@ -9,16 +9,20 @@
 #   bash scripts/fetch-bundle.sh --all --accept-license  # 전부 (비오픈소스 약관 동의를 미리 표시)
 #   bash scripts/fetch-bundle.sh --only=fd,rg            # 지정한 항목만 다시 받기 (다른 항목은 건드리지 않음)
 #   bash scripts/fetch-bundle.sh --update-lock ...       # 버전 갱신 시: 내려받은 파일의 sha256 으로 lock 갱신
+#   bash scripts/fetch-bundle.sh --dev [--update-lock]   # 개발용 도구(manifest/dev-package.json: typescript 등)만 .cache/dev 에 받기. 번들에 들어가지 않는다
 #
 # 화면 프로그램(oxy-tui.exe, role=harness)은 선택과 상관없이 함께 받는다. 아직 릴리스가 없으면(sha256 "-") 받지 않고 알린다:
 # 그때는 이 PC 에서 빌드한 bin/oxy-tui.exe (just tui-build) 를 쓰거나, 없으면 설치·설정 TUI 가 줄 입력 모드로 동작한다.
 # 선택에서 빠진 구성요소가 이전에 받아져 있으면 지운다 (번들에 원치 않는 파일이 들어가지 않도록).
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# 인터넷 PC 전용: env.sh 를 읽은 셸(npm_config_offline=true, 폐쇄망용)에서 돌려도 npm 이 레지스트리에서 받게 한다 (just lock · --update-lock 이 ENOTCACHED 로 실패했다, 2026-11-20)
+export npm_config_offline=false
 
 UPDATE_LOCK=0
 MODE=""        # interactive | defaults | select | all | only
 LIST=""
 ACCEPT=0
+DEV=0
 for a in "$@"; do
   case "$a" in
     --update-lock) UPDATE_LOCK=1 ;;
@@ -27,7 +31,8 @@ for a in "$@"; do
     --select=*) MODE=select; LIST="${a#--select=}" ;;
     --only=*) MODE=only; LIST="${a#--only=}" ;;
     --accept-license) ACCEPT=1 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    --dev) DEV=1 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) die "알 수 없는 인자: $a" ;;
   esac
 done
@@ -223,6 +228,26 @@ PROPRIETARY=",sqlcl,chrome,"   # installer/components.mjs CATALOG.proprietary �
 if [[ ! -x "$NODE" ]]; then
   IFS=$'\t' read -r n v u s _ <<< "$(lock_rows | awk -F'\t' '$1=="node"')"
   process_row "$n" "$v" "$u" "$s"
+fi
+
+# ---- 개발용 도구 (--dev): manifest/dev-package.json + dev-package-lock.json → .cache/dev (번들에서 빠지는 폴더) ----
+if (( DEV )); then
+  dir="$OXY_HOME/.cache/dev" lockf="$OXY_HOME/manifest/dev-package-lock.json"
+  mkdir -p "$dir"
+  cp -f "$OXY_HOME/manifest/dev-package.json" "$dir/package.json"
+  dev_flags=(--ignore-scripts --no-audit --no-fund --loglevel=error)
+  if [[ -f "$lockf" && $UPDATE_LOCK == 0 ]]; then
+    cp -f "$lockf" "$dir/package-lock.json"
+    log "npm ci (개발용 도구)"
+    (cd "$dir" && oxy_npm ci "${dev_flags[@]}") || die "npm ci 실패 - manifest/dev-package.json 을 바꿨다면 --dev --update-lock 으로 다시 실행"
+  else
+    rm -f "$dir/package-lock.json"
+    log "npm install (개발용 도구) → manifest/dev-package-lock.json 갱신"
+    (cd "$dir" && oxy_npm install "${dev_flags[@]}") || die "npm install 실패"
+    cp -f "$dir/package-lock.json" "$lockf"
+  fi
+  log "✓ 개발용 도구: $(cd "$dir" && "$NODE" -p "Object.entries(require('./package.json').dependencies).map(([n, v]) => n + ' ' + v).join(' · ')")"
+  exit 0
 fi
 
 # ---- 2) 선택 결정 ----
